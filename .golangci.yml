@@ -8,6 +8,11 @@ linters:
     - misspell
     - unconvert
   settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gosec:
       excludes:
         # Launching a user-chosen command is the product's job; the policy
