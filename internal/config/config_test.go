@@ -64,6 +64,8 @@ func TestLoadUserErrorsDoNotEchoSource(t *testing.T) {
 		"profile without allow": "version = 1\n[secrets.A]\nref = \"env://A\"\n[profiles.p]\nsecrets = [\"A\"]\n",
 		"profile unknown name":  "version = 1\n[profiles.p]\nsecrets = [\"B\"]\nallow = [\"x\"]\n",
 		"bws token in bws":      "version = 1\n[backends.bws]\naccess_token = \"bws://p/TOKEN\"\n",
+		"credential as plain":   "version = 1\n[secrets.A]\nref = \"env://A\"\n[profiles.p]\nsecrets = [\"A\"]\nallow = [\"x\"]\nenv = { API_TOKEN = \"" + pasted + "\" }\n",
+		"bad inherit name":      "version = 1\n[profiles.p]\nallow = [\"x\"]\ninherit = [\"not a name\"]\n",
 	} {
 		_, err := LoadUser(write(t, "config.toml", body))
 		if err == nil {

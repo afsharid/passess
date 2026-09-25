@@ -19,6 +19,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/ref"
 )
 
@@ -58,6 +59,8 @@ type Profile struct {
 	Secrets  []string
 	Required []string
 	Allow    []string
+	Inherit  []string          // extra variables passed through from the caller
+	Env      map[string]string // plain, non-secret values
 }
 
 // Project is a parsed project file.
@@ -88,9 +91,11 @@ type rawUser struct {
 		Note  string   `toml:"note"`
 	} `toml:"secrets"`
 	Profiles map[string]struct {
-		Secrets  []string `toml:"secrets"`
-		Required []string `toml:"required"`
-		Allow    []string `toml:"allow"`
+		Secrets  []string          `toml:"secrets"`
+		Required []string          `toml:"required"`
+		Allow    []string          `toml:"allow"`
+		Inherit  []string          `toml:"inherit"`
+		Env      map[string]string `toml:"env"`
 	} `toml:"profiles"`
 }
 
@@ -191,7 +196,20 @@ func LoadUser(path string) (*User, error) {
 		if len(allow) == 0 {
 			return nil, fmt.Errorf("%s: profiles.%s.allow: a profile must name the programs it runs", path, name)
 		}
-		u.Profiles[name] = Profile{Name: name, Secrets: p.Secrets, Required: p.Required, Allow: allow}
+		for _, v := range p.Inherit {
+			if !nameRe.MatchString(v) {
+				return nil, fmt.Errorf("%s: profiles.%s.inherit: %q is not a variable name", path, name, v)
+			}
+		}
+		for k := range p.Env {
+			if !nameRe.MatchString(k) {
+				return nil, fmt.Errorf("%s: profiles.%s.env: %q is not a variable name", path, name, k)
+			}
+			if policy.Sensitive(k) {
+				return nil, fmt.Errorf("%s: profiles.%s.env.%s looks like a credential; define it under [secrets] and list it in the profile", path, name, k)
+			}
+		}
+		u.Profiles[name] = Profile{Name: name, Secrets: p.Secrets, Required: p.Required, Allow: allow, Inherit: p.Inherit, Env: p.Env}
 	}
 	return u, nil
 }

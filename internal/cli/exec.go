@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -85,8 +84,8 @@ func runExec(st *Streams, args []string) int {
 		}
 	}
 
-	res := newResolver(st, u)
-	defer res.Zero()
+	res, zero := newResolver(st, u)
+	defer zero()
 	inject := map[string]secret.Value{}
 	var named []redact.Secret
 	for _, w := range wanted {
@@ -140,9 +139,9 @@ func refuse(st *Streams, u *config.User, name string, d policy.Decision) int {
 	return ExitNoPerm
 }
 
-// isTerminal reports whether r is a terminal (not merely a character device:
-// /dev/null is one too).
-func isTerminal(r io.Reader) bool {
-	f, ok := r.(*os.File)
+// isTerminal reports whether a stream is a terminal (not merely a character
+// device: /dev/null is one too).
+func isTerminal(stream any) bool {
+	f, ok := stream.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
