@@ -13,11 +13,14 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+        - (*os.File).Close
     gosec:
       excludes:
         # Launching a user-chosen command is the product's job; the policy
         # package decides what may run.
         - G204
+        # Reading the config file and the program about to run is the point.
+        - G304
 
   exclusions:
     rules:
