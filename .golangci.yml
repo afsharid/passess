@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gosec
+    - misspell
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        # Launching a user-chosen command is the product's job; the policy
+        # package decides what may run.
+        - G204
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

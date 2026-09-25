@@ -1,0 +1,23 @@
+# --- never tracked: anything that may carry a secret ---
+.env
+.env.*
+!.env.example
+*.env
+*auth.json
+*credentials*
+*.key
+*.pem
+*.p12
+bws.json
+
+# --- build and test output ---
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# --- local ---
+.DS_Store
+.claude/worktrees/
+.worktrees/
