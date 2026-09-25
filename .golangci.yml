@@ -19,6 +19,13 @@ linters:
         # package decides what may run.
         - G204
 
+  exclusions:
+    rules:
+      # Tests use math/rand, run their own binary and index fixtures freely.
+      - path: _test\.go
+        linters:
+          - gosec
+
 formatters:
   enable:
     - gofmt

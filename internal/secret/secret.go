@@ -33,7 +33,7 @@ func New(b []byte) Value {
 	}
 	c := make([]byte, len(b))
 	copy(c, b)
-	return Value{&payload{ptr: unsafe.Pointer(unsafe.SliceData(c)), n: len(c)}}
+	return Value{&payload{ptr: unsafe.Pointer(unsafe.SliceData(c)), n: len(c)}} //nolint:gosec // G103: hides the bytes from reflection, see package doc
 }
 
 // FromString returns a Value holding s.
@@ -46,7 +46,7 @@ func (v Value) Bytes() []byte {
 	if v.p == nil || v.p.n == 0 {
 		return nil
 	}
-	return unsafe.Slice((*byte)(v.p.ptr), v.p.n)
+	return unsafe.Slice((*byte)(v.p.ptr), v.p.n) //nolint:gosec // G103: ptr and n always describe one live allocation
 }
 
 // Len reports the length of the secret in bytes.
