@@ -132,7 +132,7 @@ var ErrNoConfig = errors.New("no passess config")
 func LoadUser(path string) (*User, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%w at %s; create it with `passess add NAME --ref …`", ErrNoConfig, path)
+		return nil, fmt.Errorf("%w at %s; create it with version = 1 and a [secrets.NAME] table holding ref = \"<reference>\"", ErrNoConfig, path)
 	}
 	if err != nil {
 		return nil, err

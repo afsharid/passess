@@ -3,6 +3,8 @@
 **The last mile between your password manager and your AI coding agents.**
 
 > Status: pre-alpha. Nothing here is ready to trust with a real secret yet.
+> Works today: `passess exec` and `passess run` with `env://`, `keychain://` and `bws://`
+> references. Next: `mcp-exec`, harness installers, then 1Password, Vault and `bw`.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,

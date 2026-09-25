@@ -120,7 +120,7 @@ func TestExecExitStatusAndErrors(t *testing.T) {
 	if _, _, code := run(t, "exec", "-s", "X", "--", "no-such-command-passess"); code != ExitNotFound {
 		t.Fatalf("missing command: exit %d", code)
 	}
-	if _, errOut, code := run(t, "exec", "-s", "NOPE", "--", "ls"); code != ExitConfig || !strings.Contains(errOut, "passess add NOPE") {
+	if _, errOut, code := run(t, "exec", "-s", "NOPE", "--", "ls"); code != ExitConfig || !strings.Contains(errOut, "[secrets.NOPE]") {
 		t.Fatalf("undefined secret: exit %d, %q", code, errOut)
 	}
 	if _, _, code := run(t, "exec", "--", "ls"); code != ExitUsage {
