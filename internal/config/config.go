@@ -18,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -35,7 +36,19 @@ type User struct {
 	Secrets  map[string]Secret
 	Profiles map[string]Profile
 	MCP      map[string]MCPServer
+	Agent    Agent
 }
+
+// Agent configures `passess agent`.
+type Agent struct {
+	// CacheTTL is how long the agent keeps values it resolved; 0 means it
+	// resolves them for every command.
+	CacheTTL time.Duration
+}
+
+// DefaultCacheTTL is the agent's cache lifetime unless agent.cache_ttl says
+// otherwise; gpg-agent's default.
+const DefaultCacheTTL = 10 * time.Minute
 
 // MCPServer is an MCP server that harnesses start through `passess mcp-exec
 // NAME`. Exactly one of Command (a local stdio server) and URL (a remote
@@ -202,6 +215,9 @@ type rawUser struct {
 		Headers   map[string]string `toml:"headers"`
 		Harnesses []string          `toml:"harnesses"`
 	} `toml:"mcp"`
+	Agent struct {
+		CacheTTL *string `toml:"cache_ttl"`
+	} `toml:"agent"`
 }
 
 var headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -244,6 +260,11 @@ func LoadUser(path string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseUser(path, data)
+}
+
+// ParseUser validates a user config read from path.
+func ParseUser(path string, data []byte) (*User, error) {
 	var raw rawUser
 	if err := decode(path, data, &raw); err != nil {
 		return nil, err
@@ -275,6 +296,14 @@ func LoadUser(path string) (*User, error) {
 			return nil, fmt.Errorf("%s: %s must live in keychain:// or env://, not in another vault", path, b.key)
 		}
 		*b.target = &r
+	}
+	u.Agent.CacheTTL = DefaultCacheTTL
+	if raw.Agent.CacheTTL != nil {
+		d, err := time.ParseDuration(*raw.Agent.CacheTTL)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("%s: agent.cache_ttl: %q is not a duration such as \"10m\" or \"0\"", path, *raw.Agent.CacheTTL)
+		}
+		u.Agent.CacheTTL = d
 	}
 	u.Backends.BWS.ServerURL = raw.Backends.BWS.ServerURL
 	u.Backends.OP.Account = raw.Backends.OP.Account

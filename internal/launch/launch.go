@@ -27,6 +27,10 @@ type Spec struct {
 	// attached to a terminal: the terminal already delivers them to the whole
 	// foreground process group, child included.
 	ForwardInterrupt bool
+
+	// NewGroup starts the child in a process group of its own, out of reach
+	// of signals sent to the caller's group.
+	NewGroup bool
 }
 
 // Status codes for failures to start, matching the shell's.
@@ -49,6 +53,9 @@ func Start(s Spec) (*Child, int, error) {
 	cmd.Env = s.Env
 	cmd.Dir = s.Dir
 	cmd.Stdin = s.Stdin
+	if s.NewGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	c := &Child{cmd: cmd, stdout: s.Redactor.NewWriter(s.Stdout), stderr: s.Redactor.NewWriter(s.Stderr)}
 	cmd.Stdout, cmd.Stderr = c.stdout, c.stderr
 	if err := cmd.Start(); err != nil {
