@@ -1,7 +1,9 @@
 package scan
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,18 @@ func rules(t *testing.T) *Rules {
 func TestDefaultRulesLoad(t *testing.T) {
 	if n := rules(t).Len(); n < 200 {
 		t.Fatalf("only %d rules loaded", n)
+	}
+}
+
+// TestVendoredRulesArePinned makes a rules update visible in review (ADR 5):
+// refresh from upstream on purpose, then update RulesVersion and these values.
+func TestVendoredRulesArePinned(t *testing.T) {
+	sum := sha256.Sum256(gitleaksRules)
+	if got := hex.EncodeToString(sum[:]); got != "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf" {
+		t.Fatalf("rules/gitleaks.toml changed (sha256 %s); update RulesVersion and this pin", got)
+	}
+	if n := strings.Count(string(gitleaksRules), "\n[[rules]]\n"); n != 222 {
+		t.Fatalf("rules/gitleaks.toml has %d rules, pinned 222", n)
 	}
 }
 

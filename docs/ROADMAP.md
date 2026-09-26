@@ -7,7 +7,7 @@ follow the slices.
 |---|---|---|
 | — | 0, 1 | Skeleton, threat model, `exec` and `run` with `env://`, `keychain://` and `bws://` |
 | v0.1.0-alpha | 2 | `mcp-exec` (local stdio proxy and remote HTTP bridge), `install` / `uninstall` / `status` for Claude Code and Codex |
-| v0.2 | 3 | `scan`, `audit`, `inventory`, `migrate`; 1Password, Vault/OpenBao and Bitwarden Password Manager providers |
+| v0.2.0-alpha | 3 | `scan`, `audit`, `inventory`, `migrate`; 1Password, Vault/OpenBao and Bitwarden Password Manager providers |
 | v0.3 | 4 | Config-level support for OpenCode, Kiro, Antigravity, Cursor, Gemini CLI, VS Code / Copilot, Windsurf, Zed, Claude Desktop |
 | **v0.4** | 5 | Guard hooks and native plugin packages for Claude Code, Codex, OpenCode, Kiro, Antigravity, Cursor and Gemini CLI — the first complete release |
 | v0.5 | 6 | `passess agent`: in-memory cache, approvals (Touch ID in the macOS menu bar app), audit log, session-wide redaction |
@@ -27,9 +27,14 @@ Go SDK that adds the auth header itself (ADR 6). Installers for Claude Code and 
 go through the harnesses' own CLIs (`claude mcp`, `codex mcp`), which own their file
 formats; dry run by default, backups before any change, `uninstall` as the undo.
 
-**Slice 3.** Scanning harness configs, dotfiles, `.env` files and transcripts with
-known-value matching plus vendored gitleaks rules (ADR 5); auditing harness defaults;
-migrating inline secrets into the user's vault.
+**Slice 3 (done).** Providers for 1Password (`op`), Vault / OpenBao (HTTP, KV v1 and
+v2) and the Bitwarden Password Manager (`bw`). `scan` looks at harness configs and the
+backups kept next to them, dotfiles, `.env` files and, on request, transcripts, with the
+vendored gitleaks rules plus the exact values of configured secrets (ADR 5); it never
+prints a value. `audit` reports harness defaults and files that hand credentials to
+agents, each with its fix. `migrate` moves `.env` lines and inline MCP credentials into
+the OS keychain and rewires the harness; `inventory` writes a value-free Markdown map.
+Flags may follow arguments (`passess install claude --apply`).
 
 **Slice 5.** One hook handler, `passess hook <harness> <event>`, normalizes each
 harness's hook JSON and applies a deny-only policy: no reading `.env` or credential

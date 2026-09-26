@@ -23,9 +23,10 @@ detector per call is twice the hook budget.
 
 - The passess binary does not import gitleaks.
 - Detection rules come from gitleaks' default rule set (MIT), vendored as data with its
-  license notice, compiled with Go's `regexp` behind an Aho-Corasick keyword prefilter.
-  A rule's regular expression is compiled only when one of its keywords appears in the
-  input, so the hook path pays for the rules it actually needs.
+  license notice, compiled with Go's `regexp` behind a keyword prefilter: one
+  alternation of every rule's keywords, run on the lowercased line. A rule's own
+  regular expression is compiled only when one of its keywords appears in the input,
+  so the hook path pays for the rules it actually needs.
 - Known-value matching — the redactor with the user's actual secret values — stays the
   primary detector. Rules are the net for values passess does not know.
 
