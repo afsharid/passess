@@ -139,11 +139,12 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		fmt.Fprintf(st.Stderr, "Usage: passess %s [flags] [claude] [codex]\n", verb)
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	names, err := parseAnywhere(fs, args)
+	if err != nil {
 		return ExitUsage
 	}
 	augmentPath(st.Getenv)
-	targets, err := selectAdapters(st, fs.Args())
+	targets, err := selectAdapters(st, names)
 	if err != nil {
 		return failf(st, ExitUsage, "%v", err)
 	}

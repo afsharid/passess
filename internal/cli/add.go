@@ -157,23 +157,43 @@ func tomlString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
+// keychainPrompt is the OS command that asks for a value in the terminal and
+// stores it as service "passess", account; nil where there is none. The value
+// is typed into that tool, so it never passes through passess or its argv.
+func keychainPrompt(account string) []string {
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"security", "add-generic-password", "-U", "-s", keychainService, "-a", account, "-l", "passess " + account, "-w"}
+	case "linux":
+		return []string{"secret-tool", "store", "--label", "passess " + account, "service", keychainService, "account", account}
+	}
+	return nil
+}
+
+// shellLine renders argv for a person to paste into a shell.
+func shellLine(argv []string) string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		if a == "" || strings.ContainsAny(a, " \t'\"$`\\!*?[]{}()<>|&;#~") {
+			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+		}
+		out[i] = a
+	}
+	return strings.Join(out, " ")
+}
+
 // storeInKeychain lets the user type the value straight into the OS keychain
 // tool; passess never sees it.
 func storeInKeychain(st *Streams, name string) (string, int) {
 	if detect.Harness(st.Getenv) != "" || !isTerminal(st.Stdin) {
 		return "", failf(st, ExitNoPerm, "--keychain needs you at a terminal: values should not pass through an agent. Run `passess add %s --keychain` yourself.", name)
 	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		fmt.Fprintf(st.Stderr, "Type the value for %s (it is stored in your login keychain as service \"passess\", account %q):\n", name, name)
-		cmd = exec.Command("security", "add-generic-password", "-U", "-s", "passess", "-a", name, "-l", "passess "+name, "-w")
-	case "linux":
-		fmt.Fprintf(st.Stderr, "Type the value for %s (it is stored in the Secret Service):\n", name)
-		cmd = exec.Command("secret-tool", "store", "--label", "passess "+name, "service", "passess", "account", name)
-	default:
+	argv := keychainPrompt(name)
+	if argv == nil {
 		return "", failf(st, ExitUnavailable, "--keychain is supported on macOS and Linux only")
 	}
+	fmt.Fprintf(st.Stderr, "Type the value for %s (it is stored in the OS keychain as service %q, account %q):\n", name, keychainService, name)
+	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // fixed program, arguments are names
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", failf(st, ExitUnavailable, "storing %s in the keychain failed: %v", name, err)

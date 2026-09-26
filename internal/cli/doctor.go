@@ -202,8 +202,14 @@ func fixFor(scheme string, u *config.User) string {
 		return "check that " + u.Backends.BWS.AccessToken.String() + " holds a valid machine-account token"
 	case ref.Keychain:
 		return "keychain:// works on macOS (security) and Linux (secret-tool)"
+	case ref.OnePassword:
+		return "unlock the 1Password app and turn on Settings → Developer → Integrate with 1Password CLI, or set OP_SERVICE_ACCOUNT_TOKEN"
+	case ref.Vault:
+		return "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"
+	case ref.Bitwarden:
+		return "run `bw unlock` and keep the session in backends.bw.session (for example keychain://passess/bw-session)"
 	}
-	return scheme + ":// arrives in a later release; see docs/ROADMAP.md"
+	return scheme + ":// is not supported"
 }
 
 func tokenSource(u *config.User) string {

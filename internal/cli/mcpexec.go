@@ -134,7 +134,7 @@ func runMCPExec(st *Streams, args []string) int {
 }
 
 // mcpEnv is a server's environment: the safe caller variables, those it
-// inherits, and its secrets — nothing else from the harness.
+// inherits, its plain vars and its secrets — nothing else from the harness.
 func mcpEnv(getenv func(string) string, srv config.MCPServer, inject map[string]secret.Value) []string {
 	vars := map[string]string{}
 	for _, k := range append(append([]string{}, safeEnv...), srv.Inherit...) {
@@ -148,6 +148,9 @@ func mcpEnv(getenv func(string) string, srv config.MCPServer, inject map[string]
 		}
 	}
 	vars["PATH"] = os.Getenv("PATH") // augmented
+	for k, v := range srv.Vars {
+		vars[k] = v
+	}
 	env := make([]string, 0, len(vars)+len(inject))
 	for k, v := range vars {
 		if _, isSecret := inject[k]; !isSecret {

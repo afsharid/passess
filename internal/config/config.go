@@ -44,6 +44,7 @@ type MCPServer struct {
 	Command []string          // program and arguments
 	Env     map[string]string // variable -> secret name
 	Inherit []string          // extra caller variables passed through
+	Vars    map[string]string // plain, non-secret values
 	Redact  bool              // redact the server's output (default true)
 	URL     string
 	Headers map[string]string // header -> template with {{SECRET}} placeholders
@@ -56,7 +57,7 @@ func (m MCPServer) Secrets() []string {
 		seen[s] = true
 	}
 	for _, h := range m.Headers {
-		for _, s := range placeholders(h) {
+		for _, s := range Placeholders(h) {
 			seen[s] = true
 		}
 	}
@@ -70,7 +71,8 @@ func (m MCPServer) Secrets() []string {
 
 var placeholderRe = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
 
-func placeholders(s string) []string {
+// Placeholders returns the {{NAME}} secret names in a header template.
+func Placeholders(s string) []string {
 	var out []string
 	for _, m := range placeholderRe.FindAllStringSubmatch(s, -1) {
 		out = append(out, m[1])
@@ -87,7 +89,28 @@ func Expand(template string, lookup func(string) string) string {
 
 // Backends holds per-backend settings.
 type Backends struct {
-	BWS BWS
+	BWS   BWS
+	OP    OP
+	Vault Vault
+	BW    BW
+}
+
+// OP configures 1Password.
+type OP struct {
+	Account string // --account for op; the default account when empty
+}
+
+// Vault configures HashiCorp Vault or OpenBao.
+type Vault struct {
+	Address   string   // else VAULT_ADDR / BAO_ADDR
+	Token     *ref.Ref // else VAULT_TOKEN / BAO_TOKEN / ~/.vault-token
+	Namespace string
+	CACert    string
+}
+
+// BW configures the Bitwarden Password Manager.
+type BW struct {
+	Session *ref.Ref // where an unlocked session key lives; else BW_SESSION
 }
 
 // BWS configures Bitwarden Secrets Manager.
@@ -135,6 +158,18 @@ type rawUser struct {
 			AccessToken string `toml:"access_token"`
 			ServerURL   string `toml:"server_url"`
 		} `toml:"bws"`
+		OP struct {
+			Account string `toml:"account"`
+		} `toml:"op"`
+		Vault struct {
+			Address   string `toml:"address"`
+			Token     string `toml:"token"`
+			Namespace string `toml:"namespace"`
+			CACert    string `toml:"ca_cert"`
+		} `toml:"vault"`
+		BW struct {
+			Session string `toml:"session"`
+		} `toml:"bw"`
 	} `toml:"backends"`
 	Secrets map[string]struct {
 		Ref   any      `toml:"ref"`
@@ -152,6 +187,7 @@ type rawUser struct {
 		Command []string          `toml:"command"`
 		Env     map[string]string `toml:"env"`
 		Inherit []string          `toml:"inherit"`
+		Vars    map[string]string `toml:"vars"`
 		Redact  *bool             `toml:"redact"`
 		URL     string            `toml:"url"`
 		Headers map[string]string `toml:"headers"`
@@ -207,17 +243,34 @@ func LoadUser(path string) (*User, error) {
 	}
 	u := &User{Path: path, Secrets: map[string]Secret{}, Profiles: map[string]Profile{}}
 
-	if s := raw.Backends.BWS.AccessToken; s != "" {
-		r, err := ref.Parse(s)
+	// Backend credentials are resolved before any backend is usable, so they may
+	// only live where no credential is needed to read them.
+	for _, b := range []struct {
+		key    string
+		raw    string
+		target **ref.Ref
+	}{
+		{"backends.bws.access_token", raw.Backends.BWS.AccessToken, &u.Backends.BWS.AccessToken},
+		{"backends.vault.token", raw.Backends.Vault.Token, &u.Backends.Vault.Token},
+		{"backends.bw.session", raw.Backends.BW.Session, &u.Backends.BW.Session},
+	} {
+		if b.raw == "" {
+			continue
+		}
+		r, err := ref.Parse(b.raw)
 		if err != nil {
-			return nil, fmt.Errorf("%s: backends.bws.access_token: %w", path, err)
+			return nil, fmt.Errorf("%s: %s: %w", path, b.key, err)
 		}
-		if r.Scheme == ref.BWS {
-			return nil, fmt.Errorf("%s: backends.bws.access_token cannot itself live in bws", path)
+		if r.Scheme != ref.Keychain && r.Scheme != ref.Env {
+			return nil, fmt.Errorf("%s: %s must live in keychain:// or env://, not in another vault", path, b.key)
 		}
-		u.Backends.BWS.AccessToken = &r
+		*b.target = &r
 	}
 	u.Backends.BWS.ServerURL = raw.Backends.BWS.ServerURL
+	u.Backends.OP.Account = raw.Backends.OP.Account
+	u.Backends.Vault.Address = raw.Backends.Vault.Address
+	u.Backends.Vault.Namespace = raw.Backends.Vault.Namespace
+	u.Backends.Vault.CACert = raw.Backends.Vault.CACert
 
 	for name, s := range raw.Secrets {
 		if !nameRe.MatchString(name) {
@@ -278,7 +331,7 @@ func LoadUser(path string) (*User, error) {
 		if !mcpNameRe.MatchString(name) {
 			return nil, fmt.Errorf("%s: mcp.%s: use letters, digits, - and _ in server names", path, name)
 		}
-		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Redact: true, URL: m.URL, Headers: m.Headers}
+		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Vars: m.Vars, Redact: true, URL: m.URL, Headers: m.Headers}
 		if m.Redact != nil {
 			srv.Redact = *m.Redact
 		}
@@ -319,10 +372,21 @@ func (u *User) validateMCP(m MCPServer) error {
 				return fmt.Errorf("inherit: %q is not a variable name", v)
 			}
 		}
+		for k, v := range m.Vars {
+			if !nameRe.MatchString(k) {
+				return fmt.Errorf("vars: %q is not a variable name", k)
+			}
+			if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+				return fmt.Errorf("vars.%s looks like a credential; define it under [secrets] and map it in env", k)
+			}
+			if _, dup := m.Env[k]; dup {
+				return fmt.Errorf("%s is set in both env and vars", k)
+			}
+		}
 		return nil
 	}
-	if len(m.Env) > 0 || len(m.Inherit) > 0 {
-		return errors.New("env and inherit apply to command servers; a url server gets headers")
+	if len(m.Env) > 0 || len(m.Inherit) > 0 || len(m.Vars) > 0 {
+		return errors.New("env, inherit and vars apply to command servers; a url server gets headers")
 	}
 	parsed, err := url.Parse(m.URL)
 	if err != nil || parsed.Host == "" {
@@ -339,9 +403,9 @@ func (u *User) validateMCP(m MCPServer) error {
 		if strings.ContainsAny(tmpl, "\r\n") {
 			return fmt.Errorf("headers.%s contains a line break", h)
 		}
-		names := placeholders(tmpl)
-		if len(names) == 0 {
-			return fmt.Errorf("headers.%s holds no {{SECRET}} placeholder; a literal value belongs in the vault, not here", h)
+		names := Placeholders(tmpl)
+		if len(names) == 0 && policy.SecretHeader(h, tmpl) {
+			return fmt.Errorf("headers.%s looks like a credential in clear; put the value in the vault and write {{SECRET}} here", h)
 		}
 		for _, s := range names {
 			if _, ok := u.Secrets[s]; !ok {

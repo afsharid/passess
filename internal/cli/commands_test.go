@@ -64,9 +64,11 @@ ref = ["env://PASSESS_TEST_ABSENT", "env://PASSESS_TEST_PRESENT_TOKEN"]
 [secrets.ABSENT]
 ref = "env://PASSESS_TEST_ABSENT"
 [secrets.LATER]
-ref = "op://Dev/item/field"
+ref = "vault://secret/app#token"
 `)
 	t.Setenv("PASSESS_TEST_PRESENT_TOKEN", execValue)
+	t.Setenv("VAULT_ADDR", "") // no vault configured: unavailable, deterministically
+	t.Setenv("BAO_ADDR", "")
 	out, _, code := run(t, "check", "--json", "PRESENT", "ABSENT", "LATER", "UNDEFINED")
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)

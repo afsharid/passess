@@ -142,3 +142,6 @@ func valueFrom(b []byte) secret.Value {
 
 // OSGetenv is the default environment lookup.
 var OSGetenv = os.Getenv
+
+// lookPath finds a backend CLI; tests replace it.
+var lookPath = exec.LookPath

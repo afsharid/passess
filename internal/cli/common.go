@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -20,6 +21,26 @@ import (
 func failf(st *Streams, code int, format string, args ...any) int {
 	fmt.Fprintf(st.Stderr, "passess: "+format+"\n", args...)
 	return code
+}
+
+// parseAnywhere parses flags wherever they sit among the positional
+// arguments, so `passess install claude --apply` works like
+// `passess install --apply claude`. Everything after "--" is positional.
+func parseAnywhere(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			return append(pos, rest...), nil
+		}
+		if len(rest) == 0 {
+			return pos, nil
+		}
+		pos, args = append(pos, rest[0]), rest[1:]
+	}
 }
 
 // loadConfig reads the user config and, if the working directory is inside a
@@ -48,6 +69,12 @@ func loadConfig(st *Streams) (*config.User, *config.Project, int) {
 	return u, p, 0
 }
 
+// newBootProviders are the providers that need no credential of their own;
+// backend credentials are resolved through them.
+func newBootProviders(st *Streams) []provider.Provider {
+	return []provider.Provider{provider.Env{}, provider.Keychain{Runner: provider.ExecRunner{}, Getenv: st.Getenv}}
+}
+
 // newResolver wires the providers the user config can use. The returned
 // function zeroes every value any of them holds.
 func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
@@ -56,19 +83,31 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 	keychain := provider.Keychain{Runner: run, Getenv: st.Getenv}
 	bws := &provider.BWS{Runner: run, Getenv: st.Getenv, ServerURL: u.Backends.BWS.ServerURL}
 
+	op := provider.OnePassword{Runner: run, Getenv: st.Getenv, Account: u.Backends.OP.Account}
+	vault := &provider.Vault{Address: u.Backends.Vault.Address, Namespace: u.Backends.Vault.Namespace,
+		CACert: u.Backends.Vault.CACert, Getenv: st.Getenv}
+	bw := provider.Bitwarden{Runner: run, Getenv: st.Getenv}
+
 	// Backend credentials come from providers that need no credential of their own.
 	boot := resolve.New(env, keychain)
-	switch tok := u.Backends.BWS.AccessToken; {
-	case tok != nil:
-		bws.Token = func(ctx context.Context) (secret.Value, error) {
-			return boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{*tok}})
+	from := func(name string, r *ref.Ref) func(context.Context) (secret.Value, error) {
+		if r == nil {
+			return nil
 		}
-	case st.Getenv("BWS_ACCESS_TOKEN") != "":
+		return func(ctx context.Context) (secret.Value, error) {
+			return boot.Secret(ctx, config.Secret{Name: name, Refs: []ref.Ref{*r}})
+		}
+	}
+	bws.Token = from("backends.bws.access_token", u.Backends.BWS.AccessToken)
+	if bws.Token == nil && st.Getenv("BWS_ACCESS_TOKEN") != "" {
 		bws.Token = func(context.Context) (secret.Value, error) {
 			return secret.FromString(st.Getenv("BWS_ACCESS_TOKEN")), nil
 		}
 	}
-	r := resolve.New(env, keychain, bws)
+	vault.Token = from("backends.vault.token", u.Backends.Vault.Token)
+	bw.Session = from("backends.bw.session", u.Backends.BW.Session)
+
+	r := resolve.New(env, keychain, bws, op, vault, bw)
 	return r, func() { r.Zero(); boot.Zero(); bws.Zero() }
 }
 

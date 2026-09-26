@@ -52,7 +52,9 @@ func golden(t *testing.T, name, got, configDir string) {
 func noHarness(t *testing.T) {
 	for _, v := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID", "CODEX_SANDBOX",
 		"CODEX_CI", "CURSOR_TRACE_ID", "CURSOR_AGENT", "CURSOR_CLI", "GEMINI_CLI", "GEMINI_PROJECT_DIR", "OPENCODE",
-		"OPENCODE_PID", "OPENCODE_CLIENT", "OPENCODE_TERMINAL", "ANTIGRAVITY_CLI_ALIAS", "ZED_SESSION_ID"} {
+		"OPENCODE_PID", "OPENCODE_CLIENT", "OPENCODE_TERMINAL", "ANTIGRAVITY_CLI_ALIAS", "ZED_SESSION_ID",
+		// backend settings that would change what doctor reports
+		"VAULT_ADDR", "BAO_ADDR", "VAULT_TOKEN", "BAO_TOKEN", "BW_SESSION", "BWS_ACCESS_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN"} {
 		t.Setenv(v, "")
 	}
 }

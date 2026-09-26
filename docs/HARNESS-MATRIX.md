@@ -6,8 +6,9 @@ harnesses can block a call, few can correct what comes back, which is why passes
 redacts at the subprocess boundary.
 
 Verification key: **bin** = read from the installed binary's own schema strings;
-**doc** = vendor documentation; **cfg** = observed in real config files on the
-maintainer's machine; **?** = not verified yet.
+**run** = observed by running the installed binary; **doc** = vendor documentation;
+**cfg** = observed in real config files on the maintainer's machine; **?** = not
+verified yet.
 
 | Harness | Block a call | Rewrite input | Rewrite model-visible output | MCP env syntax | Instructions file |
 |---|---|---|---|---|---|
@@ -33,13 +34,27 @@ The harness CLIs own their file formats, so passess never rewrites `~/.claude.js
 (which Claude Code updates constantly) or the TOML that holds a user's other Codex
 settings. The entries carry no secret, so passing them as arguments exposes nothing.
 
-## Insecure defaults passess will audit
+## Insecure defaults
 
+`passess audit` checks the first two today; the rest arrive with their adapters.
+
+- Codex 0.155.0-alpha.16.4 (run): with no `shell_environment_policy`, variables named
+  `*KEY*`, `*SECRET*` and `*TOKEN*` reach the commands the agent runs.
+  `ignore_default_excludes = false` drops those three; `*PASSWORD*` and `*PASSWD*` still
+  pass unless listed in `exclude`, and `exclude = ["*PASSWORD*", "*PASSWD*"]` works.
+  Method: `codex sandbox -- /usr/bin/env` with an empty `CODEX_HOME` and fake variables,
+  varying `-c shell_environment_policy.…`. That is the seatbelt runner, not the agent's
+  own shell tool; alpha defaults move, so audit re-reads the config rather than trusting
+  a version number. Profiles are `$CODEX_HOME/NAME.config.toml` files layered over
+  `config.toml` by `--profile NAME`, and their policy applies to those runs (run); 0.155
+  refuses to start with the legacy `profile = "…"` key. audit reads `config.toml`, the
+  layer every run gets.
+- Claude Code: credentials in `settings.json` `env` reach every session, command and MCP
+  server. It also keeps copies of `~/.claude.json` in `~/.claude.json.backup` and
+  `~/.claude/backups/` (cfg), which still hold whatever the file held; `passess scan`
+  reads them.
 - Claude Code: MCP `env` values passed on the command line are visible in `ps`
-  (anthropics/claude-code#80045).
-- Codex: `shell_environment_policy.ignore_default_excludes` — documented as passing
-  variables named like `*KEY*`, `*SECRET*`, `*TOKEN*` into agent shells by default; to be
-  confirmed against the installed version.
+  (anthropics/claude-code#80045). passess entries carry no value, so nothing shows.
 - Kiro: agent profiles with `includeMcpJson: false` do not receive the global MCP config
   (cfg: 6 of 7 profiles on the maintainer's machine).
 - Antigravity: several config paths, one of them a symlink; resolve, never glob (cfg).

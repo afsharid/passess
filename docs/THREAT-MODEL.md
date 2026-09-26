@@ -15,7 +15,7 @@ where the protection stops. Read the last section before relying on it.
 | # | Threat | Goal | Mechanism |
 |---|---|---|---|
 | T1 | A value reaches the model's context by accident: the agent reads `.env`, dumps the environment, prints a header while debugging, a tool echoes a DSN in an error | Primary: near zero | Values never enter the agent's environment or files; `exec`, `run` and `mcp-exec` redact child output; hooks refuse known-bad commands early |
-| T2 | Plaintext at rest: harness configs, dotfiles, `.env`, transcripts | Primary: find, move, eliminate | `scan`, `audit`, `migrate`; MCP configs reference `passess mcp-exec <name>` instead of holding tokens |
+| T2 | Plaintext at rest: harness configs and their backups, dotfiles, `.env`, transcripts | Primary: find, move, eliminate | `scan`, `audit`, `migrate`; MCP configs reference `passess mcp-exec <name>` instead of holding tokens |
 | T3 | The agent writes a key into code or a commit | Catch | Scanning and hooks; the agent never learns the value in the first place |
 | T4 | Over-broad access: every process inherits every secret | Least privilege | Secrets are declared per consumer (command, MCP server, profile) |
 | T5 | Prompt-injection exfiltration: the agent *uses* a secret it cannot see and sends it elsewhere | Make harder | Per-secret command allow lists; shells, interpreters and encoders refused by default; later approvals and a host-bound egress proxy |
@@ -46,7 +46,16 @@ where the protection stops. Read the last section before relying on it.
   shows up.
 - **Parallel hooks can clobber each other.** In Claude Code, hooks run on the original
   tool output and the last rewrite wins; another plugin that rewrites output can undo a
-  redaction. `passess audit` will warn about this.
+  redaction. `passess audit` will warn about this once the hooks exist (slice 5).
+- **Backups keep what they copied.** `migrate` and `install` back up every file before
+  changing it (0600, in a 0700 directory under `~/.local/state/passess/backups`). After a
+  migrate, that backup is the one place passess leaves a value on disk: the original file,
+  as it was. Harnesses keep their own copies too (`~/.claude/backups`). `scan` reports
+  both and `migrate` prints the removal command; deleting them is the user's call,
+  because a backup is also how a bad change is undone.
+- **Moving a value does not unleak it.** A token that sat in a file an agent could read,
+  or in a transcript, may already have reached a model provider. `migrate` says to
+  rotate; `scan --transcripts` shows where a known value went.
 
 ## Consequences for the design
 
@@ -56,4 +65,5 @@ where the protection stops. Read the last section before relying on it.
 2. Redaction happens at the subprocess boundary (`exec`, `run`, `mcp-exec`), not in the
    harness.
 3. Secret values are held in a type whose every formatting path prints `[REDACTED]`, are
-   never passed in argv, never written to disk, and never logged.
+   never passed in argv, never logged, and never written to disk by passess, except in
+   the backup of a file that already held them.

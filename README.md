@@ -2,11 +2,13 @@
 
 **The last mile between your password manager and your AI coding agents.**
 
-> Status: pre-alpha. Nothing here is ready to trust with a real secret yet.
-> Works today: `exec`, `run`, `list`, `check`, `add`, `doctor`, `mcp-exec`, and
-> `install` / `status` / `uninstall` for Claude Code and Codex, with `env://`,
-> `keychain://` and `bws://` references; plus the macOS menu bar app. Next: scanning
-> and migrating plaintext secrets, then 1Password, Vault and `bw`.
+> Status: alpha. Try it on secrets you can rotate.
+> Works today: `exec`, `run`, `list`, `check`, `add`, `doctor`, `mcp-exec`,
+> `install` / `status` / `uninstall` for Claude Code and Codex, and `scan`, `audit`,
+> `migrate` and `inventory` for secrets already sitting in clear. References can point
+> at 1Password, Bitwarden (Secrets Manager or Password Manager), Vault / OpenBao, the OS
+> keychain or an environment variable. Plus the macOS menu bar app. Next: OpenCode,
+> Kiro, Antigravity, Cursor and Gemini CLI, then guard hooks.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,
@@ -51,7 +53,7 @@ arm64 and amd64, `checksums.txt`, and the menu bar app for Apple silicon. Each f
 carries a build provenance attestation:
 
 ```sh
-gh attestation verify passess_0.1.0-alpha_darwin_arm64.tar.gz --repo afsharid/passess
+gh attestation verify passess_0.2.0-alpha_darwin_arm64.tar.gz --repo afsharid/passess
 ```
 
 ## Quick start
@@ -77,10 +79,16 @@ passess exec -s GITHUB_TOKEN -- sh -c 'echo $GITHUB_TOKEN'
 # refused: shells get no secrets unless the allow list names them
 ```
 
-A reference can also point at Bitwarden Secrets Manager (`bws://<project>/<KEY>`,
-with the machine token itself kept in the keychain via `backends.bws.access_token`)
-or at an environment variable (`env://NAME`). 1Password, Vault / OpenBao and the
-Bitwarden Password Manager follow.
+A reference can point at any of these; give several and the first that resolves wins:
+
+| Reference | Backend | passess reaches it with |
+|---|---|---|
+| `op://vault/item/field` | 1Password | the `op` CLI: desktop app sign-in, or `OP_SERVICE_ACCOUNT_TOKEN` |
+| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token kept in the keychain via `backends.bws.access_token` |
+| `bw://item/field` | Bitwarden Password Manager | the `bw` CLI with an unlocked session (`BW_SESSION` or `backends.bw.session`) |
+| `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` |
+| `keychain://service/account` | macOS Keychain, Linux Secret Service | `security` / `secret-tool` |
+| `env://NAME` | an environment variable | — |
 
 Other commands: `passess list` (names, backends, who may receive them), `passess
 check` (which secrets resolve, never their values), `passess add NAME --ref …` or
@@ -115,6 +123,34 @@ that adds the header itself, so even harnesses started from the Dock work. Outpu
 from either comes back redacted. Changes go through `claude mcp` and `codex mcp`,
 files are backed up under `~/.local/state/passess/backups` first, and
 `passess uninstall --apply` takes everything out again.
+
+## Secrets already in clear
+
+Most machines that run agents already have tokens in MCP configs, shell startup files
+and `.env` files, and in transcripts of sessions where a key was pasted. passess finds
+them and moves them, and never prints one while doing it:
+
+```sh
+passess scan                  # harness configs and their backups, dotfiles, .env files under here
+passess scan --transcripts    # also session transcripts; can take a while
+passess audit                 # harness settings and files that hand credentials to agents
+passess migrate env .env      # dry run: which lines would move into the keychain
+passess migrate mcp codex tracker --apply   # move an inline MCP credential, switch Codex to mcp-exec
+passess inventory > SECRETS-INVENTORY.md    # where every secret lives and what receives it
+```
+
+- `scan` combines the gitleaks rule set with the exact values of every secret you have
+  configured, in all their encodings. A finding is a file, a line, a rule or secret name
+  and a fingerprint keyed for that run, so it matches across files but cannot be checked
+  against a guess.
+- `audit` checks what the harnesses do by default, such as Codex handing every
+  `*TOKEN*` variable to the commands the agent runs (measured on 0.155). Each
+  finding comes with the command or edit that fixes it; audit changes nothing.
+- `migrate` is a dry run unless `--apply`. It asks about each value, refuses to run
+  under an agent, and takes a backup first. The backup still holds the old values, so
+  remove it once everything works (the command is printed). A value that sat in a file an
+  agent could read should be rotated at its provider anyway.
+- `inventory` is built from configs alone, so nothing is resolved.
 
 ## macOS menu bar app
 

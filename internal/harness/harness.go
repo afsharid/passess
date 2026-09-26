@@ -8,11 +8,10 @@
 package harness
 
 import (
-	"math"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
+
+	"github.com/afsharid/passess/internal/policy"
 )
 
 // Entry is an MCP server as a harness config has it.
@@ -46,53 +45,45 @@ type Adapter interface {
 	ConfigPath() string
 	// Entries parses the MCP servers from the harness config.
 	Entries() ([]Entry, error)
+	// Raw returns one entry with its values, for migration.
+	Raw(name string) (Raw, bool, error)
 	// AddCommand and RemoveCommand return the harness CLI invocation.
 	AddCommand(name string, argv []string) []string
 	RemoveCommand(name string) []string
 	InstructionsPath() string
 }
 
-var tokenPrefixes = regexp.MustCompile(`(?i)^(bearer\s+|token\s+)?(gh[pousr]_|github_pat_|glpat-|sk-|xox[abprs]-|AKIA|AIza|ya29\.|npm_|pypi-|hf_|dop_v1_|shpat_|sq0atp-)`)
-
-// looksLikeSecret is a conservative test for a credential stored in clear.
-func looksLikeSecret(v string) bool {
-	v = strings.TrimSpace(v)
-	if tokenPrefixes.MatchString(v) && len(v) >= 12 {
-		return true
-	}
-	lower := strings.ToLower(v)
-	for _, scheme := range []string{"bearer ", "token ", "basic "} {
-		if strings.HasPrefix(lower, scheme) {
-			v = strings.TrimSpace(v[len(scheme):])
-			break
-		}
-	}
-	if len(v) < 20 || strings.ContainsAny(v, " /\\") || strings.HasPrefix(v, "$") || strings.Contains(v, "${") {
-		return false
-	}
-	return entropy(v) >= 3.5
+// Raw is an entry with its values, read only by `passess migrate` to move them
+// into a vault. It is never printed or written anywhere but the vault.
+type Raw struct {
+	Command string
+	Args    []string
+	URL     string
+	Env     map[string]string
+	Headers map[string]string
 }
 
-// entropy is the Shannon entropy of s in bits per character.
-func entropy(s string) float64 {
-	counts := map[rune]float64{}
-	for _, r := range s {
-		counts[r]++
+func rawFrom(s map[string]any, headerKey string) Raw {
+	r := Raw{Env: map[string]string{}, Headers: map[string]string{}}
+	r.Command, _ = s["command"].(string)
+	r.Args = stringsOf(s["args"])
+	r.URL, _ = s["url"].(string)
+	for dst, key := range map[*map[string]string]string{&r.Env: "env", &r.Headers: headerKey} {
+		m, _ := s[key].(map[string]any)
+		for k, v := range m {
+			if str, ok := v.(string); ok {
+				(*dst)[k] = str
+			}
+		}
 	}
-	n := float64(len([]rune(s)))
-	var h float64
-	for _, c := range counts {
-		p := c / n
-		h -= p * math.Log2(p)
-	}
-	return h
+	return r
 }
 
 // keysAndLeaks returns the sorted keys of m and those whose values look like credentials.
 func keysAndLeaks(m map[string]any, prefix string) (keys, leaks []string) {
 	for k, v := range m {
 		keys = append(keys, k)
-		if s, ok := v.(string); ok && looksLikeSecret(s) {
+		if s, ok := v.(string); ok && policy.LooksLikeSecret(s) {
 			leaks = append(leaks, prefix+k)
 		}
 	}

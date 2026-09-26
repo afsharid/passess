@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/afsharid/passess/internal/ref"
+	"github.com/afsharid/passess/internal/secret"
 )
 
 const fakeValue = "passess-fake-keychain-0123456789"
@@ -157,4 +159,48 @@ func TestKeychainLive(t *testing.T) {
 
 	p := Keychain{Runner: ExecRunner{}}
 	contract(t, p, mustRef(t, "keychain://passess-test/"+account), canary, mustRef(t, "keychain://passess-test/absent-"+account))
+
+	// Store goes through stdin; quotes, backslashes and spaces must survive.
+	stored := `passess-fake "quoted" \back\slash ` + hex.EncodeToString(raw[4:8])
+	storeAcct := "store-" + hex.EncodeToString(raw[:4])
+	t.Cleanup(func() {
+		_ = exec.Command("security", "delete-generic-password", "-s", "passess-test", "-a", storeAcct).Run()
+	})
+	if err := p.Store(context.Background(), "passess-test", storeAcct, secret.FromString(stored)); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	v, err := p.Resolve(context.Background(), mustRef(t, "keychain://passess-test/"+storeAcct))
+	if err != nil || string(v.Bytes()) != stored {
+		t.Fatalf("stored value did not round-trip: %v", err)
+	}
+}
+
+func TestKeychainStoreKeepsValueOffArgv(t *testing.T) {
+	var got Cmd
+	run := &fakeRunner{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] == "-i" {
+			got = c
+			got.Stdin = bytes.Clone(c.Stdin) // Store clears its buffer afterwards
+			return Result{}, nil
+		}
+		return Result{Stdout: []byte(fakeValue + "\n")}, nil
+	}}
+	p := Keychain{Runner: run, GOOS: "darwin"}
+	if err := p.Store(context.Background(), "passess", "demo", secret.FromString(fakeValue)); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got.Args {
+		if strings.Contains(a, fakeValue) {
+			t.Fatal("the value reached argv")
+		}
+	}
+	if !strings.Contains(string(got.Stdin), `-w "`+fakeValue+`"`) {
+		t.Fatalf("stdin = %q", got.Stdin)
+	}
+	if err := p.Store(context.Background(), "passess", "bad/name", secret.FromString(fakeValue)); err == nil {
+		t.Fatal("a slash in the account was accepted")
+	}
+	if err := p.Store(context.Background(), "passess", "demo", secret.FromString("two\nlines-passess-fake")); err == nil {
+		t.Fatal("a multi-line value was accepted")
+	}
 }
