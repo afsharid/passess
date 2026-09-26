@@ -59,6 +59,10 @@ func TestAudit(t *testing.T) {
 	write(t, filepath.Join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport OPENAI_API_KEY="+openaiKey+"\nexport GITHUB_TOKEN=$(gh auth token)\nexport NPM_TOKEN=${NPM_TOKEN_FROM_VAULT}\n", 0o644)
 	write(t, filepath.Join(home, ".config", "fish", "config.fish"), "set -gx EDITOR vim\nset -gx HF_TOKEN "+hfToken+"\n", 0o600)
 	write(t, filepath.Join(home, ".config", "opencode", "opencode.jsonc"), "{}", 0o644)
+	write(t, filepath.Join(home, ".kiro", "agents", "crew.json"), `{"name": "crew", "includeMcpJson": false,
+  "mcpServers": {"gh": {"command": "gh-mcp", "env": {"GITHUB_TOKEN": "passess-fake-kiro-inline"}}}}`, 0o600)
+	write(t, filepath.Join(home, ".kiro", "agents", "solo.json"), `{"name": "solo"}`, 0o600)
+	write(t, filepath.Join(home, ".kiro", "agents", "team.json"), `{"name": "team", "includeMcpJson": true}`, 0o600)
 	write(t, filepath.Join(home, ".config", "zed", "settings.json"), `{"theme": "One Dark"}`, 0o644) // plain editor settings: not flagged
 	cfg := filepath.Join(home, ".config", "passess", "config.toml")
 	write(t, cfg, "version = 1\n", 0o600)
@@ -79,8 +83,14 @@ func TestAudit(t *testing.T) {
 	if f := got["claude-settings-env"]; len(f) != 1 || !strings.Contains(f[0].Detail, "env.ANTHROPIC_API_KEY") {
 		t.Fatalf("claude settings = %+v", f)
 	}
-	if f := got["mcp-inline"]; len(f) != 1 || f[0].Fix != "passess migrate mcp claude leaky" {
+	if f := got["mcp-inline"]; len(f) < 1 || f[0].Fix != "passess migrate mcp claude leaky" {
 		t.Fatalf("mcp inline = %+v", f)
+	}
+	if f := got["kiro-agents"]; len(f) != 1 || !strings.Contains(f[0].Detail, "2 agent profile(s)") || !strings.Contains(f[0].Detail, ": crew, solo") {
+		t.Fatalf("kiro agents = %+v", f)
+	}
+	if f := got["mcp-inline"]; len(f) != 2 || f[1].Area != "Kiro" || !strings.Contains(f[1].Detail, `agent crew's MCP server "gh" holds env.GITHUB_TOKEN`) {
+		t.Fatalf("kiro inline = %+v", f)
 	}
 	if f := got["codex-shell-env"]; len(f) != 1 || !strings.Contains(f[0].Fix, "ignore_default_excludes = false") {
 		t.Fatalf("codex = %+v", f)

@@ -75,7 +75,7 @@ func runScan(st *Streams, args []string) int {
 		targets = scan.Paths(paths)
 	} else {
 		wd, _ := os.Getwd()
-		targets = scan.Discover(scan.Where{Home: st.Getenv("HOME"), Dir: wd,
+		targets = scan.Discover(scan.Where{Home: st.Getenv("HOME"), ConfigHome: st.Getenv("XDG_CONFIG_HOME"), Dir: wd,
 			Backups: filepath.Join(stateDir(st.Getenv), "backups"), Transcripts: *transcripts})
 	}
 	out.Files = len(targets)
