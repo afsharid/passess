@@ -1,8 +1,14 @@
 package agent
 
 import (
+	"errors"
+
 	"golang.org/x/sys/unix"
 )
+
+// errNoProc is how procInfo reports a pid no process has: sysctl answers it
+// with zeroes, not an error. /proc on Linux has no entry, which is an error.
+var errNoProc = errors.New("no such process")
 
 func procInfo(pid int) (Proc, error) {
 	k, err := unix.SysctlKinfoProc("kern.proc.pid", pid)

@@ -1,10 +1,6 @@
 package agent
 
-import (
-	"errors"
-
-	"github.com/afsharid/passess/internal/detect"
-)
+import "github.com/afsharid/passess/internal/detect"
 
 // Proc is one process as the kernel describes it.
 type Proc struct {
@@ -75,5 +71,3 @@ func trimLogin(name string) string {
 
 // HarnessOf returns the harness a process's name belongs to, or "".
 func HarnessOf(p Proc) string { return detect.Program(p.Name) }
-
-var errNoProc = errors.New("no such process")
