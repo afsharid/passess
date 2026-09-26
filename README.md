@@ -236,6 +236,7 @@ them and moves them, and never prints one while doing it:
 ```sh
 passess scan                  # harness configs and their backups, dotfiles, .env files under here
 passess scan --transcripts    # also session transcripts; can take a while
+passess scan --scrub --apply  # replace your values in the transcripts that hold them
 passess audit                 # harness settings and files that hand credentials to agents
 passess migrate env .env      # dry run: which lines would move into the keychain
 passess migrate mcp codex tracker --apply   # move an inline MCP credential, switch Codex to mcp-exec
@@ -253,6 +254,12 @@ passess inventory > SECRETS-INVENTORY.md    # where every secret lives and what 
   under an agent, and takes a backup first. The backup still holds the old values, so
   remove it once everything works (the command is printed). A value that sat in a file an
   agent could read should be rotated at its provider anyway.
+- `scan --scrub` is a dry run unless `--apply`. It replaces only the exact values of
+  your configured secrets, with `[REDACTED:NAME]`, and only in transcripts. Each file is
+  backed up first, and keeps its mode and its modification time, which harnesses sort
+  sessions by. It leaves a session written in the last ten minutes alone. The backup
+  keeps the values, so remove it once the sessions look right. Scrubbing a transcript
+  does not unsend it: rotate what it held.
 - `inventory` is built from configs alone, so nothing is resolved.
 
 ## The agent
