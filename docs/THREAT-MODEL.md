@@ -60,6 +60,17 @@ where the protection stops. Read the last section before relying on it.
   as it was. Harnesses keep their own copies too (`~/.claude/backups`). `scan` reports
   both and `migrate` prints the removal command; deleting them is the user's call,
   because a backup is also how a bad change is undone.
+- **The agent holds values in memory.** `passess agent` keeps what it resolved for
+  `agent.cache_ttl`. It disables core dumps and refuses debuggers that attach later,
+  and zeroes values on expiry, `lock` and `stop`. It returns no value over its socket:
+  it runs the command itself (ADR 8). A same-user process that reads its memory some
+  other way is T6.
+- **The agent is not a boundary.** A same-user process can skip it: a command at a
+  terminal, or one run after `passess agent stop`, resolves in-process. The agent adds
+  a cache now and approvals next. Once approvals exist, a hook that refuses
+  `passess agent stop` and overridden `PASSESS_CONFIG` or `PASSESS_AGENT_SOCK` in agent
+  commands is what keeps them from being skipped. That makes it part of T5, not a hard
+  line.
 - **Moving a value does not unleak it.** A token that sat in a file an agent could read,
   or in a transcript, may already have reached a model provider. `migrate` says to
   rotate; `scan --transcripts` shows where a known value went.

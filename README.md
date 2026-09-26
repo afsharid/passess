@@ -8,7 +8,8 @@
 > `migrate` and `inventory` for secrets already sitting in clear. References can point
 > at 1Password, Bitwarden (Secrets Manager or Password Manager), Vault / OpenBao, the OS
 > keychain or an environment variable. Guard hooks refuse the few actions that would
-> put a value into an agent's context in seven harnesses. Plus the macOS menu bar app.
+> put a value into an agent's context in seven harnesses. `passess agent` caches
+> resolved values and runs agent commands itself. Plus the macOS menu bar app.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,
@@ -226,6 +227,32 @@ passess inventory > SECRETS-INVENTORY.md    # where every secret lives and what 
   remove it once everything works (the command is printed). A value that sat in a file an
   agent could read should be rotated at its provider anyway.
 - `inventory` is built from configs alone, so nothing is resolved.
+
+## The agent
+
+Every `passess exec` asks the vault again: 0.4–0.5 s through the `bws` CLI, more
+behind a Touch ID prompt. `passess agent` keeps the values it resolved in memory for
+`agent.cache_ttl` (10 minutes by default) and runs agent commands itself, so a cached
+secret costs one socket round trip:
+
+```sh
+passess agent start     # in the background; `passess agent serve` stays in the foreground
+passess agent status    # pid, config, which secrets it holds (names) and until when
+passess agent lock      # forget every value now
+passess agent stop
+```
+
+The agent never hands a value to anyone. `exec` gives it the command, its environment
+and its stdin, stdout and stderr; the agent applies the same policy, starts the child,
+redacts what it prints and returns its exit status. Commands at a terminal, `run` and
+`mcp-exec` keep running in-process. After upgrading passess, restart the agent: it
+refuses clients of another version rather than run them under its old policy
+([ADR 8](docs/adr/0008-the-agent-runs-the-child.md)).
+
+```toml
+[agent]
+cache_ttl = "30m"   # "0" resolves for every command
+```
 
 ## macOS menu bar app
 
