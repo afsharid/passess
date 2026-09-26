@@ -9,6 +9,9 @@ public struct Passess {
         self.executable = executable
     }
 
+    /// How to install the CLI, for the panel to offer.
+    public static let installCommand = "brew install afsharid/tap/passess"
+
     public enum Failure: Error, CustomStringConvertible {
         case notFound
         case timedOut
@@ -16,7 +19,7 @@ public struct Passess {
 
         public var description: String {
             switch self {
-            case .notFound: return "passess not found. Install it with `go install github.com/afsharid/passess/cmd/passess@latest`."
+            case .notFound: return "The passess command line tool is not installed."
             case .timedOut: return "passess did not answer in time"
             case let .unreadable(why): return "could not read passess output: \(why)"
             }
