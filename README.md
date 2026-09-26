@@ -286,10 +286,11 @@ value, in `agent-audit.jsonl` next to its socket.
 
 `Passess.app` puts passess in the menu bar. Its panel shows:
 - whether everything is fine, and every problem with its fix, copyable;
-- which secrets resolve (names and sources only);
-- whether each backend is usable;
-- the agent: a switch, the names it holds and until when, the live Allows, and a
-  lock button.
+- two tiles: the agent, which you switch on and off here, and the secrets, whose
+  check shows which resolve (names and sources only);
+- the coding agents: which have passess's hooks, instructions and MCP servers,
+  and the `passess install` line for any that needs setup;
+- the live approvals, and whether each backend is usable.
 
 When an agent needs your approval, a window asks who wants which secret for which
 command, and Allow takes Touch ID. The app never receives a value.
@@ -297,7 +298,7 @@ command, and Allow takes Touch ID. The app never receives a value.
 <p>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-panel-dark.png">
-  <img alt="The passess panel: all clear, three secrets resolve, bws and keychain ready, the agent holding two values and one Allow for gh" src="docs/images/menubar-panel-light.png" width="340">
+  <img alt="The passess panel: all clear; the agent on and holding two values; three secrets resolve; Claude Code, Codex, OpenCode, Kiro and Antigravity guarded; one Allow for gh; bws and keychain ready" src="docs/images/menubar-panel-light.png" width="340">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-approval-dark.png">

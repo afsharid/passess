@@ -97,6 +97,17 @@ public struct Passess {
         return locate(bundle: bundle, fileManager: fileManager)
     }
 
+    /// `passess status --json`: how each coding agent is set up. It reads
+    /// config files only (0.01 s).
+    public func harnesses() throws -> HarnessStatus {
+        let data = try run(["status", "--json"])
+        do {
+            return try JSONDecoder().decode(HarnessStatus.self, from: data)
+        } catch {
+            throw Failure.unreadable(String(describing: error))
+        }
+    }
+
     public func agentStatus() throws -> AgentStatus {
         let data = try run(["agent", "status", "--json"])
         do {

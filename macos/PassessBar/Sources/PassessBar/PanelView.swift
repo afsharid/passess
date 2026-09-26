@@ -1,8 +1,12 @@
 import PassessKit
 import SwiftUI
 
-/// The panel the menu bar icon opens: health first, then what needs the
-/// user, then the parts that are fine.
+// No @State in these views: the SDK's @State is a macro, and the Command Line
+// Tools this app builds with carry no SwiftUI macro plugin.
+
+/// The panel the menu bar icon opens, laid out like Control Center: how
+/// things are, two tiles for what the user switches and checks, then what
+/// needs them, the coding agents, the agent's approvals, the backends.
 struct PanelView: View {
     @ObservedObject var model: BarModel
 
@@ -13,16 +17,21 @@ struct PanelView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 12)
             if let d = model.doctor, d.config.ok {
-                content(d)
-            } else if let d = model.doctor {
-                NoConfig(doctor: d, model: model)
-            } else if model.failure == Passess.Failure.notFound.description {
-                Section("Get started") {
-                    ProblemRow(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral,
-                                          title: "Install it in a terminal", detail: Passess.installCommand,
-                                          action: .copy(Passess.installCommand)),
-                               model: model)
+                HStack(spacing: 8) {
+                    AgentTile(model: model)
+                    SecretsTile(model: model)
                 }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                content(d)
+            } else if model.doctor != nil {
+                GetStarted(item: Item(id: "start", symbol: "sparkles", tone: .neutral, title: "Add a first secret in a terminal",
+                                      detail: "passess add NAME --ref <reference>", action: .copy("passess add NAME --ref <reference>")),
+                           model: model)
+            } else if model.failure == Passess.Failure.notFound.description {
+                GetStarted(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral, title: "Install it in a terminal",
+                                      detail: Passess.installCommand, action: .copy(Passess.installCommand)),
+                           model: model)
             }
             Divider()
             Footer(model: model)
@@ -36,26 +45,51 @@ struct PanelView: View {
     private func content(_ d: Doctor) -> some View {
         let issues = problems(d)
         if !issues.isEmpty {
-            Section("Needs attention") {
+            Card("Needs attention") {
                 ForEach(issues) { item in
                     ProblemRow(item: item, model: model)
                     if item.id != issues.last?.id { Divider() }
                 }
             }
         }
-        Section("Secrets", trailing: { CheckButton(model: model) }) {
-            SecretsSection(model: model)
+        if let status = model.harnesses, !status.harnesses.isEmpty {
+            let rows = codingAgents(status)
+            let guarded = rows.filter { $0.tone == .ok }.count
+            Card("Coding agents", trailing: {
+                Text("\(guarded) of \(rows.count) guarded")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }) {
+                ForEach(rows) { AgentRowView(row: $0, model: model) }
+            }
         }
-        Section("Backends") {
-            ForEach(backends(d)) { ItemRow(item: $0) }
+        if let card = agentCard(model.agent, approving: model.approving), card.running {
+            Card("Approvals", trailing: { ApproverState(approving: card.approving) }) {
+                if card.approvals.isEmpty {
+                    Text(card.approving ? "None yet. Questions open a window of their own." : "Questions go unanswered until this app connects.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(card.approvals) { ItemRow(item: $0) }
+                }
+            }
         }
-        Section("Agent", trailing: { AgentSwitch(model: model) }) {
-            AgentSection(model: model)
+        if let check = model.check {
+            let failing = checkItems(check).filter { $0.tone != .ok }
+            if !failing.isEmpty {
+                Card("Secrets that do not resolve") {
+                    ForEach(failing) { ItemRow(item: $0) }
+                }
+            }
+        }
+        Card("Backends") {
+            BackendsView(items: backends(d))
         }
     }
 }
 
-// MARK: building blocks
+// MARK: tokens and building blocks
 
 extension Tone {
     var color: Color {
@@ -70,15 +104,17 @@ extension Tone {
     var spoken: String {
         switch self {
         case .ok: return "fine"
-        case .warning: return "warning"
+        case .warning: return "needs attention"
         case .error: return "problem"
         case .neutral: return ""
         }
     }
 }
 
-/// A titled group of rows, with an optional control on the title line.
-struct Section<Content: View, Trailing: View>: View {
+private let cardFill = Color.primary.opacity(0.05)
+
+/// A titled group of rows on a quiet rounded background.
+struct Card<Content: View, Trailing: View>: View {
     let title: String
     let trailing: Trailing
     let content: Content
@@ -90,8 +126,8 @@ struct Section<Content: View, Trailing: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -100,20 +136,19 @@ struct Section<Content: View, Trailing: View>: View {
                 trailing
             }
             .padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.045)))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(cardFill))
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
     }
 }
 
-extension Section where Trailing == EmptyView {
+extension Card where Trailing == EmptyView {
     init(_ title: String, @ViewBuilder content: () -> Content) {
         self.init(title, trailing: { EmptyView() }, content: content)
     }
@@ -138,27 +173,15 @@ struct ItemRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             ToneIcon(symbol: item.symbol, tone: item.tone)
-            if item.tone == .ok || item.tone == .neutral {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
                     .font(.system(size: 13))
                 if let detail = item.detail {
                     Text(detail)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.title)
-                        .font(.system(size: 13))
-                    if let detail = item.detail {
-                        Text(detail)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
@@ -175,23 +198,23 @@ struct Header: View {
 
     var body: some View {
         let h = headline(doctor: model.doctor, failure: model.failure)
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             ZStack {
-                Circle()
-                    .fill(h.health.tone.color.opacity(0.14))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(h.health.tone.color.opacity(0.16))
                 if model.doctor == nil && model.failure == nil {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: h.health.symbol + ".fill")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(h.health.tone.color)
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 38, height: 38)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(h.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                 if !h.detail.isEmpty {
                     Text(h.detail)
                         .font(.system(size: 12))
@@ -204,11 +227,92 @@ struct Header: View {
             Spacer(minLength: 8)
             Button(action: model.refresh) {
                 Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
             .help("Refresh")
             .accessibilityLabel("Refresh")
         }
+    }
+}
+
+// MARK: tiles
+
+/// A Control Center tile: a round symbol, lit when on, a title and a line.
+struct Tile: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    var lit = false
+    var tint: Color = .primary
+    var enabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(lit ? Color.accentColor : Color.primary.opacity(0.09))
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(lit ? Color.white : tint)
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.55)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct AgentTile: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        if let card = agentCard(model.agent, approving: model.approving) {
+            Tile(symbol: card.running ? "bolt.fill" : "bolt", title: "Agent",
+                 detail: model.agentBusy ? "…" : card.running ? (card.holds.isEmpty ? "On" : "On · holds \(card.holds.count)") : "Off",
+                 lit: card.running, enabled: !model.agentBusy) {
+                model.agentCommand(card.running ? "stop" : "start")
+            }
+            .help(card.running ? "\(card.status). Click to stop: the agent forgets every value and approval."
+                : "Start the agent: cached values, approvals")
+        } else {
+            Tile(symbol: "bolt.slash", title: "Agent", detail: "Update passess", enabled: false) {}
+                .help("The passess on your PATH has no agent yet: brew upgrade passess")
+        }
+    }
+}
+
+struct SecretsTile: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        let summary = model.check.map(checkSummary)
+        Tile(symbol: "key.fill", title: "Secrets",
+             detail: model.checking ? "Checking…" : summary?.text ?? "Click to check",
+             tint: summary?.tone.color ?? .primary, enabled: !model.checking, action: model.runCheck)
+            .help("Resolve every secret once and show which work. Names only; no value is shown.")
     }
 }
 
@@ -256,147 +360,94 @@ struct CopyButton: View {
                 .foregroundStyle(copied ? Tone.ok.color : .secondary)
         }
         .buttonStyle(.borderless)
-        .help(copied ? "Copied" : "Copy the fix")
+        .help(copied ? "Copied" : "Copy the command that fixes it")
         .accessibilityLabel(copied ? "Copied" : "Copy the fix")
     }
 }
 
-struct CheckButton: View {
+struct AgentRowView: View {
+    let row: AgentRow
     @ObservedObject var model: BarModel
 
     var body: some View {
-        if model.checking {
-            ProgressView().controlSize(.mini)
-        } else {
-            Button(model.check == nil ? "Check now" : "Check again", action: model.runCheck)
-                .buttonStyle(.borderless)
-                .font(.system(size: 11))
-                .help("Resolve every secret once and show which work. No value is shown.")
-        }
-    }
-}
-
-// No @State in these views: the SDK's @State is a macro, and the Command Line
-// Tools this app builds with carry no SwiftUI macro plugin.
-struct SecretsSection: View {
-    @ObservedObject var model: BarModel
-
-    var body: some View {
-        if let check = model.check {
-            let summary = checkSummary(check)
-            let items = checkItems(check)
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(items) { ItemRow(item: $0) }
-                }
-                .padding(.top, 4)
-            } label: {
-                HStack(spacing: 8) {
-                    ToneIcon(symbol: summary.tone == .ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
-                             tone: summary.tone)
-                    Text(summary.text).font(.system(size: 13))
-                    if let at = model.checkedAt {
-                        Text(at, style: .time)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                ToneIcon(symbol: "key.fill", tone: .neutral)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Not checked yet").font(.system(size: 13))
-                    Text("A check resolves each secret once. Names only; no value is shown.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-}
-
-struct AgentSwitch: View {
-    @ObservedObject var model: BarModel
-
-    var body: some View {
-        if model.agent != nil {
-            Toggle("", isOn: Binding(
-                get: { model.agent?.running == true },
-                set: { model.agentCommand($0 ? "start" : "stop") }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .labelsHidden()
-            .disabled(model.agentBusy)
-            .help(model.agent?.running == true ? "Stop the agent: it forgets every value and approval" : "Start the agent")
-            .accessibilityLabel("Agent")
-        }
-    }
-}
-
-struct AgentSection: View {
-    @ObservedObject var model: BarModel
-
-    var body: some View {
-        if let card = agentCard(model.agent, approving: model.approving) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    ToneIcon(symbol: card.running ? (card.holds.isEmpty ? "tray" : "tray.full.fill") : "moon.zzz.fill",
-                             tone: card.running ? .ok : .neutral)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(card.status).font(.system(size: 13))
-                        if !card.holds.isEmpty {
-                            Text(card.holds.joined(separator: ", "))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                    Spacer(minLength: 4)
-                    if card.running {
-                        Button {
-                            model.agentCommand("lock")
-                        } label: {
-                            Label("Lock", systemImage: "lock.fill").font(.system(size: 11))
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(model.agentBusy)
-                        .help("Forget every cached value and approval now")
-                    }
-                }
-                if card.running {
-                    HStack(spacing: 8) {
-                        ToneIcon(symbol: card.approving ? "hand.raised.fill" : "hand.raised.slash", tone: card.approving ? .ok : .neutral)
-                        Text(card.approving ? "Approval questions appear here" : "Not connected for approval questions")
-                            .font(.system(size: 12))
-                            .foregroundStyle(card.approving ? .primary : .secondary)
-                    }
-                    ForEach(card.approvals) { ItemRow(item: $0) }
-                }
-            }
-        } else {
-            HStack(spacing: 8) {
-                ToneIcon(symbol: "questionmark.circle", tone: .neutral)
-                Text("This passess has no agent yet")
-                    .font(.system(size: 12))
+        HStack(spacing: 10) {
+            Text(row.monogram)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.title)
+                    .font(.system(size: 13, weight: .medium))
+                Text(row.detail)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Spacer(minLength: 4)
+            if let fix = row.fix {
+                CopyButton(copied: model.copied == row.id) { model.copy(fix, from: row.id) }
+            }
+            Image(systemName: row.symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(row.tone.color)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(row.tone.spoken)
+    }
+}
+
+struct ApproverState: View {
+    let approving: Bool
+
+    var body: some View {
+        Label(approving ? "answered here" : "not connected", systemImage: approving ? "hand.raised.fill" : "hand.raised.slash")
+            .font(.system(size: 11))
+            .foregroundStyle(approving ? Tone.ok.color : Tone.warning.color)
+            .labelStyle(.titleAndIcon)
+    }
+}
+
+/// Usable backends in one line; one that is not gets a line of its own with why.
+struct BackendsView: View {
+    let items: [Item]
+
+    var body: some View {
+        let ready = items.filter { $0.tone == .ok }
+        let broken = items.filter { $0.tone != .ok }
+        if !ready.isEmpty {
+            HStack(spacing: 14) {
+                ForEach(ready) { item in
+                    HStack(spacing: 5) {
+                        ToneIcon(symbol: item.symbol, tone: item.tone)
+                        Text(item.title).font(.system(size: 13))
+                    }
+                    .help(item.detail ?? "")
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue("ready")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        ForEach(broken) { ItemRow(item: $0) }
+        if items.isEmpty {
+            Text("No secret uses a vault yet")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 }
 
-struct NoConfig: View {
-    let doctor: Doctor
+struct GetStarted: View {
+    let item: Item
     @ObservedObject var model: BarModel
 
     var body: some View {
-        let start = "passess add NAME --ref <reference>"
-        Section("Get started") {
-            ProblemRow(item: Item(id: "start", symbol: "sparkles", tone: .neutral,
-                                  title: "Add a first secret in a terminal", detail: start, action: .copy(start)),
-                       model: model)
+        Card("Get started") {
+            ProblemRow(item: item, model: model)
         }
     }
 }
@@ -419,11 +470,10 @@ struct Footer: View {
             }
             Spacer()
             if let config = model.doctor?.config, config.ok {
-                let path = config.path
-                Button("Config") { model.open(URL(fileURLWithPath: path)) }
+                Button("Config") { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))
-                    .help(path)
+                    .help(config.path)
             }
             Button {
                 model.open(URL(string: "https://github.com/afsharid/passess#readme")!)

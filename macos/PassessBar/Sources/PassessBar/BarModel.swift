@@ -9,6 +9,7 @@ final class BarModel: ObservableObject {
     @Published private(set) var doctor: Doctor?
     @Published private(set) var failure: String?
     @Published private(set) var agent: AgentStatus?
+    @Published private(set) var harnesses: HarnessStatus?
     @Published private(set) var check: Check?
     @Published private(set) var checkedAt: Date?
     @Published private(set) var checking = false
@@ -48,11 +49,13 @@ final class BarModel: ObservableObject {
             var failure: String?
             do { doctor = try cli.doctor() } catch { failure = String(describing: error) }
             let agent = try? (Passess.locateForAgent() ?? cli).agentStatus()
+            let harnesses = try? cli.harnesses()
             DispatchQueue.main.async {
                 self.refreshing = false
                 self.doctor = doctor
                 self.failure = failure
                 self.agent = agent
+                self.harnesses = harnesses
             }
         }
     }
@@ -97,11 +100,12 @@ final class BarModel: ObservableObject {
     }
 
     /// Fixed state for previews: nothing runs.
-    func seed(doctor: Doctor?, failure: String? = nil, agent: AgentStatus?, check: Check? = nil,
-              checkedAt: Date? = nil, approving: Bool = false) {
+    func seed(doctor: Doctor?, failure: String? = nil, agent: AgentStatus?, harnesses: HarnessStatus? = nil,
+              check: Check? = nil, checkedAt: Date? = nil, approving: Bool = false) {
         self.doctor = doctor
         self.failure = failure
         self.agent = agent
+        self.harnesses = harnesses
         self.check = check
         self.checkedAt = checkedAt
         self.approving = approving

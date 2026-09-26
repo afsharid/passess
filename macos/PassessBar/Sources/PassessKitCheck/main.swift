@@ -82,6 +82,15 @@ if let ask = frame.ask {
     expect(false, "agent-ask.json holds a question")
 }
 
+// coding agents
+let status = load(HarnessStatus.self, "status.json")
+let agents = codingAgents(status)
+expect(agents.map(\.id) == ["codex", "claude", "claude-desktop"], "agents that need setup come first: \(agents.map(\.id))")
+expect(agents[0].tone == .warning && agents[0].fix == "passess install codex --apply", "an agent missing hooks offers the install command")
+expect(agents[0].detail == "no hooks · instructions · 1 MCP server", "agent detail: \(agents[0].detail)")
+expect(agents[1].tone == .ok && agents[1].monogram == "CC" && agents[1].fix == nil, "a guarded agent")
+expect(agents[2].tone == .neutral && agents[2].detail == "Nothing set up", "an agent with nothing to set up")
+
 expect(AgentJSON.socketPath(environment: [:], home: "/h") == "/h/.local/state/passess/agent.sock", "default socket path")
 expect(AgentJSON.socketPath(environment: ["PASSESS_AGENT_SOCK": "/s"], home: "/h") == "/s", "PASSESS_AGENT_SOCK wins")
 expect(AgentJSON.socketPath(environment: ["XDG_RUNTIME_DIR": "/run/u"], home: "/h") == "/run/u/passess/agent.sock",

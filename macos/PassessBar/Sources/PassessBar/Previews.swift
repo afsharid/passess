@@ -85,6 +85,23 @@ private func samples() -> [(String, AnyView)] {
      "approvals": [{"secret": "GITHUB_TOKEN", "program": "gh", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}]}
     """)
     let agentOff = decode(AgentStatus.self, #"{"running": false}"#)
+    func harness(_ id: String, _ label: String, hooks: String, instructions: String, servers: Int = 0, actions: Int = 0) -> String {
+        let s = (0..<servers).map { #"{"name": "server\#($0)", "state": "ok"}"# }.joined(separator: ",")
+        let a = (0..<actions).map { _ in #"{"kind": "add"}"# }.joined(separator: ",")
+        return #"{"id": "\#(id)", "label": "\#(label)", "servers": [\#(s)], "instructions_state": "\#(instructions)", "hooks": "\#(hooks)", "actions": [\#(a)], "errors": []}"#
+    }
+    let agents = decode(HarnessStatus.self, "{\"applied\": false, \"harnesses\": [" + [
+        harness("claude", "Claude Code", hooks: "ok", instructions: "ok"),
+        harness("codex", "Codex", hooks: "ok", instructions: "ok", servers: 1),
+        harness("opencode", "OpenCode", hooks: "ok", instructions: "ok"),
+        harness("kiro", "Kiro", hooks: "unavailable", instructions: "ok"),
+        harness("antigravity", "Antigravity", hooks: "ok", instructions: "ok"),
+        harness("claude-desktop", "Claude Desktop", hooks: "none", instructions: "none"),
+    ].joined(separator: ",") + "]}")
+    let agentsNeedSetup = decode(HarnessStatus.self, "{\"applied\": false, \"harnesses\": [" + [
+        harness("claude", "Claude Code", hooks: "ok", instructions: "ok"),
+        harness("codex", "Codex", hooks: "missing", instructions: "ok", actions: 1),
+    ].joined(separator: ",") + "]}")
     let check = decode(Check.self, """
     {"config": "/Users/you/.config/passess/config.toml", "ok": true,
      "secrets": [{"name": "GITHUB_TOKEN", "state": "ok", "from": "op://Dev/GitHub PAT/credential"},
@@ -103,8 +120,9 @@ private func samples() -> [(String, AnyView)] {
         return AnyView(PanelView(model: model))
     }
     return [
-        ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, check: check, checkedAt: now, approving: true) }),
-        ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff) }),
+        ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: check, checkedAt: now, approving: true) }),
+        ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }),
+        ("panel-old-cli", panel { $0.seed(doctor: healthy, agent: nil, harnesses: agents) }),
         ("panel-loading", panel { $0.seed(doctor: nil, agent: nil) }),
         ("panel-no-config", panel { $0.seed(doctor: noConfig, agent: agentOff) }),
         ("panel-cli-missing", panel { $0.seed(doctor: nil, failure: Passess.Failure.notFound.description, agent: nil) }),
