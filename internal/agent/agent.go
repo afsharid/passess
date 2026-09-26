@@ -21,10 +21,12 @@ const Version = 1
 type Kind string
 
 const (
-	Exec   Kind = "exec"   // run a command with secrets; the client's stdio is attached
-	Status Kind = "status" // describe the agent
-	Lock   Kind = "lock"   // forget every cached value
-	Stop   Kind = "stop"   // stop accepting, forget, exit once running commands end
+	Exec     Kind = "exec"     // run a command with secrets; the client's stdio is attached
+	Ask      Kind = "ask"      // may these secrets go to this command? No value either way
+	Approver Kind = "approver" // answer asks for as long as the connection lasts
+	Status   Kind = "status"   // describe the agent
+	Lock     Kind = "lock"     // forget every cached value and approval
+	Stop     Kind = "stop"     // stop accepting, forget, exit once running commands end
 )
 
 // Secret is one -s flag: the variable to set and the secret it gets.
@@ -68,10 +70,41 @@ func (e Environ) Lookup(key string) (string, bool) {
 // Frame is one message after the request: signals from the client, then one
 // reply from the agent.
 type Frame struct {
-	Signal int    `json:"signal,omitempty"` // client → agent: deliver this signal to the child
-	Status *int   `json:"status,omitempty"` // agent → client: the exit status; the last frame
-	Error  string `json:"error,omitempty"`  // agent → client: why a control request failed
-	Info   *Info  `json:"info,omitempty"`   // agent → client: the answer to Status
+	Signal int     `json:"signal,omitempty"` // client → agent: deliver this signal to the child
+	Status *int    `json:"status,omitempty"` // agent → client: the exit status; the last frame
+	Error  string  `json:"error,omitempty"`  // agent → client: why a request failed, as the client would say it
+	Info   *Info   `json:"info,omitempty"`   // agent → client: the answer to Status
+	Ask    *AskFor `json:"ask,omitempty"`    // agent → approver: a question
+	Cancel string  `json:"cancel,omitempty"` // agent → approver: the question with this ID is settled
+	Answer *Answer `json:"answer,omitempty"` // approver → agent
+}
+
+// AskFor is a question for an approver: may these secrets go to this
+// command? It carries names and the command, never a value.
+type AskFor struct {
+	ID      string    `json:"id"`
+	Secrets []string  `json:"secrets"`
+	Program string    `json:"program"` // the program family the secrets would go to
+	Path    string    `json:"path"`    // the executable, resolved
+	Argv    []string  `json:"argv"`    // with words that look like credentials replaced
+	Dir     string    `json:"dir"`
+	Harness string    `json:"harness,omitempty"` // from the caller's environment: a label, unverified
+	Anchor  *Proc     `json:"anchor,omitempty"`  // the process an Allow is remembered for; nil: it is not
+	Until   time.Time `json:"until,omitzero"`    // how long an Allow lasts
+}
+
+// Answer is an approver's reply.
+type Answer struct {
+	ID    string `json:"id"`
+	Allow bool   `json:"allow"`
+}
+
+// Approval is an Allow the agent remembers.
+type Approval struct {
+	Secret  string    `json:"secret"`
+	Program string    `json:"program"`
+	Anchor  Proc      `json:"anchor"`
+	Until   time.Time `json:"until"`
 }
 
 // Info describes a running agent. It names secrets, never values.
@@ -89,6 +122,10 @@ type Info struct {
 	Jobs     int       `json:"jobs"`             // commands running
 	Served   int       `json:"served"`           // exec requests since it started
 	Stopping bool      `json:"stopping,omitempty"`
+
+	Approvers int        `json:"approvers"` // connected
+	Approvals []Approval `json:"approvals"`
+	Pending   int        `json:"pending"` // questions no one has answered yet
 }
 
 // ErrNotRunning means no agent listens on the socket.
