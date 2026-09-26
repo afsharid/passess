@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/afsharid/passess/internal/harness"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/resolve"
