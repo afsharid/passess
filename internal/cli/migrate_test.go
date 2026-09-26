@@ -76,6 +76,11 @@ func TestMigrateEnv(t *testing.T) {
 	if strings.Contains(out, "passess-fake-apikey") || strings.Contains(out, "passess-fake-dbpw") {
 		t.Fatal("migrate printed a value")
 	}
+	for _, want := range []string{"The backup still holds the old values in clear", "rm -r ", shellLine(keychainPrompt("my-app.API_KEY")), "passess scan"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
 	got, _ := os.ReadFile(envPath)
 	if string(got) != "# app settings\nDEBUG=true\nEMPTY_SECRET=\nSESSION_SECRET=${API_KEY}\n" {
 		t.Fatalf(".env after migrate: %q", got)
@@ -122,8 +127,15 @@ X-Client = "passess-test"
 		t.Fatal(err)
 	}
 
-	out, errOut, code := run(t, "migrate", "mcp", "claude", "legacy", "--apply", "--yes")
-	if code != 0 {
+	out, errOut, code := run(t, "migrate", "mcp", "claude", "legacy")
+	if code != 0 || !strings.Contains(out, "env.API_TOKEN -> API_TOKEN at keychain://passess/mcp.legacy.API_TOKEN") || !strings.Contains(out, "Dry run") {
+		t.Fatalf("dry run: exit %d\n%s%s", code, out, errOut)
+	}
+	if len(stored) != 0 || readCalls(t, calls) != "" || strings.Contains(out, "passess-fake-legacy") {
+		t.Fatal("the dry run changed something or printed a value")
+	}
+	out, errOut, code = run(t, "migrate", "mcp", "claude", "legacy", "--apply", "--yes")
+	if code != 0 || !strings.Contains(out, "where agents could read it") {
 		t.Fatalf("claude: exit %d\n%s%s", code, out, errOut)
 	}
 	if stored["passess/mcp.legacy.API_TOKEN"] != "passess-fake-legacy-0123456789abcdef" {

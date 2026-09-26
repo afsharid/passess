@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -74,7 +75,8 @@ func runScan(st *Streams, args []string) int {
 		targets = scan.Paths(paths)
 	} else {
 		wd, _ := os.Getwd()
-		targets = scan.Discover(st.Getenv("HOME"), wd, *transcripts)
+		targets = scan.Discover(scan.Where{Home: st.Getenv("HOME"), Dir: wd,
+			Backups: filepath.Join(stateDir(st.Getenv), "backups"), Transcripts: *transcripts})
 	}
 	out.Files = len(targets)
 	findings, errs := s.All(targets, runtime.NumCPU())
@@ -154,7 +156,7 @@ func printScan(st *Streams, out scanOutput) {
 	for _, f := range out.Findings {
 		byCategory[f.Category] = append(byCategory[f.Category], f)
 	}
-	for _, cat := range []string{"config", "dotfile", "env", "transcript", "path"} {
+	for _, cat := range []string{"config", "backup", "dotfile", "env", "transcript", "path"} {
 		fs := byCategory[cat]
 		if len(fs) == 0 {
 			continue
@@ -176,6 +178,16 @@ func printScan(st *Streams, out scanOutput) {
 	if len(byCategory["transcript"]) > 0 || len(byCategory["config"]) > 0 {
 		fmt.Fprintln(st.Stdout, "Rotate anything found in a transcript first: that value has already left this machine.")
 		fmt.Fprintln(st.Stdout, "Then move it into your vault and out of the file (`passess migrate`).")
+	}
+	if b := byCategory["backup"]; len(b) > 0 {
+		dirs := map[string]bool{}
+		for _, f := range b {
+			dirs[filepath.Dir(f.Path)] = true
+		}
+		fmt.Fprintln(st.Stdout, "Backups keep the values they were taken with. Once you no longer need them, remove them:")
+		for _, d := range sortedKeys(dirs) {
+			fmt.Fprintf(st.Stdout, "  %s\n", short(d))
+		}
 	}
 	for _, e := range out.Errors {
 		fmt.Fprintf(st.Stdout, "could not read: %s\n", e)

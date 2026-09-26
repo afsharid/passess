@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -265,13 +267,35 @@ func (m *migration) env(file string) int {
 		fmt.Fprintf(st.Stdout, "note: %s not updated: %v\n", projectFile, err)
 	}
 	sort.Strings(names)
-	fmt.Fprintf(st.Stdout, "\nMoved %d secret(s) into the keychain: %s.\n", len(names), strings.Join(names, ", "))
-	fmt.Fprintf(st.Stdout, "%s no longer holds them; backup: %s\n", file, backup)
+	fmt.Fprintf(st.Stdout, "\nMoved %d secret(s) into the keychain: %s. %s no longer holds them.\n", len(names), strings.Join(names, ", "), file)
 	fmt.Fprintf(st.Stdout, "Start the app through passess, e.g. add to %s:\n", cfgPath)
 	fmt.Fprintf(st.Stdout, "  [profiles.%s]\n  secrets = [%s]\n  allow   = [\"npm\"]   # the program you start\n", project, quoteList(names))
 	fmt.Fprintf(st.Stdout, "and run: passess run %s -- npm run dev\n", project)
-	fmt.Fprintln(st.Stdout, "If the file was ever committed or shared, rotate these values at their provider.")
+	printAfterMove(st, backup, "If "+file+" was ever committed, synced or shared, rotate the values at their provider", accountsOf(moves, moved))
 	return ExitOK
+}
+
+func accountsOf(moves []envMove, moved map[int]bool) []string {
+	var out []string
+	for _, mv := range moves {
+		if moved[mv.Line] {
+			out = append(out, mv.account)
+		}
+	}
+	return out
+}
+
+// printAfterMove says what is left to do once values have moved: the backup
+// still holds them in clear, and a value that sat in a file may need rotating.
+func printAfterMove(st *Streams, backup, rotate string, accounts []string) {
+	fmt.Fprintf(st.Stdout, "\nThe backup still holds the old values in clear. Once everything works, remove it:\n  rm -r %s\n", shellLine([]string{backup}))
+	fmt.Fprintf(st.Stdout, "%s, then store each new value with:\n", rotate)
+	for _, a := range accounts {
+		if argv := keychainPrompt(a); argv != nil {
+			fmt.Fprintf(st.Stdout, "  %s\n", shellLine(argv))
+		}
+	}
+	fmt.Fprintln(st.Stdout, "`passess scan` lists any other copy that still holds them (harness backups, dotfiles, transcripts with --transcripts).")
 }
 
 func quoteList(names []string) string {
@@ -467,18 +491,17 @@ func (m *migration) mcp(harnessID, server string) int {
 				strings.Join(cmd[:3], " "), err, harnessID, backup)
 		}
 	}
-	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess; backup: %s\n", adapter.Label(), server, backup)
-	fmt.Fprintf(st.Stdout, "The credential sat in clear in %s: rotate it at its provider, then update the keychain item.\n", adapter.ConfigPath())
+	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), server)
+	accounts := make([]string, len(moves))
+	for i, mv := range moves {
+		accounts[i] = mv.account
+	}
+	printAfterMove(st, backup, "The credential sat in clear in "+adapter.ConfigPath()+", where agents could read it: rotate it at its provider", accounts)
 	return ExitOK
 }
 
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 // mcpBlock renders [mcp.NAME]; it holds names and non-secret values only.

@@ -105,7 +105,9 @@ func TestBinaryFilesAreSkipped(t *testing.T) {
 func TestDiscover(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	for _, p := range []string{".claude.json", ".codex/config.toml", ".zshrc", ".kiro/agents/crew.json",
-		".claude/projects/p/1.jsonl", ".codex/sessions/2026/09/26/r.jsonl", ".codex/history.jsonl"} {
+		".claude/projects/p/1.jsonl", ".codex/sessions/2026/09/26/r.jsonl", ".codex/history.jsonl",
+		".claude.json.backup", ".claude/backups/.claude.json.backup.1790420106981", ".codex/config.toml.backup-20260801-210842",
+		"state/backups/20260926-120000.000/00-Users_x_.env", "state/backups/20260926-120000.000/manifest.json"} {
 		writeFile(t, filepath.Join(home, p), "x\n")
 	}
 	for _, p := range []string{".env", ".env.local", ".env.example", "api/.env.production", "node_modules/pkg/.env", "a/b/c/d/e/.env"} {
@@ -120,7 +122,7 @@ func TestDiscover(t *testing.T) {
 		}
 		return n, paths
 	}
-	ts := Discover(home, project, false)
+	ts := Discover(Where{Home: home, Dir: project, Backups: filepath.Join(home, "state", "backups")})
 	if n, _ := count(ts, "config"); n != 3 {
 		t.Fatalf("configs = %d", n)
 	}
@@ -130,10 +132,13 @@ func TestDiscover(t *testing.T) {
 	if n, paths := count(ts, "env"); n != 3 {
 		t.Fatalf("env files = %v", paths)
 	}
+	if n, paths := count(ts, "backup"); n != 4 {
+		t.Fatalf("backups = %v", paths)
+	}
 	if n, _ := count(ts, "transcript"); n != 0 {
 		t.Fatal("transcripts only when asked")
 	}
-	if n, paths := count(Discover(home, project, true), "transcript"); n != 3 {
+	if n, paths := count(Discover(Where{Home: home, Dir: project, Transcripts: true}), "transcript"); n != 3 {
 		t.Fatalf("transcripts = %v", paths)
 	}
 }
