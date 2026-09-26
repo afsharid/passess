@@ -29,10 +29,37 @@ verified yet.
 |---|---|---|---|---|
 | Claude Code | `~/.claude.json` → `mcpServers` (user scope) | `claude mcp add --scope user NAME -- passess mcp-exec NAME`, `claude mcp remove --scope user NAME` | `~/.claude/CLAUDE.md` | live, against the installed CLI in a throwaway `HOME` |
 | Codex | `$CODEX_HOME/config.toml` → `[mcp_servers.*]` | `codex mcp add NAME -- passess mcp-exec NAME`, `codex mcp remove NAME` | `$CODEX_HOME/AGENTS.md` | live, same way |
+| Antigravity | `~/.gemini/config/mcp_config.json` → `mcpServers` (resolved: `~/.gemini/antigravity/mcp_config.json` links to it) | `agy mcp add NAME passess mcp-exec NAME`, `agy mcp remove NAME` | `~/.gemini/config/rules/passess.md` | live (agy 1.2.11) |
+| OpenCode | `$XDG/opencode/opencode.json` or `.jsonc` → `mcp` (`type: local`, one `command` array, `environment`) | file edit; refuses when both files exist | `$XDG/opencode/AGENTS.md` | golden |
+| Kiro | `~/.kiro/settings/mcp.json` → `mcpServers` | file edit | `~/.kiro/steering/passess.md` | golden |
+| Gemini CLI | `~/.gemini/settings.json` → `mcpServers` (strict JSON) | file edit, only with `gemini` on PATH | `~/.gemini/GEMINI.md` | golden |
+| Cursor | `~/.cursor/mcp.json` → `mcpServers` (`type: stdio`) | file edit | — | golden, symlink case |
+| VS Code | `Code/User/mcp.json` → `servers` (`type: stdio`) | edits an existing file only: the path is inferred | — | golden |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` or `$XDG/devin/mcp_config.json` | edits an existing file only | — | golden |
+| Zed | `$XDG/zed/settings.json` → `context_servers` | edits an existing file only | `$XDG/zed/AGENTS.md` | golden |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS only) | file edit | — | golden |
+
+`$XDG` is `XDG_CONFIG_HOME`, else `~/.config`. "golden" means an adapter test on a real
+config shape: install adds the entry, a second install changes nothing, and uninstall
+gives back the original bytes. Edited files keep their mode; `audit` reports modes
+separately.
 
 The harness CLIs own their file formats, so passess never rewrites `~/.claude.json`
 (which Claude Code updates constantly) or the TOML that holds a user's other Codex
 settings. The entries carry no secret, so passing them as arguments exposes nothing.
+Where no CLI works unattended, passess edits the file itself (ADR 7).
+
+What the harnesses did, rather than what their docs say:
+
+- `agy` 1.2.11 has `mcp add` and `mcp remove`. They work without sign-in and write
+  `~/.gemini/config/mcp_config.json` (run, in a throwaway `HOME`). Antigravity's docs do
+  not list them. Its global customization root is `~/.gemini/config/`, with `rules/`
+  beside `skills/` and `workflows/` (bin).
+- `kiro-cli` 2.21.4 refuses `mcp add` without a signed-in account, even for the local
+  file (run). Its help lists `--args` and `--agent`, which the docs do not.
+- Kiro agent profiles load `~/.kiro/settings/mcp.json` only with `includeMcpJson: true`,
+  and the default is false (doc). 6 of 7 profiles on the maintainer's machine leave it
+  off (cfg). `passess audit` lists such profiles.
 
 ## Insecure defaults
 

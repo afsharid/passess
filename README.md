@@ -4,11 +4,10 @@
 
 > Status: alpha. Try it on secrets you can rotate.
 > Works today: `exec`, `run`, `list`, `check`, `add`, `doctor`, `mcp-exec`,
-> `install` / `status` / `uninstall` for Claude Code and Codex, and `scan`, `audit`,
+> `install` / `status` / `uninstall` for eleven harnesses, and `scan`, `audit`,
 > `migrate` and `inventory` for secrets already sitting in clear. References can point
 > at 1Password, Bitwarden (Secrets Manager or Password Manager), Vault / OpenBao, the OS
-> keychain or an environment variable. Plus the macOS menu bar app. Next: OpenCode,
-> Kiro, Antigravity, Cursor and Gemini CLI, then guard hooks.
+> keychain or an environment variable. Plus the macOS menu bar app. Next: guard hooks.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,
@@ -38,9 +37,8 @@ passess run web -- npm run dev
 ```
 
 The same references and policy work across Claude Code, Codex, OpenCode, Kiro,
-Antigravity, Cursor and Gemini CLI, with config-level support for VS Code / Copilot,
-Windsurf, Zed and Claude Desktop. See [docs/ROADMAP.md](docs/ROADMAP.md) for what
-lands when.
+Antigravity, Gemini CLI, Cursor, VS Code / Copilot, Windsurf, Zed and Claude Desktop.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what lands when.
 
 ## Install
 
@@ -112,16 +110,35 @@ headers = { Authorization = "Bearer {{TRACKER_TOKEN}}" }
 Then let passess register them with your harnesses:
 
 ```sh
-passess install            # dry run: shows what would change in Claude Code and Codex
+passess install            # dry run: shows what would change in every harness it finds
 passess install --apply    # registers each server as `passess mcp-exec NAME`
+passess install cursor zed --apply   # or only some of them
 passess status             # what each harness runs, and any credentials still in clear
 ```
 
 The harness config ends up holding only `passess mcp-exec github`. The local server
-gets its secret in its environment; for a remote server passess runs a stdio bridge
+gets its secret in its environment. For a remote server, passess runs a stdio bridge
 that adds the header itself, so even harnesses started from the Dock work. Output
-from either comes back redacted. Changes go through `claude mcp` and `codex mcp`,
-files are backed up under `~/.local/state/passess/backups` first, and
+from either comes back redacted.
+
+| Harness | How passess registers servers | Instructions it adds to |
+|---|---|---|
+| Claude Code | `claude mcp` | `~/.claude/CLAUDE.md` |
+| Codex | `codex mcp` | `~/.codex/AGENTS.md` |
+| Antigravity | `agy mcp`, reading `~/.gemini/config/mcp_config.json` | `~/.gemini/config/rules/passess.md` |
+| OpenCode | edits `~/.config/opencode/opencode.json(c)` | `~/.config/opencode/AGENTS.md` |
+| Kiro | edits `~/.kiro/settings/mcp.json` | `~/.kiro/steering/passess.md` |
+| Gemini CLI | edits `~/.gemini/settings.json` | `~/.gemini/GEMINI.md` |
+| Zed | edits `context_servers` in its `settings.json` | `~/.config/zed/AGENTS.md` |
+| Cursor | edits `~/.cursor/mcp.json` | — |
+| VS Code | edits the user `mcp.json`, if it exists | — |
+| Windsurf | edits its `mcp_config.json`, if it exists | — |
+| Claude Desktop (macOS) | edits `claude_desktop_config.json` | — |
+
+When passess edits a file, only its own entries change. Comments, key order and
+formatting stay, a symlinked config is changed where it points, and `uninstall`
+restores the file byte for byte ([ADR 7](docs/adr/0007-edit-harness-configs-by-splicing.md)).
+Files are backed up under `~/.local/state/passess/backups` first, and
 `passess uninstall --apply` takes everything out again.
 
 ## Secrets already in clear

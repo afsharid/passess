@@ -8,7 +8,7 @@ follow the slices.
 | — | 0, 1 | Skeleton, threat model, `exec` and `run` with `env://`, `keychain://` and `bws://` |
 | v0.1.0-alpha | 2 | `mcp-exec` (local stdio proxy and remote HTTP bridge), `install` / `uninstall` / `status` for Claude Code and Codex |
 | v0.2.0-alpha | 3 | `scan`, `audit`, `inventory`, `migrate`; 1Password, Vault/OpenBao and Bitwarden Password Manager providers |
-| v0.3 | 4 | Config-level support for OpenCode, Kiro, Antigravity, Cursor, Gemini CLI, VS Code / Copilot, Windsurf, Zed, Claude Desktop |
+| v0.3.0-alpha | 4 | Config-level support for OpenCode, Kiro, Antigravity, Cursor, Gemini CLI, VS Code / Copilot, Windsurf, Zed, Claude Desktop |
 | **v0.4** | 5 | Guard hooks and native plugin packages for Claude Code, Codex, OpenCode, Kiro, Antigravity, Cursor and Gemini CLI — the first complete release |
 | v0.5 | 6 | `passess agent`: in-memory cache, approvals (Touch ID in the macOS menu bar app), audit log, session-wide redaction |
 | v0.6+ | 7 | Host-bound egress proxy, transcript clean-up, `fnox://`, `passess trust`, Linux and Windows polish, signed releases |
@@ -35,6 +35,15 @@ prints a value. `audit` reports harness defaults and files that hand credentials
 agents, each with its fix. `migrate` moves `.env` lines and inline MCP credentials into
 the OS keychain and rewires the harness; `inventory` writes a value-free Markdown map.
 Flags may follow arguments (`passess install claude --apply`).
+
+**Slice 4 (done).** `install`, `status`, `uninstall` and `migrate mcp` reach nine more
+harnesses. Antigravity goes through `agy mcp`; the other eight have no command that works
+unattended, so passess edits their JSON or JSONC config with a byte-level splicer that
+keeps comments and formatting and makes uninstall exact (ADR 7). Each harness is a small
+spec: config paths (XDG-aware, symlinks resolved, never creating a harness's directory),
+the path to its servers, the entry shape and its instructions file. `audit` reports Kiro
+agent profiles that ignore the global MCP config. Writing into those profiles, and the
+`tools` lists that gate them, is left for when the hooks for Kiro land.
 
 **Slice 5.** One hook handler, `passess hook <harness> <event>`, normalizes each
 harness's hook JSON and applies a deny-only policy: no reading `.env` or credential
