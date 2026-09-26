@@ -1,11 +1,16 @@
 package redact
 
-import "io"
+import (
+	"io"
+	"sync"
+)
 
 // Writer redacts everything written to it before passing it on. It holds back
 // only bytes that could be the beginning of a secret, so ordinary output is not
-// delayed. Close must be called to flush what is held back.
+// delayed. Close must be called to flush what is held back. Writes and Close
+// may be called from several goroutines.
 type Writer struct {
+	mu  sync.Mutex
 	r   *Redactor
 	w   io.Writer
 	buf []byte
@@ -19,6 +24,8 @@ func (r *Redactor) NewWriter(w io.Writer) *Writer { return &Writer{r: r, w: w} }
 // Write never reports a short write for data it accepted: held-back bytes are
 // written by a later Write or by Close.
 func (x *Writer) Write(p []byte) (int, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	if x.err != nil {
 		return 0, x.err
 	}
@@ -32,6 +39,8 @@ func (x *Writer) Write(p []byte) (int, error) {
 // Close writes whatever is still held back and clears the internal buffers,
 // which may hold part of a secret.
 func (x *Writer) Close() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	err := x.flush(true)
 	clear(x.buf[:cap(x.buf)])
 	clear(x.out[:cap(x.out)])

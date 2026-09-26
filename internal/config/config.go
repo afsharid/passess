@@ -329,7 +329,7 @@ func (u *User) validateMCP(m MCPServer) error {
 		return errors.New("url is not a valid URL")
 	}
 	local := parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1"
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && local) {
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !local) {
 		return errors.New("url must use https (plain http only for localhost): credentials would travel in clear")
 	}
 	for h, tmpl := range m.Headers {
