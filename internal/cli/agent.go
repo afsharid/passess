@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -405,7 +406,9 @@ func (s *agentServer) cacheState() (names []string, expires time.Time, busy bool
 }
 
 // exec runs one request's command with the client's stdin, stdout and stderr.
-func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) int {
+// Every request past the descriptor check is audited, refusals included: the
+// deferred write reads the named result.
+func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (code int) {
 	s.served.Add(1)
 	if len(files) != 3 {
 		for _, f := range files {
@@ -423,6 +426,25 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 		return v
 	}}
 
+	entry := auditEntry{Kind: "exec", PID: c.Peer.PID, Secrets: []string{}, Dir: req.Dir,
+		Harness: detect.Harness(st.Getenv), Argv: redactArgv(req.Argv, nil)}
+	for _, w := range req.Secrets {
+		if !slices.Contains(entry.Secrets, w.Name) {
+			entry.Secrets = append(entry.Secrets, w.Name)
+		}
+	}
+	chain, _ := agent.Ancestry(c.Peer.PID)
+	anchor, anchored := agent.Anchor(chain)
+	if anchored {
+		entry.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
+	}
+	ran := false
+	defer func() {
+		entry.Outcome = outcomeOf(code, ran)
+		entry.Status = &code
+		s.log.write(entry)
+	}()
+
 	u, data, code := s.load(st, req)
 	if code != 0 {
 		return code
@@ -438,19 +460,6 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 	if err != nil {
 		return failf(st, ExitConfig, "%v", err)
 	}
-	entry := auditEntry{Kind: "exec", PID: c.Peer.PID, Secrets: wanted.names(), Dir: req.Dir,
-		Harness: detect.Harness(st.Getenv), Argv: redactArgv(req.Argv, nil)}
-	chain, _ := agent.Ancestry(c.Peer.PID)
-	anchor, anchored := agent.Anchor(chain)
-	if anchored {
-		entry.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
-	}
-	ran := false
-	defer func() {
-		entry.Outcome = outcomeOf(code, ran)
-		entry.Status = &code
-		s.log.write(entry)
-	}()
 
 	quit := make(chan struct{})
 	defer close(quit)
@@ -539,7 +548,7 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 // load checks that a request comes from a client of this build that reads
 // this agent's config, and parses it. Refusals go to st.Stderr.
 func (s *agentServer) load(st *Streams, req agent.Request) (*config.User, []byte, int) {
-	if req.V != agent.Version || req.Build != buildinfo.String() {
+	if req.V != agent.Version || !sameBuild(req.Build, buildinfo.String()) {
 		return nil, nil, failf(st, ExitUnavailable, "the running agent is passess %s and this is passess %s; restart it: passess agent stop && passess agent start",
 			buildinfo.String(), req.Build)
 	}
@@ -565,6 +574,13 @@ func (s *agentServer) load(st *Streams, req agent.Request) (*config.User, []byte
 		return nil, nil, failf(st, ExitConfig, "%v", err)
 	}
 	return u, data, 0
+}
+
+// sameBuild compares two passess versions. A release built by GoReleaser
+// says 0.5.0 and the same tag built by the Makefile says v0.5.0; the menu bar
+// app bundles the second while Homebrew installs the first.
+func sameBuild(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
 // relaySignals delivers the signals the client forwards. A client that goes
