@@ -140,8 +140,9 @@ passess inventory > SECRETS-INVENTORY.md    # where every secret lives and what 
 ```
 
 - `scan` combines the gitleaks rule set with the exact values of every secret you have
-  configured, in all their encodings. A finding is a file, a line, a rule or secret name,
-  a fingerprint and a length.
+  configured, in all their encodings. A finding is a file, a line, a rule or secret name
+  and a fingerprint keyed for that run, so it matches across files but cannot be checked
+  against a guess.
 - `audit` checks what the harnesses do by default, such as Codex handing every
   `*TOKEN*` variable to the commands the agent runs (measured on 0.155). Each
   finding comes with the command or edit that fixes it; audit changes nothing.

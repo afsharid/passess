@@ -1,12 +1,14 @@
 // Package scan looks for secrets stored in clear: in harness configs,
 // dotfiles, .env files and harness transcripts. It reports where and what
-// kind, never the value: a finding carries a fingerprint (a truncated SHA-256)
-// so the same secret can be recognized across files without being shown.
+// kind, never the value: a finding carries a fingerprint so the same secret
+// can be recognized across the files of one scan without being shown.
 package scan
 
 import (
 	"bufio"
 	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -20,14 +22,18 @@ import (
 
 // Finding is one secret found in clear.
 type Finding struct {
-	Path        string `json:"path"`
-	Line        int    `json:"line"`
-	Category    string `json:"category"` // config | dotfile | env | transcript | path
-	Kind        string `json:"kind"`     // known (a value passess manages) | rule (a secret-shaped string)
-	Secret      string `json:"secret,omitempty"`
-	Rule        string `json:"rule,omitempty"`
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	Category string `json:"category"` // config | dotfile | env | transcript | path
+	Kind     string `json:"kind"`     // known (a value passess manages) | rule (a secret-shaped string)
+	Secret   string `json:"secret,omitempty"`
+	Rule     string `json:"rule,omitempty"`
+	// Fingerprint is keyed for one run: equal within a scan, meaningless
+	// outside it, so it cannot be checked against a guessed value.
 	Fingerprint string `json:"fingerprint"`
-	Length      int    `json:"length"`
+	// Length of a rule match; omitted for known secrets, where it would only
+	// describe a value the name already identifies.
+	Length int `json:"length,omitempty"`
 }
 
 // Target is a file to scan.
@@ -39,14 +45,22 @@ type Target struct {
 // Scanner combines known-value matching with the rule set. Either may be nil.
 type Scanner struct {
 	Known   *redact.Redactor
-	KnownFP map[string]string // secret name -> fingerprint of its value
+	KnownFP map[string]string // secret name -> s.Fingerprint of its value
 	Rules   *Rules
+
+	keyOnce sync.Once
+	key     [32]byte
 }
 
-// Fingerprint identifies a value without revealing it.
-func Fingerprint(v []byte) string {
-	sum := sha256.Sum256(v)
-	return hex.EncodeToString(sum[:6])
+// Fingerprint identifies a value within this scan without revealing it: an
+// HMAC-SHA-256 under a random key that lives only in this process, truncated
+// to 6 bytes. An unkeyed hash of a short, human-chosen password would hand
+// whoever reads the output (a transcript, say) an offline guessing test.
+func (s *Scanner) Fingerprint(v []byte) string {
+	s.keyOnce.Do(func() { _, _ = rand.Read(s.key[:]) })
+	m := hmac.New(sha256.New, s.key[:])
+	m.Write(v)
+	return hex.EncodeToString(m.Sum(nil)[:6])
 }
 
 // File scans one file line by line. Binary files are skipped.
@@ -84,7 +98,7 @@ func (s *Scanner) line(t Target, n int, line []byte) []Finding {
 		s.Known.Each(line, func(start, end int, name string) {
 			known = append(known, span{start, end})
 			out = append(out, Finding{Path: t.Path, Line: n, Category: t.Category, Kind: "known",
-				Secret: name, Fingerprint: s.KnownFP[name], Length: end - start})
+				Secret: name, Fingerprint: s.KnownFP[name]})
 		})
 	}
 	if s.Rules != nil {
@@ -97,7 +111,7 @@ func (s *Scanner) line(t Target, n int, line []byte) []Finding {
 				continue // already reported by name
 			}
 			out = append(out, Finding{Path: t.Path, Line: n, Category: t.Category, Kind: "rule",
-				Rule: m.Rule, Fingerprint: Fingerprint([]byte(m.Secret)), Length: len(m.Secret)})
+				Rule: m.Rule, Fingerprint: s.Fingerprint([]byte(m.Secret)), Length: len(m.Secret)})
 		}
 	}
 	return out

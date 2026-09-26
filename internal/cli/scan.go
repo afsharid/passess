@@ -62,7 +62,7 @@ func runScan(st *Streams, args []string) int {
 				defer zero()
 				s.Known, out.Known, out.Unresolved = rd, len(known), unresolved
 				for name, v := range known {
-					s.KnownFP[name] = scan.Fingerprint(v.Bytes())
+					s.KnownFP[name] = s.Fingerprint(v.Bytes())
 				}
 			} else if !errors.Is(err, config.ErrNoConfig) {
 				return failf(st, ExitConfig, "%v", err)
@@ -163,15 +163,18 @@ func printScan(st *Streams, out scanOutput) {
 		}
 		fmt.Fprintf(st.Stdout, "%s\n", cat)
 		for _, f := range fs {
-			what := "known " + f.Secret
 			if f.Kind == "rule" {
-				what = "rule " + f.Rule
+				fmt.Fprintf(st.Stdout, "  %s:%d  rule %s  fp %s (%d chars)\n", short(f.Path), f.Line, f.Rule, f.Fingerprint, f.Length)
+			} else {
+				fmt.Fprintf(st.Stdout, "  %s:%d  known %s  fp %s\n", short(f.Path), f.Line, f.Secret, f.Fingerprint)
 			}
-			fmt.Fprintf(st.Stdout, "  %s:%d  %s  fp %s (%d chars)\n", short(f.Path), f.Line, what, f.Fingerprint, f.Length)
 		}
 	}
 	fmt.Fprintf(st.Stdout, "\n%d finding(s) in %d file(s) scanned; rules: %s; %d configured value(s) searched for.\n",
 		len(out.Findings), out.Files, out.Rules, out.Known)
+	if len(out.Findings) > 0 {
+		fmt.Fprintln(st.Stdout, "Equal fingerprints mean the same value within this scan; they are keyed per run and prove nothing about a guess.")
+	}
 	if len(out.Unresolved) > 0 {
 		fmt.Fprintf(st.Stdout, "Not searched (could not be resolved): %s\n", strings.Join(out.Unresolved, ", "))
 	}

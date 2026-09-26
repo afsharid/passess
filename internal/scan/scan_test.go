@@ -76,7 +76,8 @@ func TestFileFindsKnownAndRuleSecretsByLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Scanner{Known: rd, KnownFP: map[string]string{"MY_TOKEN": Fingerprint([]byte(knownVal))}, Rules: rules(t)}
+	s := &Scanner{Known: rd, Rules: rules(t)}
+	s.KnownFP = map[string]string{"MY_TOKEN": s.Fingerprint([]byte(knownVal))}
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeFile(t, path, strings.Join([]string{
 		`{"role":"user","text":"hello"}`,
@@ -91,7 +92,7 @@ func TestFileFindsKnownAndRuleSecretsByLine(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("findings = %+v", got)
 	}
-	if got[0].Line != 2 || got[0].Kind != "known" || got[0].Secret != "MY_TOKEN" || got[0].Fingerprint != Fingerprint([]byte(knownVal)) {
+	if got[0].Line != 2 || got[0].Kind != "known" || got[0].Secret != "MY_TOKEN" || got[0].Fingerprint != s.Fingerprint([]byte(knownVal)) || got[0].Length != 0 {
 		t.Fatalf("known finding = %+v", got[0])
 	}
 	if got[1].Line != 3 || got[1].Kind != "known" {
@@ -104,6 +105,21 @@ func TestFileFindsKnownAndRuleSecretsByLine(t *testing.T) {
 		if strings.Contains(f.Fingerprint, knownVal) || strings.Contains(f.Fingerprint, githubPAT) {
 			t.Fatal("a finding carries a value")
 		}
+	}
+}
+
+func TestFingerprintsAreKeyedPerScanner(t *testing.T) {
+	a, b := &Scanner{}, &Scanner{}
+	v := []byte("passess-fake-short-pw")
+	if first := a.Fingerprint(v); first != a.Fingerprint(append([]byte{}, v...)) {
+		t.Fatal("one scanner must give one value one fingerprint")
+	}
+	if a.Fingerprint(v) == b.Fingerprint(v) {
+		t.Fatal("two scanners gave the same fingerprint: it is not keyed")
+	}
+	sum := sha256.Sum256(v)
+	if a.Fingerprint(v) == hex.EncodeToString(sum[:6]) {
+		t.Fatal("the fingerprint is a plain hash of the value")
 	}
 }
 
