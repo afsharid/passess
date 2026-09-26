@@ -17,8 +17,8 @@ follow the slices.
 
 **Slice 1 (done).** References and a value type that cannot be printed, the redactor,
 providers for `env`, `keychain` and `bws`, the policy that keeps shells and
-interpreters away from secrets, `exec`, `run` with profiles. Still to do in this
-slice: `list`, `check`, `add`, `doctor` (with `--json` for the menu bar app).
+interpreters away from secrets, `exec`, `run` with profiles, `list`, `check`, `add`
+and `doctor`, each with `--json`.
 
 **Slice 2.** `passess mcp-exec <name>` becomes the MCP `command` in every harness:
 the server's command and secrets live in passess config, not in the harness file.
@@ -35,6 +35,8 @@ harness's hook JSON and applies a deny-only policy: no reading `.env` or credent
 files, no environment dumps, a paste guard for prompts, context at session start.
 Hooks are defense in depth; see the threat model for why they are not the boundary.
 
-**macOS menu bar app.** A thin SwiftUI client that shows `passess doctor --json` and,
-from slice 6, asks for Touch ID approval when the daemon needs it. It never receives a
-secret value.
+**macOS menu bar app (first version done).** A thin AppKit client, `macos/PassessBar`,
+that shows `passess doctor --json`, runs `check` on request and bundles the CLI. From
+slice 6 it asks for Touch ID approval when the daemon needs it. It never receives a
+secret value; the JSON it reads is pinned by fixtures that the Go tests write and the
+app's headless checks decode.

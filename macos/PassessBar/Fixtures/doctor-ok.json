@@ -1,0 +1,17 @@
+{
+  "version": "v0.0.0-test",
+  "ok": true,
+  "config": {
+    "path": "/Users/you/.config/passess/config.toml",
+    "ok": true
+  },
+  "secrets": 1,
+  "profiles": 0,
+  "backends": [
+    {
+      "scheme": "env",
+      "ok": true
+    }
+  ],
+  "problems": []
+}
