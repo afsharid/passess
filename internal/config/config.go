@@ -132,7 +132,7 @@ var ErrNoConfig = errors.New("no passess config")
 func LoadUser(path string) (*User, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%w at %s; create it with version = 1 and a [secrets.NAME] table holding ref = \"<reference>\"", ErrNoConfig, path)
+		return nil, fmt.Errorf("%w at %s; start one with `passess add NAME --ref <reference>`", ErrNoConfig, path)
 	}
 	if err != nil {
 		return nil, err
@@ -260,6 +260,15 @@ func FindProject(dir string) string {
 		}
 		dir = parent
 	}
+}
+
+// NeedsName reports whether the project lists name; a nil project lists nothing.
+func (p *Project) NeedsName(name string) (Need, bool) {
+	if p == nil {
+		return Need{}, false
+	}
+	n, ok := p.Needs[name]
+	return n, ok
 }
 
 // ProjectAllow returns the project's narrowing for name, or nil.

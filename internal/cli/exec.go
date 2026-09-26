@@ -76,7 +76,7 @@ func runExec(st *Streams, args []string) int {
 	for _, w := range wanted {
 		s, ok := u.Secrets[w.name]
 		if !ok {
-			return failf(st, ExitConfig, "%s is not defined; add a [secrets.%s] table with ref = \"<reference>\" to %s", w.name, w.name, u.Path)
+			return failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>` (or add a [secrets.%s] table to %s)", w.name, w.name, w.name, u.Path)
 		}
 		d := policy.Check(w.name, prog, policy.Effective(s.Allow, proj.ProjectAllow(w.name)))
 		if !d.Allowed {

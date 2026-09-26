@@ -10,6 +10,7 @@ import (
 
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/provider"
+	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
 )
 
@@ -48,10 +49,16 @@ func (e *MissingError) Unwrap() []error { return e.Attempts }
 
 // Secret returns the value of s.
 func (r *Resolver) Secret(ctx context.Context, s config.Secret) (secret.Value, error) {
+	v, _, err := r.SecretFrom(ctx, s)
+	return v, err
+}
+
+// SecretFrom returns the value of s and the candidate reference it came from.
+func (r *Resolver) SecretFrom(ctx context.Context, s config.Secret) (secret.Value, ref.Ref, error) {
 	var attempts []error
 	for _, rf := range s.Refs {
 		if v, ok := r.cache[rf.String()]; ok {
-			return v, nil
+			return v, rf, nil
 		}
 		p, ok := r.providers[rf.Scheme]
 		if !ok {
@@ -64,9 +71,18 @@ func (r *Resolver) Secret(ctx context.Context, s config.Secret) (secret.Value, e
 			continue
 		}
 		r.cache[rf.String()] = v
-		return v, nil
+		return v, rf, nil
 	}
-	return secret.Value{}, &MissingError{Name: s.Name, Attempts: attempts}
+	return secret.Value{}, ref.Ref{}, &MissingError{Name: s.Name, Attempts: attempts}
+}
+
+// Available reports, per scheme, whether its provider can be used right now.
+func (r *Resolver) Available(ctx context.Context, scheme string) error {
+	p, ok := r.providers[scheme]
+	if !ok {
+		return fmt.Errorf("%w: %s:// is not supported yet", provider.ErrUnavailable, scheme)
+	}
+	return p.Available(ctx)
 }
 
 // Zero overwrites every cached value.
