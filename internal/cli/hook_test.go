@@ -34,6 +34,8 @@ func TestHookGoldens(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Token-shaped strings are built at run time so scanners skip the fixtures.
+			payload = bytes.ReplaceAll(payload, []byte("__FAKE_GITHUB_PAT__"), []byte("gh"+"p_"+strings.Repeat("A1b2C3d4E5", 3)+"f6G7h8"))
 			var out, errb bytes.Buffer
 			code := Main([]string{"hook", harness, event}, bytes.NewReader(payload), &out, &errb)
 			got := fmt.Sprintf("exit: %d\n--- stdout\n%s--- stderr\n%s", code, out.String(), errb.String())
