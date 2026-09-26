@@ -454,3 +454,25 @@ func TestLookPathIn(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+// The agent masks what it holds and nothing else; after lock it holds nothing.
+func TestAgentMasksWhatItHolds(t *testing.T) {
+	var calls atomic.Int32
+	s := cacheServer(&calls)
+	u, sum := cacheConfig(t, "1h")
+	value, err := resolveVia(t, s, u, sum, nil, "K")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := agent.Blob("token=" + value + "\nok\n")
+	if got := s.mask(text); strings.Contains(string(got), value) || !strings.Contains(string(got), "[REDACTED:K]") || !strings.HasSuffix(string(got), "ok\n") {
+		t.Fatalf("masked %q", got)
+	}
+	if got := s.mask("nothing held here\n"); got != "nothing held here\n" {
+		t.Fatalf("text without a value changed: %q", got)
+	}
+	s.forget()
+	if got := s.mask(text); got != text {
+		t.Fatalf("after lock the agent still masks: %q", got)
+	}
+}

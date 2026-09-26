@@ -90,6 +90,13 @@ func (r *Resolver) Cached(rf ref.Ref) bool {
 	return ok
 }
 
+// CachedValue returns the value rf points to, if it is held; no provider is
+// asked.
+func (r *Resolver) CachedValue(rf ref.Ref) (secret.Value, bool) {
+	v, ok := r.cache[rf.String()]
+	return v, ok
+}
+
 // Available reports, per scheme, whether its provider can be used right now.
 func (r *Resolver) Available(ctx context.Context, scheme string) error {
 	p, ok := r.providers[scheme]

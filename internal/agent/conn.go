@@ -13,8 +13,13 @@ import (
 	"time"
 )
 
-// maxRequest bounds the request line; an environment is tens of kilobytes.
-const maxRequest = 1 << 20
+// maxRequest bounds the request line: an environment is tens of kilobytes, a
+// tool output to mask (MaxRedact) is larger.
+const maxRequest = 4*MaxRedact + 1<<20
+
+// MaxRedact is the longest text a Redact request carries. JSON may escape a
+// byte into six, hence the room maxRequest leaves.
+const MaxRedact = 4 << 20
 
 // maxFrame bounds every later line.
 const maxFrame = 64 << 10
@@ -203,6 +208,9 @@ func (c *Conn) read(v any, limit int) error {
 
 // Close closes the connection.
 func (c *Conn) Close() error { return c.c.Close() }
+
+// SetDeadline bounds how long reads and writes on the connection may wait.
+func (c *Conn) SetDeadline(t time.Time) error { return c.c.SetDeadline(t) }
 
 func closeAll(files []*os.File) {
 	for _, f := range files {
