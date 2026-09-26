@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -36,14 +37,33 @@ func TestDefaultRulesLoad(t *testing.T) {
 }
 
 // TestVendoredRulesArePinned makes a rules update visible in review (ADR 5):
-// refresh from upstream on purpose, then update RulesVersion and these values.
+// refresh from upstream on purpose, reapply the one local change (see the
+// file's header), then update RulesVersion and these values.
 func TestVendoredRulesArePinned(t *testing.T) {
 	sum := sha256.Sum256(gitleaksRules)
-	if got := hex.EncodeToString(sum[:]); got != "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf" {
+	if got := hex.EncodeToString(sum[:]); got != "86a111e68a85c59f71d08c66cae58663486089650d66c63828cc119cb13d2f3e" {
 		t.Fatalf("rules/gitleaks.toml changed (sha256 %s); update RulesVersion and this pin", got)
 	}
 	if n := strings.Count(string(gitleaksRules), "\n[[rules]]\n"); n != 222 {
 		t.Fatalf("rules/gitleaks.toml has %d rules, pinned 222", n)
+	}
+}
+
+// Upstream's gcp-api-key allowlist lists public example keys verbatim, and
+// GitHub's secret scanning reports each one. The file spells them AIz[a]…:
+// the same regex, no key-shaped text.
+func TestVendoredRulesHoldNoKeys(t *testing.T) {
+	if m := regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`).Find(gitleaksRules); m != nil {
+		t.Fatalf("rules/gitleaks.toml holds a key-shaped string (%s…); write its AIza as AIz[a]", m[:8])
+	}
+	rs := rules(t)
+	example := "AIza" + "Syabcdefghijklmnopqrstuvwxyz1234567" // the first allowlisted example, built at run time
+	if got := rs.Line("app.js", `const key = "`+example+`";`); len(got) != 0 {
+		t.Fatalf("an allowlisted example key was reported: %+v", got)
+	}
+	random := "AIza" + "Sy" + "Q8mXv2Lk7Pz4Rt9Wn3Bc6Hd1Jf5Gs0Aa2" // 35 characters after AIza
+	if got := rs.Line("app.js", `const key = "`+random+`";`); len(got) != 1 || got[0].Rule != "gcp-api-key" {
+		t.Fatalf("a key outside the allowlist was missed: %+v", got)
 	}
 }
 
