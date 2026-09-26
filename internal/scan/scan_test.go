@@ -96,7 +96,7 @@ func TestFileFindsKnownAndRuleSecretsByLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Scanner{Known: rd, Rules: rules(t)}
+	s := &Scanner{Known: rd, Rules: rules(t), TranscriptRules: true}
 	s.KnownFP = map[string]string{"MY_TOKEN": s.Fingerprint([]byte(knownVal))}
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeFile(t, path, strings.Join([]string{
@@ -140,6 +140,23 @@ func TestFingerprintsAreKeyedPerScanner(t *testing.T) {
 	sum := sha256.Sum256(v)
 	if a.Fingerprint(v) == hex.EncodeToString(sum[:6]) {
 		t.Fatal("the fingerprint is a plain hash of the value")
+	}
+}
+
+func TestTranscriptsGetRulesOnlyOnRequest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	writeFile(t, path, `{"content": "my token is `+githubPAT+`"}`+"\n")
+	s := &Scanner{Rules: rules(t)}
+	if got, _ := s.File(Target{Path: path, Category: "transcript"}); len(got) != 0 {
+		t.Fatalf("rules ran on a transcript by default: %+v", got)
+	}
+	s.TranscriptRules = true
+	if got, _ := s.File(Target{Path: path, Category: "transcript"}); len(got) != 1 || got[0].Rule != "github-pat" {
+		t.Fatalf("with TranscriptRules: %+v", got)
+	}
+	if got, _ := (&Scanner{Rules: rules(t)}).File(Target{Path: path, Category: "config"}); len(got) != 1 {
+		t.Fatalf("other files keep their rules: %+v", got)
 	}
 }
 

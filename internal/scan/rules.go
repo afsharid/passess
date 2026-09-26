@@ -56,7 +56,8 @@ type Rules struct {
 	global    allowlist
 	keywordRe *regexp.Regexp
 	byKeyword map[string][]*rule
-	always    []*rule // rules without keywords
+	within    map[string][]string // keyword -> the other keywords inside it
+	always    []*rule             // rules without keywords
 }
 
 // DefaultRules parses the vendored gitleaks rules.
@@ -89,12 +90,26 @@ func DefaultRules() (*Rules, error) {
 		for _, k := range r.Keywords {
 			k = strings.ToLower(k)
 			if _, seen := rs.byKeyword[k]; !seen {
-				keys = append(keys, regexp.QuoteMeta(k))
+				keys = append(keys, k)
 			}
 			rs.byKeyword[k] = append(rs.byKeyword[k], r)
 		}
 	}
-	rs.keywordRe = regexp.MustCompile(strings.Join(keys, "|"))
+	// Longest first: the alternation takes the first keyword that matches at
+	// a position, so "apikey" must come before "api". Keywords inside a hit
+	// ("key" in "apikey") are looked up from within.
+	sort.SliceStable(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	rs.within = map[string][]string{}
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = regexp.QuoteMeta(k)
+		for _, other := range keys {
+			if other != k && strings.Contains(k, other) {
+				rs.within[k] = append(rs.within[k], other)
+			}
+		}
+	}
+	rs.keywordRe = regexp.MustCompile(strings.Join(quoted, "|"))
 	return rs, nil
 }
 
@@ -192,9 +207,13 @@ func (rs *Rules) Line(path, line string) []RuleMatch {
 	for _, r := range rs.always {
 		candidates[r] = true
 	}
+	// One pass finds the longest keyword at each position; the keywords
+	// inside it count too ("password" in "administrator_login_password").
 	for _, k := range rs.keywordRe.FindAllString(lower, -1) {
-		for _, r := range rs.byKeyword[k] {
-			candidates[r] = true
+		for _, kw := range append([]string{k}, rs.within[k]...) {
+			for _, r := range rs.byKeyword[kw] {
+				candidates[r] = true
+			}
 		}
 	}
 	var out []RuleMatch
@@ -206,38 +225,43 @@ func (rs *Rules) Line(path, line string) []RuleMatch {
 			continue
 		}
 		for _, idx := range r.re.FindAllStringSubmatchIndex(line, -1) {
-			start, end := idx[0], idx[1]
-			match := line[start:end]
-			sStart, sEnd := start, end
-			switch {
-			case r.SecretGroup > 0 && 2*r.SecretGroup+1 < len(idx) && idx[2*r.SecretGroup] >= 0:
-				sStart, sEnd = idx[2*r.SecretGroup], idx[2*r.SecretGroup+1]
-			case r.SecretGroup == 0:
-				for g := 1; 2*g+1 < len(idx); g++ {
-					if idx[2*g] >= 0 && idx[2*g+1] > idx[2*g] {
-						sStart, sEnd = idx[2*g], idx[2*g+1]
-						break
-					}
-				}
+			if m, ok := rs.accept(r, path, line, idx); ok {
+				out = append(out, m)
 			}
-			secret := line[sStart:sEnd]
-			if r.Entropy > 0 && policy.Entropy(secret) < r.Entropy {
-				continue
-			}
-			if rs.global.allows(path, secret, match, line) {
-				continue
-			}
-			allowed := false
-			for i := range r.Allowlists {
-				allowed = allowed || r.Allowlists[i].allows(path, secret, match, line)
-			}
-			if allowed {
-				continue
-			}
-			out = append(out, RuleMatch{Rule: r.ID, Secret: secret, Start: sStart})
 		}
 	}
 	return dedupe(out)
+}
+
+// accept applies a rule's secret group, entropy and allowlists to one match.
+func (rs *Rules) accept(r *rule, path, line string, idx []int) (RuleMatch, bool) {
+	start, end := idx[0], idx[1]
+	match := line[start:end]
+	sStart, sEnd := start, end
+	switch {
+	case r.SecretGroup > 0 && 2*r.SecretGroup+1 < len(idx) && idx[2*r.SecretGroup] >= 0:
+		sStart, sEnd = idx[2*r.SecretGroup], idx[2*r.SecretGroup+1]
+	case r.SecretGroup == 0:
+		for g := 1; 2*g+1 < len(idx); g++ {
+			if idx[2*g] >= 0 && idx[2*g+1] > idx[2*g] {
+				sStart, sEnd = idx[2*g], idx[2*g+1]
+				break
+			}
+		}
+	}
+	secret := line[sStart:sEnd]
+	if r.Entropy > 0 && policy.Entropy(secret) < r.Entropy {
+		return RuleMatch{}, false
+	}
+	if rs.global.allows(path, secret, match, line) {
+		return RuleMatch{}, false
+	}
+	for i := range r.Allowlists {
+		if r.Allowlists[i].allows(path, secret, match, line) {
+			return RuleMatch{}, false
+		}
+	}
+	return RuleMatch{Rule: r.ID, Secret: secret, Start: sStart}, true
 }
 
 // dedupe keeps one match per secret: the specific rule over generic-api-key,
