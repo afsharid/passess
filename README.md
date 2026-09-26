@@ -46,7 +46,13 @@ lands when.
 go install github.com/afsharid/passess/cmd/passess@latest
 ```
 
-Requires Go 1.27.1 or newer. Prebuilt binaries arrive with v0.1.0-alpha.
+Requires Go 1.27.1 or newer. Or download a release: macOS and Linux binaries for
+arm64 and amd64, `checksums.txt`, and the menu bar app for Apple silicon. Each file
+carries a build provenance attestation:
+
+```sh
+gh attestation verify passess_0.1.0-alpha_darwin_arm64.tar.gz --repo afsharid/passess
+```
 
 ## Quick start
 

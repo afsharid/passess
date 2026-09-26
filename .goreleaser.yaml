@@ -1,0 +1,38 @@
+version: 2
+project_name: passess
+
+builds:
+  - id: passess
+    main: ./cmd/passess
+    binary: passess
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/afsharid/passess/internal/buildinfo.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - SECURITY.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  prerelease: auto
+  footer: |
+    **macOS menu bar app:** `Passess-{{ .Tag }}-macos-arm64.zip` is attached by a separate job once it builds.
+    It is ad-hoc signed, so the first launch needs right-click → Open.
+
+    Verify a download: `gh attestation verify <file> --repo afsharid/passess`.
