@@ -14,6 +14,7 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
         - (*os.File).Close
+        - (*github.com/afsharid/passess/internal/agent.Conn).Close
     gosec:
       excludes:
         # Launching a user-chosen command is the product's job; the policy

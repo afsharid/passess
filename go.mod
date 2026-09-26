@@ -6,6 +6,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	mvdan.cc/sh/v3 v3.14.1
 )
@@ -17,6 +18,5 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
