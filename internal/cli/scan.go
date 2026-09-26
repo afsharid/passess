@@ -29,16 +29,18 @@ type scanOutput struct {
 	Unresolved []string       `json:"unresolved"` // configured secrets whose values could not be searched for
 	Findings   []scan.Finding `json:"findings"`
 	Errors     []string       `json:"errors"`
+	Notes      []string       `json:"notes,omitempty"`
 }
 
 func runScan(st *Streams, args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(st.Stderr)
 	asJSON := fs.Bool("json", false, "machine-readable output")
-	transcripts := fs.Bool("transcripts", false, "also scan harness session transcripts (can be large)")
+	transcripts := fs.Bool("transcripts", false, "also search harness session transcripts for your configured values")
+	transcriptRules := fs.Bool("transcript-rules", false, "with --transcripts, also run the rules on them (slow on a large history)")
 	noKnown := fs.Bool("no-known", false, "do not resolve configured secrets to search for their values")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts] [--no-known] [--json] [PATH...]")
+		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts [--transcript-rules]] [--no-known] [--json] [PATH...]")
 		fmt.Fprintln(st.Stderr, "Without PATH: harness configs and dotfiles in your home, .env files under this directory.")
 		fs.PrintDefaults()
 	}
@@ -52,7 +54,7 @@ func runScan(st *Streams, args []string) int {
 	if err != nil {
 		return failf(st, ExitSoftware, "%v", err)
 	}
-	s := &scan.Scanner{Rules: rules, KnownFP: map[string]string{}}
+	s := &scan.Scanner{Rules: rules, KnownFP: map[string]string{}, TranscriptRules: *transcriptRules}
 	out := scanOutput{Rules: scan.RulesVersion, Unresolved: []string{}, Findings: []scan.Finding{}, Errors: []string{}}
 
 	if !*noKnown {
@@ -79,6 +81,12 @@ func runScan(st *Streams, args []string) int {
 			Backups: filepath.Join(stateDir(st.Getenv), "backups"), Transcripts: *transcripts})
 	}
 	out.Files = len(targets)
+	if *transcripts && !*transcriptRules {
+		out.Notes = append(out.Notes, "transcripts were searched for your configured values only; --transcript-rules also looks for other secret-shaped strings (slow)")
+		if out.Known == 0 {
+			out.Notes = append(out.Notes, "no configured value could be searched for, so transcripts were not checked at all")
+		}
+	}
 	findings, errs := s.All(targets, runtime.NumCPU())
 	out.Findings = append(out.Findings, findings...)
 	for _, e := range errs {
@@ -194,5 +202,8 @@ func printScan(st *Streams, out scanOutput) {
 	}
 	for _, e := range out.Errors {
 		fmt.Fprintf(st.Stdout, "could not read: %s\n", e)
+	}
+	for _, n := range out.Notes {
+		fmt.Fprintf(st.Stdout, "note: %s\n", n)
 	}
 }
