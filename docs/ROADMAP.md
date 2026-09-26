@@ -59,12 +59,17 @@ the boundary.
 
 **Slice 6 (in progress).** `passess agent` runs agent commands itself and keeps what
 vaults returned in memory for `agent.cache_ttl`; no value crosses its socket (ADR 8).
-Done: the socket (the user's own processes only, stdio passed as descriptors), the
-cache with `status`, `lock` and `stop`, and `exec` through the agent with the in-process
-path unchanged. Next: approvals keyed on secret, program and harness, answered with
-Touch ID in the menu bar app and failing closed; an audit log of names; then hook
-redaction with the agent's values, `passess helper` for `apiKeyHelper`, and hooks that
-refuse ways around the agent.
+Done:
+- the socket (the user's own processes only, stdio passed as descriptors);
+- the cache, with `status`, `lock` and `stop`;
+- `exec` through the agent, with the in-process path unchanged;
+- approvals for secrets marked `approve`, keyed on secret, program family and the
+  caller's anchor process (ADR 9). They fail closed and are answered with
+  `passess agent approve`;
+- an audit log of names.
+
+Next: Touch ID answers in the menu bar app; then hook redaction with the agent's values,
+`passess helper` for `apiKeyHelper`, and hooks that refuse ways around the agent.
 
 **Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,
 must never show it in its output, transcripts or files. And the maintainer's machine

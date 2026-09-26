@@ -124,6 +124,19 @@ project's files.
 The run stays open for Codex and OpenCode, and for Codex with its hooks trusted; v0.4.0
 waits on it.
 
+## Where approvals anchor
+
+An approval belongs to the caller's nearest ancestor that is not a shell (ADR 9). One
+real command per harness, 2026-09-26: a dev agent with a secret that needs approval,
+no approver, and the refusal's "asked for by …".
+
+| Harness | Anchor | One Allow covers |
+|---|---|---|
+| Claude Code 2.1.281 (desktop Code tab) | `claude` | the session: each command's `zsh` is skipped |
+| Kiro CLI (`kiro-cli chat --no-interactive`) | `kiro-cli-chat` | the chat |
+| Antigravity (`agy -p`) | `agy` | the run |
+| Codex, OpenCode | not measured: neither reached a model | — |
+
 ## Insecure defaults
 
 `passess audit` checks the first two today; the rest arrive with their adapters.

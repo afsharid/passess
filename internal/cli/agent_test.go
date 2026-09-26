@@ -258,10 +258,10 @@ func (p countingProvider) Resolve(_ context.Context, r ref.Ref) (secret.Value, e
 }
 
 func cacheServer(calls *atomic.Int32) *agentServer {
-	return &agentServer{live: map[*generation]bool{}, resolvers: func(*config.User) (*resolve.Resolver, func()) {
+	return newAgentServer(nil, "", func(*config.User) (*resolve.Resolver, func()) {
 		r := resolve.New(countingProvider{calls})
 		return r, r.Zero
-	}}
+	})
 }
 
 func cacheConfig(t *testing.T, ttl string) (*config.User, [sha256.Size]byte) {
@@ -395,10 +395,26 @@ func TestAgentRefusesAnotherBuild(t *testing.T) {
 		}
 	}
 	s := cacheServer(new(atomic.Int32))
-	code := s.exec(nil, agent.Request{V: agent.Version, Build: "0.0.0-another", Kind: agent.Exec}, files)
+	code := s.exec(&agent.Conn{}, agent.Request{V: agent.Version, Build: "0.0.0-another", Kind: agent.Exec}, files)
 	msg, _ := io.ReadAll(stderr)
 	if code != ExitUnavailable || !strings.Contains(string(msg), "passess agent stop && passess agent start") {
 		t.Fatalf("exit %d, stderr %q", code, msg)
+	}
+}
+
+func TestSameBuild(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{"0.5.0", "v0.5.0", true},
+		{"v0.5.0-alpha", "v0.5.0-alpha", true},
+		{"0.5.0", "0.5.1", false},
+		{"dev", "dev-abc123", false},
+	} {
+		if got := sameBuild(c.a, c.b); got != c.same {
+			t.Errorf("sameBuild(%q, %q) = %v", c.a, c.b, got)
+		}
 	}
 }
 

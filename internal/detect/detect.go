@@ -30,6 +30,17 @@ func Harness(getenv func(string) string) string {
 	return ""
 }
 
+// programs maps the process names of harness executables, as the kernel
+// keeps them, to harness names. Editors whose terminals people also type in
+// (Zed, VS Code) are left out: their process says nothing about who typed.
+var programs = map[string]string{
+	"claude": "claude-code", "codex": "codex", "opencode": "opencode", "opencode.exe": "opencode",
+	"kiro-cli": "kiro", "kiro-cli-chat": "kiro", "agy": "antigravity", "cursor-agent": "cursor", "gemini": "gemini-cli",
+}
+
+// Program returns the harness whose executable has this process name, or "".
+func Program(name string) string { return programs[name] }
+
 // OwnPrefix is the prefix of the variables a harness sets for its own use
 // (CLAUDE_CODE_MESSAGING_TOKEN under Claude Code), or "". Variables the user
 // sets for a harness, such as GEMINI_API_KEY, are not the harness's own.

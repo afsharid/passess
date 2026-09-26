@@ -44,11 +44,19 @@ type Agent struct {
 	// CacheTTL is how long the agent keeps values it resolved; 0 means it
 	// resolves them for every command.
 	CacheTTL time.Duration
+	// ApprovalTTL is how long an Allow lasts; 0 means every command asks.
+	ApprovalTTL time.Duration
+	// ApprovalTimeout is how long a question waits for an answer.
+	ApprovalTimeout time.Duration
 }
 
-// DefaultCacheTTL is the agent's cache lifetime unless agent.cache_ttl says
-// otherwise; gpg-agent's default.
-const DefaultCacheTTL = 10 * time.Minute
+// Defaults for [agent]. The cache lifetime is gpg-agent's; an approval lasts
+// a working day.
+const (
+	DefaultCacheTTL        = 10 * time.Minute
+	DefaultApprovalTTL     = 8 * time.Hour
+	DefaultApprovalTimeout = 60 * time.Second
+)
 
 // MCPServer is an MCP server that harnesses start through `passess mcp-exec
 // NAME`. Exactly one of Command (a local stdio server) and URL (a remote
@@ -147,6 +155,9 @@ type Secret struct {
 	Refs  []ref.Ref // candidates, first that resolves wins
 	Allow []string  // program families that may receive it; empty means any non-denied program
 	Note  string
+	// Approve makes every new (program, caller) pair wait for the user's
+	// Allow, given through `passess agent`.
+	Approve bool
 }
 
 // Profile is a named bundle for `passess run`.
@@ -194,9 +205,10 @@ type rawUser struct {
 		} `toml:"bw"`
 	} `toml:"backends"`
 	Secrets map[string]struct {
-		Ref   any      `toml:"ref"`
-		Allow []string `toml:"allow"`
-		Note  string   `toml:"note"`
+		Ref     any      `toml:"ref"`
+		Allow   []string `toml:"allow"`
+		Note    string   `toml:"note"`
+		Approve bool     `toml:"approve"`
 	} `toml:"secrets"`
 	Profiles map[string]struct {
 		Secrets  []string          `toml:"secrets"`
@@ -216,7 +228,9 @@ type rawUser struct {
 		Harnesses []string          `toml:"harnesses"`
 	} `toml:"mcp"`
 	Agent struct {
-		CacheTTL *string `toml:"cache_ttl"`
+		CacheTTL        *string `toml:"cache_ttl"`
+		ApprovalTTL     *string `toml:"approval_ttl"`
+		ApprovalTimeout *string `toml:"approval_timeout"`
 	} `toml:"agent"`
 }
 
@@ -297,13 +311,30 @@ func ParseUser(path string, data []byte) (*User, error) {
 		}
 		*b.target = &r
 	}
-	u.Agent.CacheTTL = DefaultCacheTTL
-	if raw.Agent.CacheTTL != nil {
-		d, err := time.ParseDuration(*raw.Agent.CacheTTL)
-		if err != nil || d < 0 {
-			return nil, fmt.Errorf("%s: agent.cache_ttl: %q is not a duration such as \"10m\" or \"0\"", path, *raw.Agent.CacheTTL)
+	for _, d := range []struct {
+		key    string
+		raw    *string
+		target *time.Duration
+		def    time.Duration
+		min    time.Duration
+	}{
+		{"cache_ttl", raw.Agent.CacheTTL, &u.Agent.CacheTTL, DefaultCacheTTL, 0},
+		{"approval_ttl", raw.Agent.ApprovalTTL, &u.Agent.ApprovalTTL, DefaultApprovalTTL, 0},
+		{"approval_timeout", raw.Agent.ApprovalTimeout, &u.Agent.ApprovalTimeout, DefaultApprovalTimeout, time.Millisecond},
+	} {
+		*d.target = d.def
+		if d.raw == nil {
+			continue
 		}
-		u.Agent.CacheTTL = d
+		v, err := time.ParseDuration(*d.raw)
+		if err != nil || v < d.min {
+			zero := ""
+			if d.min == 0 {
+				zero = ` or "0"`
+			}
+			return nil, fmt.Errorf("%s: agent.%s: %q is not a duration such as \"10m\"%s", path, d.key, *d.raw, zero)
+		}
+		*d.target = v
 	}
 	u.Backends.BWS.ServerURL = raw.Backends.BWS.ServerURL
 	u.Backends.OP.Account = raw.Backends.OP.Account
@@ -323,7 +354,7 @@ func ParseUser(path string, data []byte) (*User, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: secrets.%s.allow: %w", path, name, err)
 		}
-		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note}
+		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note, Approve: s.Approve}
 	}
 
 	for name, p := range raw.Profiles {

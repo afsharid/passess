@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +23,9 @@ import (
 	"github.com/afsharid/passess/internal/agent"
 	"github.com/afsharid/passess/internal/buildinfo"
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/launch"
+	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/provider"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/resolve"
@@ -30,7 +33,7 @@ import (
 )
 
 func init() {
-	commands["agent"] = command{"keep resolved values in memory and run exec for agents: start, stop, status, lock", runAgent}
+	commands["agent"] = command{"keep resolved values in memory, run exec for agents, ask for approvals: start, stop, status, lock, approve", runAgent}
 }
 
 // ExitAgentStopped is what `passess agent status` returns when no agent runs
@@ -43,7 +46,7 @@ const killGrace = 5 * time.Second
 
 func runAgent(st *Streams, args []string) int {
 	usage := func() int {
-		fmt.Fprintln(st.Stderr, "Usage: passess agent start | stop | status [--json] | lock | serve")
+		fmt.Fprintln(st.Stderr, "Usage: passess agent start | stop | status [--json] | lock | approve | serve")
 		return ExitUsage
 	}
 	if len(args) == 0 {
@@ -58,6 +61,8 @@ func runAgent(st *Streams, args []string) int {
 		return agentStart(st)
 	case sub == "serve":
 		return agentServe(st)
+	case sub == "approve":
+		return agentApprove(st)
 	case sub == "stop", sub == "lock":
 		return agentControl(st, agent.Kind(sub))
 	default:
@@ -130,6 +135,11 @@ func printInfo(w io.Writer, in *agent.Info) {
 		fmt.Fprintln(w, "           (a vault is being asked right now)")
 	}
 	fmt.Fprintf(w, "  running  %d command(s); %d since it started\n", in.Jobs, in.Served)
+	fmt.Fprintf(w, "  approve  %d approver(s) connected, %d question(s) open\n", in.Approvers, in.Pending)
+	for _, a := range in.Approvals {
+		fmt.Fprintf(w, "           %s for %s, asked by %s (pid %d), until %s\n", a.Secret, a.Program, a.Anchor.Name, a.Anchor.PID,
+			a.Until.Local().Format("Mon 15:04"))
+	}
 }
 
 func agentControl(st *Streams, kind agent.Kind) int {
@@ -222,8 +232,8 @@ func agentServe(st *Streams) int {
 	if err != nil {
 		return failf(st, ExitUnavailable, "%v", err)
 	}
-	s := &agentServer{l: l, configPath: canonical(cfg), started: time.Now(), live: map[*generation]bool{},
-		resolvers: func(u *config.User) (*resolve.Resolver, func()) { return newResolver(st, u) }}
+	s := newAgentServer(l, canonical(cfg), func(u *config.User) (*resolve.Resolver, func()) { return newResolver(st, u) })
+	s.log = &auditLog{path: filepath.Join(filepath.Dir(path), "agent-audit.jsonl"), stderr: st.Stderr}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer signal.Stop(sigs)
@@ -255,10 +265,22 @@ type agentServer struct {
 	served    atomic.Int32 // exec requests received
 	stopOnce  sync.Once
 
-	mu       sync.Mutex
-	gen      *generation          // the shared cache, nil when empty
-	live     map[*generation]bool // every generation not yet forgotten
-	stopping bool
+	log *auditLog
+
+	mu        sync.Mutex
+	gen       *generation          // the shared cache, nil when empty
+	live      map[*generation]bool // every generation not yet forgotten
+	stopping  bool
+	approvers map[*agent.Conn]bool
+	pending   map[string]*pendingAsk
+	approved  map[approvalKey]approval
+	asks      uint64 // questions asked, for their IDs
+}
+
+func newAgentServer(l *agent.Listener, configPath string, resolvers func(*config.User) (*resolve.Resolver, func())) *agentServer {
+	return &agentServer{l: l, configPath: configPath, started: time.Now(), resolvers: resolvers,
+		live: map[*generation]bool{}, approvers: map[*agent.Conn]bool{}, pending: map[string]*pendingAsk{},
+		approved: map[approvalKey]approval{}}
 }
 
 func (s *agentServer) serve() {
@@ -301,10 +323,17 @@ func (s *agentServer) handle(c *agent.Conn) {
 	case agent.Exec:
 		status := s.exec(c, req, files)
 		_ = c.Write(agent.Frame{Status: &status})
+	case agent.Ask:
+		var msg strings.Builder
+		status := s.ask(c, req, &msg)
+		_ = c.Write(agent.Frame{Status: &status, Error: msg.String()})
+	case agent.Approver:
+		s.serveApprover(c)
 	case agent.Status:
 		_ = c.Write(agent.Frame{Info: s.info()})
 	case agent.Lock:
 		s.forget()
+		s.dropApprovals("the agent was locked")
 		_ = c.Write(agent.Frame{Status: new(0)})
 	case agent.Stop:
 		s.stop() // before the reply: once stop returns, the socket is gone
@@ -320,9 +349,14 @@ func (s *agentServer) stop() {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		s.stopping = true
+		approvers := s.approverList()
 		s.mu.Unlock()
 		_ = s.l.Close()
 		s.forget()
+		s.dropApprovals("the agent stopped")
+		for _, c := range approvers {
+			_ = c.Close() // ends serveApprover, so serve can return
+		}
 	})
 }
 
@@ -334,8 +368,10 @@ func (s *agentServer) info() *agent.Info {
 	}
 	s.mu.Lock()
 	in.Stopping = s.stopping
+	in.Approvers, in.Pending = len(s.approvers), len(s.pending)
 	s.mu.Unlock()
 	in.Cached, in.Expires, in.Busy = s.cacheState()
+	in.Approvals = s.approvals()
 	return in
 }
 
@@ -370,7 +406,9 @@ func (s *agentServer) cacheState() (names []string, expires time.Time, busy bool
 }
 
 // exec runs one request's command with the client's stdin, stdout and stderr.
-func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) int {
+// Every request past the descriptor check is audited, refusals included: the
+// deferred write reads the named result.
+func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (code int) {
 	s.served.Add(1)
 	if len(files) != 3 {
 		for _, f := range files {
@@ -388,12 +426,28 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 		return v
 	}}
 
-	if req.V != agent.Version || req.Build != buildinfo.String() {
-		return failf(st, ExitUnavailable, "the running agent is passess %s and this is passess %s; restart it: passess agent stop && passess agent start",
-			buildinfo.String(), req.Build)
+	entry := auditEntry{Kind: "exec", PID: c.Peer.PID, Secrets: []string{}, Dir: req.Dir,
+		Harness: detect.Harness(st.Getenv), Argv: redactArgv(req.Argv, nil)}
+	for _, w := range req.Secrets {
+		if !slices.Contains(entry.Secrets, w.Name) {
+			entry.Secrets = append(entry.Secrets, w.Name)
+		}
 	}
-	if len(req.Argv) == 0 || len(req.Secrets) == 0 || !filepath.IsAbs(req.Dir) {
-		return failf(st, ExitUsage, "an exec request needs a command, secrets and an absolute working directory")
+	chain, _ := agent.Ancestry(c.Peer.PID)
+	anchor, anchored := agent.Anchor(chain)
+	if anchored {
+		entry.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
+	}
+	ran := false
+	defer func() {
+		entry.Outcome = outcomeOf(code, ran)
+		entry.Status = &code
+		s.log.write(entry)
+	}()
+
+	u, data, code := s.load(st, req)
+	if code != 0 {
+		return code
 	}
 	var wanted secretFlags
 	for _, w := range req.Secrets {
@@ -402,6 +456,105 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 		}
 		wanted = append(wanted, struct{ env, name string }{w.Env, w.Name})
 	}
+	proj, err := loadProject(req.Dir)
+	if err != nil {
+		return failf(st, ExitConfig, "%v", err)
+	}
+
+	quit := make(chan struct{})
+	defer close(quit)
+	frames := clientFrames(c, quit)
+
+	prog, code := checkExec(st, u, proj, req.Argv, wanted, lookPathIn(req.Env, req.Dir))
+	if code != 0 {
+		return code
+	}
+	entry.Program = policy.Family(prog.Name)
+	// Before acquire: a command waiting on the user must not pin a generation
+	// past its lifetime.
+	if code = s.approval(st, u, wanted.names(), prog, req, anchor, anchored, frames); code != 0 {
+		return code
+	}
+	g, code := s.acquire(st, u, sha256.Sum256(data))
+	if code != 0 {
+		return code
+	}
+	res := requestResolver(g, req.Env)
+	spec, code := resolveExec(st, u, prog, req.Env, req.Argv, wanted, res)
+	res.Zero()
+	s.release(g)
+	if code != 0 {
+		return code
+	}
+	defer spec.Redactor.Zero()
+	entry.Argv = redactArgv(req.Argv, spec.Redactor)
+	spec.Dir, spec.Stdin, spec.Stdout, spec.Stderr = req.Dir, stdin, stdout, stderr
+	spec.NewGroup = true // signals for the agent's own group are not the child's
+	child, code, err := launch.Start(spec)
+	closeStdin() // the child has its own copy
+	if err != nil {
+		code = failf(st, code, "%s: %v", req.Argv[0], err)
+		return code
+	}
+	ran = true
+	s.running.Add(1)
+	defer s.running.Add(-1)
+	done := make(chan struct{})
+	go relaySignals(frames, child, done)
+	status, err := child.Wait()
+	close(done)
+	code = execStatus(st, req.Argv[0], status, err)
+	return code
+}
+
+// ask answers an in-process caller's question: may these secrets go to this
+// command? The program is found here, from the caller's PATH, as exec would
+// find it; the caller's word for it is not taken. Refusals are written to
+// msg, for the caller to print.
+func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
+	st := &Streams{Stdout: io.Discard, Stderr: msg, Getenv: func(k string) string {
+		v, _ := req.Env.Lookup(k)
+		return v
+	}}
+	u, _, code := s.load(st, req)
+	if code != 0 {
+		return code
+	}
+	var names []string
+	for _, w := range req.Secrets {
+		if _, ok := u.Secrets[w.Name]; !ok {
+			return failf(st, ExitConfig, "%s is not defined in %s", w.Name, u.Path)
+		}
+		names = append(names, w.Name)
+	}
+	prog, err := policy.Inspect(req.Argv[0], lookPathIn(req.Env, req.Dir))
+	if err != nil {
+		return failf(st, ExitNotFound, "%v", err)
+	}
+	chain, _ := agent.Ancestry(c.Peer.PID)
+	anchor, anchored := agent.Anchor(chain)
+	quit := make(chan struct{})
+	defer close(quit)
+	code = s.approval(st, u, names, prog, req, anchor, anchored, clientFrames(c, quit))
+	e := auditEntry{Kind: "ask", PID: c.Peer.PID, Secrets: names, Program: policy.Family(prog.Name), Dir: req.Dir,
+		Argv: redactArgv(req.Argv, nil), Harness: detect.Harness(st.Getenv), Outcome: outcomeOf(code, false), Status: &code}
+	if anchored {
+		e.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
+	}
+	s.log.write(e)
+	return code
+}
+
+// load checks that a request comes from a client of this build that reads
+// this agent's config, and parses it. Refusals go to st.Stderr.
+func (s *agentServer) load(st *Streams, req agent.Request) (*config.User, []byte, int) {
+	if req.V != agent.Version || !sameBuild(req.Build, buildinfo.String()) {
+		return nil, nil, failf(st, ExitUnavailable, "the running agent is passess %s and this is passess %s; restart it: passess agent stop && passess agent start",
+			buildinfo.String(), req.Build)
+	}
+	if len(req.Argv) == 0 || len(req.Secrets) == 0 || !filepath.IsAbs(req.Dir) {
+		return nil, nil, failf(st, ExitUsage, "a request needs a command, secrets and an absolute working directory")
+	}
 	// req.Config is the client's spelling of its config path; messages use it,
 	// as they would in the client.
 	cfg := req.Config
@@ -409,48 +562,25 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 		cfg = filepath.Join(req.Dir, cfg)
 	}
 	if canonical(cfg) != s.configPath {
-		return failf(st, ExitConfig, "the agent serves %s, but this command would read %s; set PASSESS_CONFIG and XDG_CONFIG_HOME as the agent has them, or restart the agent from here: passess agent stop && passess agent start",
+		return nil, nil, failf(st, ExitConfig, "the agent serves %s, but this command would read %s; set PASSESS_CONFIG and XDG_CONFIG_HOME as the agent has them, or restart the agent from here: passess agent stop && passess agent start",
 			s.configPath, req.Config)
 	}
 	data, err := os.ReadFile(s.configPath)
 	if err != nil {
-		return failf(st, ExitConfig, "%v", err)
+		return nil, nil, failf(st, ExitConfig, "%v", err)
 	}
 	u, err := config.ParseUser(req.Config, data)
 	if err != nil {
-		return failf(st, ExitConfig, "%v", err)
+		return nil, nil, failf(st, ExitConfig, "%v", err)
 	}
-	proj, err := loadProject(req.Dir)
-	if err != nil {
-		return failf(st, ExitConfig, "%v", err)
-	}
+	return u, data, 0
+}
 
-	g, code := s.acquire(st, u, sha256.Sum256(data))
-	if code != 0 {
-		return code
-	}
-	res := requestResolver(g, req.Env)
-	spec, code := prepareExec(st, u, proj, req.Env, req.Argv, wanted, res, lookPathIn(req.Env, req.Dir))
-	res.Zero()
-	s.release(g)
-	if code != 0 {
-		return code
-	}
-	defer spec.Redactor.Zero()
-	spec.Dir, spec.Stdin, spec.Stdout, spec.Stderr = req.Dir, stdin, stdout, stderr
-	spec.NewGroup = true // signals for the agent's own group are not the child's
-	child, code, err := launch.Start(spec)
-	closeStdin() // the child has its own copy
-	if err != nil {
-		return failf(st, code, "%s: %v", req.Argv[0], err)
-	}
-	s.running.Add(1)
-	defer s.running.Add(-1)
-	done := make(chan struct{})
-	go relaySignals(c, child, done)
-	status, err := child.Wait()
-	close(done)
-	return execStatus(st, req.Argv[0], status, err)
+// sameBuild compares two passess versions. A release built by GoReleaser
+// says 0.5.0 and the same tag built by the Makefile says v0.5.0; the menu bar
+// app bundles the second while Homebrew installs the first.
+func sameBuild(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
 // relaySignals delivers the signals the client forwards. A client that goes
@@ -458,25 +588,24 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) i
 // Signals go to the child alone, never to a process group: once the child is
 // reaped, os.Process refuses to signal a reused pid, a group id offers no
 // such guard.
-func relaySignals(c *agent.Conn, child *launch.Child, done <-chan struct{}) {
+func relaySignals(frames <-chan agent.Frame, child *launch.Child, done <-chan struct{}) {
 	for {
-		f, err := c.ReadFrame()
 		select {
 		case <-done:
 			return
-		default:
-		}
-		if err != nil {
-			_ = child.Signal(syscall.SIGTERM)
-			select {
-			case <-done:
-			case <-time.After(killGrace):
-				_ = child.Signal(syscall.SIGKILL)
+		case f, ok := <-frames:
+			if !ok {
+				_ = child.Signal(syscall.SIGTERM)
+				select {
+				case <-done:
+				case <-time.After(killGrace):
+					_ = child.Signal(syscall.SIGKILL)
+				}
+				return
 			}
-			return
-		}
-		if f.Signal > 0 {
-			_ = child.Signal(syscall.Signal(f.Signal))
+			if f.Signal > 0 {
+				_ = child.Signal(syscall.Signal(f.Signal))
+			}
 		}
 	}
 }

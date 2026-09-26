@@ -61,6 +61,9 @@ func runRun(st *Streams, args []string) int {
 			return refuse(st, u, s, d)
 		}
 	}
+	if code := askApproval(st, u, prof.Secrets, argv); code != 0 {
+		return code
+	}
 
 	res, zero := newResolver(st, u)
 	defer zero()
