@@ -132,6 +132,18 @@ func TestInstallApplyAndUninstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"github": {"command": "`+exe+`", "args": ["mcp-exec", "github"]}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	settings, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	for _, want := range []string{passessPath() + " hook claude PreToolUse", passessPath() + " hook claude UserPromptSubmit", `"matcher": "Bash|Read`} {
+		if !strings.Contains(string(settings), want) {
+			t.Fatalf("Claude settings lack %q:\n%s", want, settings)
+		}
+	}
+	if hooks, _ := os.ReadFile(filepath.Join(home, ".codex", "hooks.json")); !strings.Contains(string(hooks), passessPath()+" hook codex PreToolUse") {
+		t.Fatalf("Codex hooks.json:\n%s", hooks)
+	}
+	if out, _, _ := run(t, "status"); !strings.Contains(out, "hooks          ok") {
+		t.Fatalf("status does not report the hooks:\n%s", out)
+	}
 	if out, errOut, code := run(t, "uninstall", "--apply"); code != 0 {
 		t.Fatalf("uninstall: exit %d: %s %s", code, out, errOut)
 	}
@@ -141,6 +153,13 @@ func TestInstallApplyAndUninstall(t *testing.T) {
 	claudeDoc, _ = os.ReadFile(filepath.Join(home, ".claude", "CLAUDE.md"))
 	if string(claudeDoc) != "# My rules\n\nBe brief.\n" {
 		t.Fatalf("uninstall did not restore the instructions: %q", claudeDoc)
+	}
+	// passess created both hook files; nothing of theirs is left, so they go.
+	for _, f := range []string{filepath.Join(home, ".claude", "settings.json"), filepath.Join(home, ".codex", "hooks.json")} {
+		if _, err := os.Stat(f); !os.IsNotExist(err) {
+			data, _ := os.ReadFile(f)
+			t.Fatalf("%s is still there:\n%s", f, data)
+		}
 	}
 }
 

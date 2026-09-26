@@ -1,0 +1,27 @@
+{
+  "description": "passess: refuse the actions that put secret values into the conversation, redact credentials in tool output",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit",
+        "hooks": [{"type": "command", "command": "passess hook claude PreToolUse"}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "passess hook claude PostToolUse"}]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{"type": "command", "command": "passess hook claude UserPromptSubmit"}]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "passess hook claude SessionStart"}]
+      }
+    ]
+  }
+}

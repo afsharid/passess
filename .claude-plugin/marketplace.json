@@ -1,0 +1,23 @@
+{
+  "name": "passess",
+  "owner": {
+    "name": "afsharid"
+  },
+  "metadata": {
+    "description": "passess: the last mile between your password manager and your AI coding agents",
+    "version": "0.4.0-alpha"
+  },
+  "plugins": [
+    {
+      "name": "passess",
+      "source": "./plugins/claude",
+      "description": "Keeps secret values out of Claude Code's context: refuses environment dumps, reads of .env and credential files, vault reads and pasted credentials, and redacts credentials in tool output. Needs the passess CLI on PATH.",
+      "version": "0.4.0-alpha",
+      "author": {
+        "name": "afsharid"
+      },
+      "category": "security",
+      "keywords": ["secrets", "credentials", "1password", "bitwarden", "vault", "mcp"]
+    }
+  ]
+}
