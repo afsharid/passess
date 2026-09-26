@@ -166,9 +166,14 @@ func (s *agentServer) settle(p *pendingAsk, allow bool, why, outcome string) {
 	p.timer.Stop()
 	p.allow, p.why = allow, why
 	if allow && p.keys != nil {
-		until := time.Now().Add(p.ttl)
+		now := time.Now()
+		for k, a := range s.approved { // keep the map to live Allows
+			if now.After(a.until) || !a.anchor.Alive() {
+				delete(s.approved, k)
+			}
+		}
 		for _, k := range p.keys {
-			s.approved[k] = approval{anchor: *p.ask.Anchor, until: until}
+			s.approved[k] = approval{anchor: *p.ask.Anchor, until: now.Add(p.ttl)}
 		}
 	}
 	approvers := s.approverList()

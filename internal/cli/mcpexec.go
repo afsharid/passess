@@ -80,10 +80,15 @@ func runMCPExec(st *Streams, args []string) int {
 		}
 	}
 
-	// A remote server's secrets go to passess's own bridge.
+	// A remote server's secrets go to passess's own bridge. The agent finds
+	// the program for itself, so name this one by a path it cannot miss.
 	argv := srv.Command
 	if len(argv) == 0 {
-		argv = []string{"passess", "mcp-exec", name}
+		self, err := os.Executable()
+		if err != nil {
+			self = "passess"
+		}
+		argv = []string{self, "mcp-exec", name}
 	}
 	if code := askApproval(st, u, srv.Secrets(), argv); code != 0 {
 		return code
