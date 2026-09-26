@@ -62,6 +62,8 @@ func selectAdapters(st *Streams, names []string) ([]harness.Adapter, error) {
 		switch {
 		case len(names) == 0 && a.Installed():
 			out = append(out, a)
+		case contains(names, a.ID()) && a.ConfigPath() == "":
+			return nil, fmt.Errorf("%s has no config location passess knows on this system", a.Label())
 		case contains(names, a.ID()):
 			out = append(out, a)
 		}
@@ -379,6 +381,13 @@ func writeInstructions(path, verb string) error {
 	next := harness.Splice(string(doc))
 	if verb == "uninstall" {
 		next = harness.Unsplice(string(doc))
+		// A file passess named for itself goes once its block is out.
+		if filepath.Base(path) == "passess.md" && strings.TrimSpace(next) == "" {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -57,5 +58,40 @@ func TestInstallEditsJSONHarnesses(t *testing.T) {
 	}
 	if readCalls(t, calls) != "" {
 		t.Fatal("no harness CLI should have run for Cursor")
+	}
+}
+
+func TestOwnInstructionsFileGoesOnUninstall(t *testing.T) {
+	home, _ := fakeHarnesses(t)
+	if err := os.MkdirAll(filepath.Join(home, ".kiro", "settings"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	steering := filepath.Join(home, ".kiro", "steering", "passess.md")
+	if out, errOut, code := run(t, "install", "kiro", "--apply"); code != 0 {
+		t.Fatalf("install: exit %d\n%s%s", code, out, errOut)
+	}
+	if doc, err := os.ReadFile(steering); err != nil || !strings.Contains(string(doc), "passess exec") {
+		t.Fatalf("steering file: %v\n%s", err, doc)
+	}
+	if out, errOut, code := run(t, "uninstall", "kiro", "--apply"); code != 0 {
+		t.Fatalf("uninstall: exit %d\n%s%s", code, out, errOut)
+	}
+	if _, err := os.Stat(steering); !os.IsNotExist(err) {
+		t.Fatalf("the emptied steering file stayed: %v", err)
+	}
+	// A shared file keeps whatever else it holds.
+	claudeMD, _ := os.ReadFile(filepath.Join(home, ".claude", "CLAUDE.md"))
+	if !strings.Contains(string(claudeMD), "Be brief.") {
+		t.Fatal("CLAUDE.md lost the user's text")
+	}
+}
+
+func TestHarnessWithoutAConfigHereIsRefused(t *testing.T) {
+	fakeHarnesses(t)
+	if runtime.GOOS != "linux" {
+		t.Skip("Claude Desktop has a config location on this system")
+	}
+	if _, errOut, code := run(t, "install", "claude-desktop"); code != ExitUsage || !strings.Contains(errOut, "no config location") {
+		t.Fatalf("exit %d: %s", code, errOut)
 	}
 }

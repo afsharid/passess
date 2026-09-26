@@ -6,7 +6,8 @@ harnesses can block a call, few can correct what comes back, which is why passes
 redacts at the subprocess boundary.
 
 Verification key: **bin** = read from the installed binary's own schema strings;
-**run** = observed by running the installed binary; **doc** = vendor documentation;
+**run** = observed by running the installed binary; **src** = read from the harness's
+source code; **doc** = vendor documentation;
 **cfg** = observed in real config files on the maintainer's machine; **?** = not
 verified yet.
 
@@ -36,7 +37,7 @@ verified yet.
 | Cursor | `~/.cursor/mcp.json` → `mcpServers` (`type: stdio`) | file edit | — | golden, symlink case |
 | VS Code | `Code/User/mcp.json` → `servers` (`type: stdio`) | edits an existing file only: the path is inferred | — | golden |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` or `$XDG/devin/mcp_config.json` | edits an existing file only | — | golden |
-| Zed | `$XDG/zed/settings.json` → `context_servers` | edits an existing file only | `$XDG/zed/AGENTS.md` | golden |
+| Zed | `$XDG/zed/settings.json` → `context_servers`, an untagged enum whose stdio form is `{command, args, env?}` (src, zed@933d8d9) | edits an existing file only | `$XDG/zed/AGENTS.md` | golden |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS only) | file edit | — | golden |
 
 `$XDG` is `XDG_CONFIG_HOME`, else `~/.config`. "golden" means an adapter test on a real
