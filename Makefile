@@ -17,8 +17,10 @@ test:
 vet:
 	go vet ./...
 
+# Both systems: files for one of them are invisible to the linter on the other.
 lint:
 	golangci-lint run
+	GOOS=linux golangci-lint run
 
 check: vet test lint
 
