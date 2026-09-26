@@ -11,5 +11,7 @@ let package = Package(
         .executableTarget(name: "PassessBar", dependencies: ["PassessKit"]),
         // Decodes the JSON fixtures the Go tests write and checks what the menu would show.
         .executableTarget(name: "PassessKitCheck", dependencies: ["PassessKit"]),
+        // Draws AppIcon.iconset; `make macos-icon` turns it into AppIcon.icns.
+        .executableTarget(name: "IconMaker"),
     ]
 )
