@@ -35,7 +35,44 @@ passess run web -- npm run dev
 
 The same references and policy work across Claude Code, Codex, OpenCode, Kiro,
 Antigravity, Cursor and Gemini CLI, with config-level support for VS Code / Copilot,
-Windsurf, Zed and Claude Desktop.
+Windsurf, Zed and Claude Desktop. See [docs/ROADMAP.md](docs/ROADMAP.md) for what
+lands when.
+
+## Install
+
+```sh
+go install github.com/afsharid/passess/cmd/passess@latest
+```
+
+Requires Go 1.27.1 or newer. Prebuilt binaries arrive with v0.1.0-alpha.
+
+## Quick start
+
+Put a secret in the macOS Keychain (the value is prompted for, never typed on the
+command line), then describe it in `~/.config/passess/config.toml`:
+
+```sh
+security add-generic-password -U -s passess -a github -w
+```
+
+```toml
+version = 1
+
+[secrets.GITHUB_TOKEN]
+ref   = "keychain://passess/github"
+allow = ["gh", "git"]
+```
+
+```sh
+passess exec -s GITHUB_TOKEN -- gh api user   # the value reaches gh only
+passess exec -s GITHUB_TOKEN -- sh -c 'echo $GITHUB_TOKEN'
+# refused: shells get no secrets unless the allow list names them
+```
+
+A reference can also point at Bitwarden Secrets Manager (`bws://<project>/<KEY>`,
+with the machine token itself kept in the keychain via `backends.bws.access_token`)
+or at an environment variable (`env://NAME`). 1Password, Vault / OpenBao and the
+Bitwarden Password Manager follow.
 
 ## What it protects against — and what it does not
 
