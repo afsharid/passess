@@ -18,12 +18,16 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var checkedAt: Date?
     private var checking = false
     private var refreshing = false
+    private var agent: AgentStatus?
+    private let approver = ApproverController()
 
     func start() {
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
         setIcon(.unknown)
+        approver.onChange = { [weak self] in self?.refresh() }
+        approver.start()
         rebuild()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.refresh() }
@@ -50,10 +54,12 @@ final class StatusController: NSObject, NSMenuDelegate {
             var result: Doctor?
             var failure: String?
             do { result = try passess.doctor() } catch { failure = String(describing: error) }
+            let agent = try? (Passess.locateForAgent() ?? passess).agentStatus()
             DispatchQueue.main.async {
                 self.refreshing = false
                 self.doctor = result
                 self.failure = failure
+                self.agent = agent
                 self.setIcon(health(result))
                 self.rebuild()
             }
@@ -96,6 +102,17 @@ final class StatusController: NSObject, NSMenuDelegate {
         checkItem.target = self
         checkItem.isEnabled = passess != nil && !checking
         menu.addItem(checkItem)
+        menu.addItem(.separator())
+
+        for row in rows(agent: agent, approving: approver.connected) {
+            menu.addItem(menuItem(for: row))
+        }
+        if agent?.running == true {
+            addAgentItem("Forget cached values and approvals", "lock")
+            addAgentItem("Stop agent", "stop")
+        } else {
+            addAgentItem("Start agent", "start")
+        }
         if let check = check {
             let results = NSMenuItem(title: resultsTitle(check), action: nil, keyEquivalent: "")
             let sub = NSMenu()
@@ -118,6 +135,22 @@ final class StatusController: NSObject, NSMenuDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
         menu.addItem(NSMenuItem(title: "Quit passess", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    private func addAgentItem(_ title: String, _ subcommand: String) {
+        let mi = NSMenuItem(title: title, action: #selector(agentCommand(_:)), keyEquivalent: "")
+        mi.target = self
+        mi.representedObject = subcommand
+        mi.isEnabled = Passess.locateForAgent() != nil
+        menu.addItem(mi)
+    }
+
+    @objc private func agentCommand(_ sender: NSMenuItem) {
+        guard let subcommand = sender.representedObject as? String, let cli = Passess.locateForAgent() else { return }
+        work.async {
+            try? cli.agent(subcommand)
+            DispatchQueue.main.async { self.refresh() }
+        }
     }
 
     private func resultsTitle(_ check: Check) -> String {

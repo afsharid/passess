@@ -101,3 +101,51 @@ public func rows(check: Check) -> [Row] {
                    action: item.detail.map { .copy($0) } ?? .none)
     }
 }
+
+/// Rows for the agent's part of the menu. Names only.
+public func rows(agent: AgentStatus?, approving: Bool) -> [Row] {
+    guard let a = agent else {
+        return [Row("Agent: status unknown", symbol: "questionmark.circle")]
+    }
+    guard a.running else {
+        return [Row("Agent: not running — every command asks the vault", symbol: "moon.zzz")]
+    }
+    var out = [Row("Agent: running, pid \(a.pid ?? 0)", symbol: "bolt.shield")]
+    let cached = a.cached ?? []
+    if cached.isEmpty {
+        out.append(Row("Holds no values" + (a.cacheTTL == "0s" ? " (cache off)" : ""), symbol: "tray"))
+    } else {
+        let until = a.expires.map { " until " + clock($0) } ?? ""
+        out.append(Row("Holds \(cached.joined(separator: ", "))\(until)", symbol: "tray.full"))
+    }
+    out.append(Row(approving ? "Answering approval questions here" : "Not answering approval questions yet",
+                   symbol: approving ? "hand.raised" : "hand.raised.slash"))
+    for ap in a.approvals ?? [] {
+        out.append(Row("\(ap.secret) for \(ap.program) — \(ap.anchor.name) (pid \(ap.anchor.pid)), until \(clock(ap.until))",
+                       symbol: "checkmark.shield"))
+    }
+    return out
+}
+
+/// The title and body of the alert that puts a question to the user.
+public func askText(_ ask: AgentAsk) -> (title: String, detail: String) {
+    var who = "A caller passess cannot identify"
+    if let anchor = ask.anchor {
+        who = "\(anchor.name) (pid \(anchor.pid))"
+    }
+    let title = "\(who) wants \(ask.secrets.joined(separator: ", ")) for \(ask.program)"
+    var detail = "In \(ask.dir)\n$ \(ask.argv.joined(separator: " "))"
+    if let harness = ask.harness {
+        detail += "\n\nIt says it runs under \(harness)."
+    }
+    if let until = ask.until {
+        detail += "\n\nAn Allow lasts until \(clock(until)), for this program and this caller only."
+    } else {
+        detail += "\n\nAn Allow counts for this command only."
+    }
+    return (title, detail)
+}
+
+private func clock(_ date: Date) -> String {
+    DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+}
