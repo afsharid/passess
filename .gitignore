@@ -17,6 +17,10 @@ bws.json
 *.out
 coverage.*
 
+# --- macOS menu bar app build ---
+macos/PassessBar/.build/
+macos/PassessBar/.swiftpm/
+
 # --- local ---
 .DS_Store
 .claude/worktrees/

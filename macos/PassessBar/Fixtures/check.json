@@ -1,0 +1,16 @@
+{
+  "config": "/Users/you/.config/passess/config.toml",
+  "ok": false,
+  "secrets": [
+    {
+      "name": "ABSENT",
+      "state": "missing",
+      "detail": "ABSENT could not be resolved: env://PASSESS_TEST_ABSENT: not found"
+    },
+    {
+      "name": "PRESENT",
+      "state": "ok",
+      "from": "env://PASSESS_TEST_PRESENT_TOKEN"
+    }
+  ]
+}

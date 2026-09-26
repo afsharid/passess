@@ -1,0 +1,24 @@
+{
+  "version": "v0.0.0-test",
+  "ok": false,
+  "config": {
+    "path": "/Users/you/.config/passess/config.toml",
+    "ok": true
+  },
+  "secrets": 1,
+  "profiles": 0,
+  "backends": [
+    {
+      "scheme": "vault",
+      "ok": false,
+      "detail": "backend unavailable: vault:// is not supported yet"
+    }
+  ],
+  "problems": [
+    {
+      "severity": "error",
+      "message": "vault:// is not usable",
+      "fix": "vault:// arrives in a later release; see docs/ROADMAP.md"
+    }
+  ]
+}

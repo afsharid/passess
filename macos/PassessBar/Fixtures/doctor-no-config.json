@@ -1,0 +1,19 @@
+{
+  "version": "v0.0.0-test",
+  "ok": false,
+  "config": {
+    "path": "/Users/you/.config/passess/config.toml",
+    "ok": false,
+    "error": "not found"
+  },
+  "secrets": 0,
+  "profiles": 0,
+  "backends": [],
+  "problems": [
+    {
+      "severity": "error",
+      "message": "no config file",
+      "fix": "passess add NAME --ref \u003creference\u003e, or create /Users/you/.config/passess/config.toml with version = 1"
+    }
+  ]
+}
