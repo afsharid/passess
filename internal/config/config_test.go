@@ -132,3 +132,67 @@ func TestUserPath(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+func TestLoadMCPServers(t *testing.T) {
+	u, err := LoadUser(write(t, "config.toml", `
+version = 1
+[secrets.GITHUB_TOKEN]
+ref = "keychain://passess/github"
+[secrets.REMOTE_TOKEN]
+ref = "keychain://passess/remote"
+
+[mcp.github]
+command = ["/opt/homebrew/bin/github-mcp-server", "stdio"]
+env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "GITHUB_TOKEN" }
+inherit = ["GH_HOST"]
+
+[mcp.remote]
+url     = "https://mcp.example.com/mcp"
+headers = { Authorization = "Bearer {{REMOTE_TOKEN}}" }
+
+[mcp.plain]
+command = ["npx", "-y", "some-server"]
+redact  = false
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := u.MCP["github"]
+	if gh.Command[0] != "/opt/homebrew/bin/github-mcp-server" || gh.Env["GITHUB_PERSONAL_ACCESS_TOKEN"] != "GITHUB_TOKEN" || !gh.Redact {
+		t.Fatalf("github = %+v", gh)
+	}
+	if got := u.MCP["remote"].Secrets(); len(got) != 1 || got[0] != "REMOTE_TOKEN" {
+		t.Fatalf("remote secrets = %v", got)
+	}
+	if u.MCP["plain"].Redact {
+		t.Fatal("redact = false ignored")
+	}
+	if got := Expand("Bearer {{A}} and {{B}}", func(n string) string { return "<" + n + ">" }); got != "Bearer <A> and <B>" {
+		t.Fatal(got)
+	}
+}
+
+func TestMCPValidation(t *testing.T) {
+	head := "version = 1\n[secrets.T]\nref = \"env://T\"\n"
+	for name, body := range map[string]string{
+		"both":            "[mcp.x]\ncommand = [\"a\"]\nurl = \"https://h/mcp\"\n",
+		"neither":         "[mcp.x]\ninherit = [\"A\"]\n",
+		"unknown secret":  "[mcp.x]\ncommand = [\"a\"]\nenv = { V = \"NOPE\" }\n",
+		"headers on cmd":  "[mcp.x]\ncommand = [\"a\"]\nheaders = { H = \"{{T}}\" }\n",
+		"env on url":      "[mcp.x]\nurl = \"https://h/mcp\"\nenv = { V = \"T\" }\n",
+		"plain http":      "[mcp.x]\nurl = \"http://example.com/mcp\"\nheaders = { Authorization = \"Bearer {{T}}\" }\n",
+		"literal header":  "[mcp.x]\nurl = \"https://h/mcp\"\nheaders = { Authorization = \"Bearer passess-fake-literal-0123456789\" }\n",
+		"unknown in tmpl": "[mcp.x]\nurl = \"https://h/mcp\"\nheaders = { Authorization = \"Bearer {{NOPE}}\" }\n",
+		"bad name":        "[mcp.\"bad name\"]\ncommand = [\"a\"]\n",
+	} {
+		_, err := LoadUser(write(t, "config.toml", head+body))
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if strings.Contains(err.Error(), "passess-fake-literal") {
+			t.Errorf("%s: error echoes a value: %v", name, err)
+		}
+	}
+	if _, err := LoadUser(write(t, "config.toml", head+"[mcp.x]\nurl = \"http://localhost:8080/mcp\"\nheaders = { Authorization = \"Bearer {{T}}\" }\n")); err != nil {
+		t.Fatalf("http on localhost refused: %v", err)
+	}
+}

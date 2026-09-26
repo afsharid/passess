@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,56 @@ type User struct {
 	Backends Backends
 	Secrets  map[string]Secret
 	Profiles map[string]Profile
+	MCP      map[string]MCPServer
+}
+
+// MCPServer is an MCP server that harnesses start through `passess mcp-exec
+// NAME`. Exactly one of Command (a local stdio server) and URL (a remote
+// streamable-HTTP server bridged over stdio) is set.
+type MCPServer struct {
+	Name    string
+	Command []string          // program and arguments
+	Env     map[string]string // variable -> secret name
+	Inherit []string          // extra caller variables passed through
+	Redact  bool              // redact the server's output (default true)
+	URL     string
+	Headers map[string]string // header -> template with {{SECRET}} placeholders
+}
+
+// Secrets returns the secret names the server uses, sorted.
+func (m MCPServer) Secrets() []string {
+	seen := map[string]bool{}
+	for _, s := range m.Env {
+		seen[s] = true
+	}
+	for _, h := range m.Headers {
+		for _, s := range placeholders(h) {
+			seen[s] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+var placeholderRe = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
+
+func placeholders(s string) []string {
+	var out []string
+	for _, m := range placeholderRe.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// Expand replaces every {{NAME}} in template with lookup(NAME).
+func Expand(template string, lookup func(string) string) string {
+	return placeholderRe.ReplaceAllStringFunc(template, func(m string) string {
+		return lookup(m[2 : len(m)-2])
+	})
 }
 
 // Backends holds per-backend settings.
@@ -97,7 +148,17 @@ type rawUser struct {
 		Inherit  []string          `toml:"inherit"`
 		Env      map[string]string `toml:"env"`
 	} `toml:"profiles"`
+	MCP map[string]struct {
+		Command []string          `toml:"command"`
+		Env     map[string]string `toml:"env"`
+		Inherit []string          `toml:"inherit"`
+		Redact  *bool             `toml:"redact"`
+		URL     string            `toml:"url"`
+		Headers map[string]string `toml:"headers"`
+	} `toml:"mcp"`
 }
+
+var headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 type rawProject struct {
 	Version int `toml:"version"`
@@ -211,7 +272,84 @@ func LoadUser(path string) (*User, error) {
 		}
 		u.Profiles[name] = Profile{Name: name, Secrets: p.Secrets, Required: p.Required, Allow: allow, Inherit: p.Inherit, Env: p.Env}
 	}
+
+	u.MCP = map[string]MCPServer{}
+	for name, m := range raw.MCP {
+		if !mcpNameRe.MatchString(name) {
+			return nil, fmt.Errorf("%s: mcp.%s: use letters, digits, - and _ in server names", path, name)
+		}
+		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Redact: true, URL: m.URL, Headers: m.Headers}
+		if m.Redact != nil {
+			srv.Redact = *m.Redact
+		}
+		if err := u.validateMCP(srv); err != nil {
+			return nil, fmt.Errorf("%s: mcp.%s: %w", path, name, err)
+		}
+		u.MCP[name] = srv
+	}
 	return u, nil
+}
+
+var mcpNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+func (u *User) validateMCP(m MCPServer) error {
+	switch {
+	case len(m.Command) > 0 && m.URL != "":
+		return errors.New("set either command or url, not both")
+	case len(m.Command) == 0 && m.URL == "":
+		return errors.New("set command (a local server) or url (a remote one)")
+	}
+	if len(m.Command) > 0 {
+		if m.Command[0] == "" {
+			return errors.New("command[0] is empty")
+		}
+		if len(m.Headers) > 0 {
+			return errors.New("headers apply to url servers; a local server gets env")
+		}
+		for k, s := range m.Env {
+			if !nameRe.MatchString(k) {
+				return fmt.Errorf("env: %q is not a variable name", k)
+			}
+			if _, ok := u.Secrets[s]; !ok {
+				return fmt.Errorf("env.%s uses %s, which is not defined under [secrets]", k, s)
+			}
+		}
+		for _, v := range m.Inherit {
+			if !nameRe.MatchString(v) {
+				return fmt.Errorf("inherit: %q is not a variable name", v)
+			}
+		}
+		return nil
+	}
+	if len(m.Env) > 0 || len(m.Inherit) > 0 {
+		return errors.New("env and inherit apply to command servers; a url server gets headers")
+	}
+	parsed, err := url.Parse(m.URL)
+	if err != nil || parsed.Host == "" {
+		return errors.New("url is not a valid URL")
+	}
+	local := parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1"
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !local) {
+		return errors.New("url must use https (plain http only for localhost): credentials would travel in clear")
+	}
+	for h, tmpl := range m.Headers {
+		if !headerNameRe.MatchString(h) {
+			return fmt.Errorf("headers: %q is not a header name", h)
+		}
+		if strings.ContainsAny(tmpl, "\r\n") {
+			return fmt.Errorf("headers.%s contains a line break", h)
+		}
+		names := placeholders(tmpl)
+		if len(names) == 0 {
+			return fmt.Errorf("headers.%s holds no {{SECRET}} placeholder; a literal value belongs in the vault, not here", h)
+		}
+		for _, s := range names {
+			if _, ok := u.Secrets[s]; !ok {
+				return fmt.Errorf("headers.%s uses {{%s}}, which is not defined under [secrets]", h, s)
+			}
+		}
+	}
+	return nil
 }
 
 // LoadProject reads a project file.

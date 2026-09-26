@@ -22,6 +22,17 @@ maintainer's machine; **?** = not verified yet.
 | Windsurf | pre-hooks only (doc) | no (doc) | no (doc) | JSON | |
 | Zed, Claude Desktop | config-level only for now | | | JSON `env` | |
 
+## How passess installs itself
+
+| Harness | Reads | Writes | Instructions | Verified |
+|---|---|---|---|---|
+| Claude Code | `~/.claude.json` → `mcpServers` (user scope) | `claude mcp add --scope user NAME -- passess mcp-exec NAME`, `claude mcp remove --scope user NAME` | `~/.claude/CLAUDE.md` | live, against the installed CLI in a throwaway `HOME` |
+| Codex | `$CODEX_HOME/config.toml` → `[mcp_servers.*]` | `codex mcp add NAME -- passess mcp-exec NAME`, `codex mcp remove NAME` | `$CODEX_HOME/AGENTS.md` | live, same way |
+
+The harness CLIs own their file formats, so passess never rewrites `~/.claude.json`
+(which Claude Code updates constantly) or the TOML that holds a user's other Codex
+settings. The entries carry no secret, so passing them as arguments exposes nothing.
+
 ## Insecure defaults passess will audit
 
 - Claude Code: MCP `env` values passed on the command line are visible in `ps`

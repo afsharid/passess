@@ -20,11 +20,12 @@ providers for `env`, `keychain` and `bws`, the policy that keeps shells and
 interpreters away from secrets, `exec`, `run` with profiles, `list`, `check`, `add`
 and `doctor`, each with `--json`.
 
-**Slice 2.** `passess mcp-exec <name>` becomes the MCP `command` in every harness:
-the server's command and secrets live in passess config, not in the harness file.
-Remote servers get a stdio-to-streamable-HTTP bridge built on the official MCP Go SDK
-that adds the auth header itself. Installers for Claude Code (through `claude mcp`)
-and Codex (in-place TOML edits) with dry run, backups and rollback.
+**Slice 2 (done).** `passess mcp-exec <name>` becomes the MCP `command` in every
+harness: the server's command and secrets live in passess config, not in the harness
+file. Remote servers get a stdio-to-streamable-HTTP bridge built on the official MCP
+Go SDK that adds the auth header itself (ADR 6). Installers for Claude Code and Codex
+go through the harnesses' own CLIs (`claude mcp`, `codex mcp`), which own their file
+formats; dry run by default, backups before any change, `uninstall` as the undo.
 
 **Slice 3.** Scanning harness configs, dotfiles, `.env` files and transcripts with
 known-value matching plus vendored gitleaks rules (ADR 5); auditing harness defaults;

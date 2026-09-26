@@ -22,6 +22,11 @@ resolved, a script is judged by the interpreter on its `#!` line (including
 same policy code serves `exec`, `run` profiles and `mcp-exec`. `mcp-exec` takes its
 command from user config only, never from its caller's argv.
 
+An MCP server's command is different: the user wrote it into their own config and
+`mcp-exec` takes no command from its caller, so no agent chose it. The default refusal
+does not apply there (`npx` and `uvx` are how most servers start), but a secret's
+explicit allow list still does.
+
 Names fold into families before comparison: every shell is `sh` (Debian's `/bin/sh` is
 dash, Fedora's is bash, Alpine's is busybox, and allowing a shell should not depend on
 which one), `python3.14` is `python`, `nodejs` is `node`. For a multi-call binary such as

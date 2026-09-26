@@ -250,6 +250,25 @@ var Bootstrap = map[string]bool{
 // unless passess itself injects them.
 func Sensitive(name string) bool { return Bootstrap[name] || sensitive.MatchString(name) }
 
+// CheckConfigured judges a program the user configured themselves, such as an
+// MCP server's command: no agent chose it, so the default refusal of shells and
+// interpreters does not apply (npx and uvx are how most servers start), but an
+// explicit allow list on the secret still does.
+func CheckConfigured(secret string, p Program, allow []string) Decision {
+	if allow == nil {
+		return Decision{Allowed: true}
+	}
+	for _, a := range allow {
+		for _, f := range p.Families {
+			if Family(a) == f {
+				return Decision{Allowed: true}
+			}
+		}
+	}
+	return Decision{Family: Family(p.Name), Reason: fmt.Sprintf(
+		"%s is not in the allow list of %s (%s)", p.Name, secret, strings.Join(allow, ", "))}
+}
+
 // Decision is the outcome of Check.
 type Decision struct {
 	Allowed bool
