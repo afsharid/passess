@@ -344,6 +344,28 @@ func TestApproveLoop(t *testing.T) {
 	}
 }
 
+// A request refused before the policy runs (here: an unreadable project
+// file) is audited too.
+func TestAgentAuditsEarlyRefusals(t *testing.T) {
+	dir := setupDir(t)
+	startAgent(t)
+	if err := os.WriteFile(filepath.Join(dir, "passess.toml"), []byte("version = [broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := run(t, "exec", "-s", "X", "--", "sh", "-c", "true"); code != ExitConfig {
+		t.Fatalf("exit %d, want %d", code, ExitConfig)
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(os.Getenv("PASSESS_AGENT_SOCK")), "agent-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e auditEntry
+	if err := json.Unmarshal(b, &e); err != nil || e.Kind != "exec" || e.Outcome != "failed" || e.Status == nil ||
+		*e.Status != ExitConfig || strings.Join(e.Secrets, ",") != "X" {
+		t.Fatalf("audit %s (%v)", b, err)
+	}
+}
+
 func TestAgentAuditLog(t *testing.T) {
 	setupApprovals(t)
 	startAgent(t)

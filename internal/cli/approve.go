@@ -166,19 +166,17 @@ func (s *agentServer) settle(p *pendingAsk, allow bool, why, outcome string) {
 	p.timer.Stop()
 	p.allow, p.why = allow, why
 	if allow && p.keys != nil {
-		now := time.Now()
-		for k, a := range s.approved { // keep the map to live Allows
-			if now.After(a.until) || !a.anchor.Alive() {
-				delete(s.approved, k)
-			}
-		}
+		until := time.Now().Add(p.ttl)
 		for _, k := range p.keys {
-			s.approved[k] = approval{anchor: *p.ask.Anchor, until: now.Add(p.ttl)}
+			s.approved[k] = approval{anchor: *p.ask.Anchor, until: until}
 		}
 	}
 	approvers := s.approverList()
 	s.mu.Unlock()
 	close(p.done)
+	if allow {
+		s.prune()
+	}
 	for _, c := range approvers {
 		_ = c.Write(agent.Frame{Cancel: p.ask.ID})
 	}
@@ -212,18 +210,43 @@ func (s *agentServer) dropApprovals(why string) {
 	}
 }
 
-// approvals lists the live Allows, dropping the ones that expired or whose
-// caller is gone.
-func (s *agentServer) approvals() []agent.Approval {
+// prune drops the Allows that expired or whose caller is gone. Whether a
+// caller lives is a kernel call per entry, made without holding s.mu.
+func (s *agentServer) prune() {
 	now := time.Now()
+	s.mu.Lock()
+	var anchors []approvalKey
+	for k, a := range s.approved {
+		if now.After(a.until) {
+			delete(s.approved, k)
+			continue
+		}
+		anchors = append(anchors, k)
+	}
+	s.mu.Unlock()
+	var gone []approvalKey
+	for _, k := range anchors {
+		if !(agent.Proc{PID: k.pid, Start: k.start}).Alive() {
+			gone = append(gone, k)
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for _, k := range gone { // the key names the dead process, so no new Allow can share it
+		delete(s.approved, k)
+	}
+	s.mu.Unlock()
+}
+
+// approvals lists the live Allows.
+func (s *agentServer) approvals() []agent.Approval {
+	s.prune()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []agent.Approval{}
 	for k, a := range s.approved {
-		if now.After(a.until) || !a.anchor.Alive() {
-			delete(s.approved, k)
-			continue
-		}
 		out = append(out, agent.Approval{Secret: k.secret, Program: k.program, Anchor: a.anchor, Until: a.until})
 	}
 	slices.SortFunc(out, func(a, b agent.Approval) int {
