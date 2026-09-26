@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/afsharid/passess/internal/agent"
 )
 
 const execValue = "passess-fake-exec-0123456789abcdef"
@@ -24,9 +26,16 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	binary = filepath.Join(dir, "passess")
-	build := exec.Command("go", "build", "-o", binary, "github.com/afsharid/passess/cmd/passess")
+	// Without VCS stamping the binary reports the same version as this test
+	// process, as an agent and its clients must.
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", binary, "github.com/afsharid/passess/cmd/passess")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
+		panic(err)
+	}
+	// Keep every test away from an agent the user may be running; the ones
+	// that want an agent start their own.
+	if err := os.Setenv("PASSESS_AGENT_SOCK", filepath.Join(dir, "no-agent.sock")); err != nil {
 		panic(err)
 	}
 	code := m.Run()
@@ -37,6 +46,13 @@ func TestMain(m *testing.M) {
 // setup writes a user config and points passess at it. X may go to sh; Y has
 // no allow list.
 func setup(t *testing.T) {
+	t.Helper()
+	setupDir(t)
+}
+
+// setupDir is setup, returning the directory that holds config.toml and is
+// now the working directory.
+func setupDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.toml")
@@ -55,6 +71,7 @@ ref = "env://PASSESS_TEST_Y_TOKEN"
 	t.Setenv("PASSESS_TEST_Y_TOKEN", execValue+"-y")
 	t.Setenv("UNRELATED_API_KEY", "passess-fake-unrelated-0123456789")
 	t.Chdir(dir) // keep any real passess.toml out of the way
+	return dir
 }
 
 func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
@@ -64,8 +81,30 @@ func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	return out.String(), errb.String(), code
 }
 
+// bothWays runs test against passess exec in this process and through an
+// agent, each after its own setup: an agent must start with the environment
+// the test has prepared.
+func bothWays(t *testing.T, setupFn func(*testing.T), test func(t *testing.T, agentPID int)) {
+	t.Helper()
+	t.Run("in-process", func(t *testing.T) {
+		setupFn(t)
+		test(t, 0)
+	})
+	t.Run("agent", func(t *testing.T) {
+		setupFn(t)
+		test(t, startAgent(t))
+		f, err := ask(os.Getenv("PASSESS_AGENT_SOCK"), agent.Status)
+		if err != nil || f.Info == nil || f.Info.Served == 0 {
+			t.Fatalf("the agent ran nothing, so the test ran in-process (%v)", err)
+		}
+	})
+}
+
 func TestExecRedactsWhatTheChildPrints(t *testing.T) {
-	setup(t)
+	bothWays(t, setup, testExecRedacts)
+}
+
+func testExecRedacts(t *testing.T, _ int) {
 	out, errOut, code := run(t, "exec", "-s", "X", "--", "sh", "-c", `echo "value=$X"; printf %s "$X" | base64; echo "done"`)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
@@ -79,7 +118,10 @@ func TestExecRedactsWhatTheChildPrints(t *testing.T) {
 }
 
 func TestExecRefusesShellWithoutAllow(t *testing.T) {
-	setup(t)
+	bothWays(t, setup, testExecRefusesShell)
+}
+
+func testExecRefusesShell(t *testing.T, _ int) {
 	out, errOut, code := run(t, "exec", "-s", "Y", "--", "sh", "-c", "echo $Y")
 	if code != ExitNoPerm {
 		t.Fatalf("exit %d, want %d", code, ExitNoPerm)
@@ -95,7 +137,10 @@ func TestExecRefusesShellWithoutAllow(t *testing.T) {
 }
 
 func TestExecEnvironmentHygiene(t *testing.T) {
-	setup(t)
+	bothWays(t, setup, testExecEnvironmentHygiene)
+}
+
+func testExecEnvironmentHygiene(t *testing.T, _ int) {
 	out, errOut, code := run(t, "exec", "-s", "X", "-s", "ALIAS=X", "--", "sh", "-c", "env")
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
@@ -113,7 +158,10 @@ func TestExecEnvironmentHygiene(t *testing.T) {
 }
 
 func TestExecExitStatusAndErrors(t *testing.T) {
-	setup(t)
+	bothWays(t, setup, testExecExitStatusAndErrors)
+}
+
+func testExecExitStatusAndErrors(t *testing.T, _ int) {
 	if _, _, code := run(t, "exec", "-s", "X", "--", "sh", "-c", "exit 3"); code != 3 {
 		t.Fatalf("exit %d, want 3", code)
 	}
@@ -129,8 +177,9 @@ func TestExecExitStatusAndErrors(t *testing.T) {
 }
 
 // startPassess runs the real binary with a long-running child and returns it
-// together with the child's pid.
-func startPassess(t *testing.T, args ...string) (*exec.Cmd, int) {
+// together with the child's pid. The child is passess's own, or the agent's
+// when agentPID is set.
+func startPassess(t *testing.T, agentPID int, args ...string) (*exec.Cmd, int) {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
 	cmd.Env = os.Environ()
@@ -140,8 +189,12 @@ func startPassess(t *testing.T, args ...string) (*exec.Cmd, int) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	parent := cmd.Process.Pid
+	if agentPID != 0 {
+		parent = agentPID
+	}
 	for range 100 {
-		out, _ := exec.Command("pgrep", "-P", strconv.Itoa(cmd.Process.Pid)).Output()
+		out, _ := exec.Command("pgrep", "-P", strconv.Itoa(parent)).Output()
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
 			return cmd, pid
 		}
@@ -167,9 +220,11 @@ func exitCode(t *testing.T, cmd *exec.Cmd) int {
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 func TestExecSignals(t *testing.T) {
-	setup(t)
+	bothWays(t, setup, testExecSignals)
+}
 
-	cmd, child := startPassess(t, "exec", "-s", "Y", "--", "sleep", "30")
+func testExecSignals(t *testing.T, agentPID int) {
+	cmd, child := startPassess(t, agentPID, "exec", "-s", "Y", "--", "sleep", "30")
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +236,7 @@ func TestExecSignals(t *testing.T) {
 		t.Fatal("SIGINT: the child survived")
 	}
 
-	cmd, child = startPassess(t, "exec", "-s", "Y", "--", "sleep", "30")
+	cmd, child = startPassess(t, agentPID, "exec", "-s", "Y", "--", "sleep", "30")
 	if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -191,9 +246,16 @@ func TestExecSignals(t *testing.T) {
 }
 
 func TestExecValueNotInArgv(t *testing.T) {
-	setup(t)
-	cmd, child := startPassess(t, "exec", "-s", "Y", "--", "sleep", "30")
-	for _, pid := range []int{cmd.Process.Pid, child} {
+	bothWays(t, setup, testExecValueNotInArgv)
+}
+
+func testExecValueNotInArgv(t *testing.T, agentPID int) {
+	cmd, child := startPassess(t, agentPID, "exec", "-s", "Y", "--", "sleep", "30")
+	pids := []int{cmd.Process.Pid, child}
+	if agentPID != 0 {
+		pids = append(pids, agentPID)
+	}
+	for _, pid := range pids {
 		out, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
 		if err != nil {
 			t.Fatal(err)

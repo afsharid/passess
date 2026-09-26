@@ -65,58 +65,78 @@ func runExec(st *Streams, args []string) int {
 		return ExitUsage
 	}
 
+	if c := agentFor(st); c != nil {
+		return execThroughAgent(st, c, argv, wanted)
+	}
+
 	u, proj, code := loadConfig(st)
 	if code != 0 {
 		return code
 	}
-	prog, err := policy.Inspect(argv[0], exec.LookPath)
+	res, zero := newResolver(st, u)
+	defer zero()
+	spec, code := prepareExec(st, u, proj, os.Environ(), argv, wanted, res, exec.LookPath)
+	if code != 0 {
+		return code
+	}
+	defer spec.Redactor.Zero()
+	spec.Stdin, spec.Stdout, spec.Stderr = st.Stdin, st.Stdout, st.Stderr
+	spec.ForwardInterrupt = !isTerminal(st.Stdin)
+	status, err := launch.Run(spec)
+	return execStatus(st, argv[0], status, err)
+}
+
+// secretSource resolves configured secrets.
+type secretSource interface {
+	Secret(ctx context.Context, s config.Secret) (secret.Value, error)
+}
+
+// prepareExec checks the policy for argv and every wanted secret, resolves
+// them and returns the child's spec without its streams. Refusals and
+// warnings go to st.Stderr; a non-zero code means nothing may run. The spec's
+// environment and redactor hold copies: res may forget its values at once.
+func prepareExec(st *Streams, u *config.User, proj *config.Project, environ, argv []string, wanted secretFlags,
+	res secretSource, lookPath func(string) (string, error)) (launch.Spec, int) {
+	prog, err := policy.Inspect(argv[0], lookPath)
 	if err != nil {
-		return failf(st, ExitNotFound, "%v", err)
+		return launch.Spec{}, failf(st, ExitNotFound, "%v", err)
 	}
 	for _, w := range wanted {
 		s, ok := u.Secrets[w.name]
 		if !ok {
-			return failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>` (or add a [secrets.%s] table to %s)", w.name, w.name, w.name, u.Path)
+			return launch.Spec{}, failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>` (or add a [secrets.%s] table to %s)", w.name, w.name, w.name, u.Path)
 		}
 		d := policy.Check(w.name, prog, policy.Effective(s.Allow, proj.ProjectAllow(w.name)))
 		if !d.Allowed {
-			return refuse(st, u, w.name, d)
+			return launch.Spec{}, refuse(st, u, w.name, d)
 		}
 	}
 
-	res, zero := newResolver(st, u)
-	defer zero()
 	inject := map[string]secret.Value{}
 	var named []redact.Secret
 	for _, w := range wanted {
 		v, err := res.Secret(context.Background(), u.Secrets[w.name])
 		if err != nil {
-			return failf(st, resolveExitCode(err), "%v", err)
+			return launch.Spec{}, failf(st, resolveExitCode(err), "%v", err)
 		}
 		inject[w.env] = v
 		named = append(named, redact.Secret{Name: w.name, Value: v})
 	}
 	rd, warnings, err := redact.New(named, redact.Options{})
 	if err != nil {
-		return failf(st, ExitConfig, "%v", err)
+		return launch.Spec{}, failf(st, ExitConfig, "%v", err)
 	}
-	defer rd.Zero()
 	for _, w := range warnings {
 		fmt.Fprintf(st.Stderr, "passess: warning: %s\n", w)
 	}
+	return launch.Spec{Path: prog.Path, Argv: argv, Env: childEnv(environ, u, inject), Redactor: rd}, 0
+}
 
-	status, err := launch.Run(launch.Spec{
-		Path:             prog.Path,
-		Argv:             argv,
-		Env:              childEnv(os.Environ(), u, inject),
-		Stdin:            st.Stdin,
-		Stdout:           st.Stdout,
-		Stderr:           st.Stderr,
-		Redactor:         rd,
-		ForwardInterrupt: !isTerminal(st.Stdin),
-	})
+// execStatus reports a child that did not start or whose output was lost,
+// and passes its status on.
+func execStatus(st *Streams, argv0 string, status int, err error) int {
 	if err != nil && status >= launch.NotExecutable {
-		return failf(st, status, "%s: %v", argv[0], err)
+		return failf(st, status, "%s: %v", argv0, err)
 	}
 	if err != nil && !errors.Is(err, syscall.EPIPE) {
 		fmt.Fprintf(st.Stderr, "passess: %v\n", err)
