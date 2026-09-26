@@ -444,7 +444,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		return ExitOK
 	}
 
-	block := mcpBlock(server, raw, envMap, vars, headers)
+	block := mcpBlock(server, raw, envMap, vars, headers, harnessID)
 	for _, mv := range moves {
 		fmt.Fprintf(st.Stdout, "  %s -> %s at keychain://%s/%s\n", mv.from, mv.secret, keychainService, mv.account)
 	}
@@ -499,9 +499,12 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // mcpBlock renders [mcp.NAME]; it holds names and non-secret values only.
-func mcpBlock(name string, raw harness.Raw, env, vars, headers map[string]string) []byte {
+// The server stays in the harness it came from (harnesses = [...]): moving
+// it into passess must not spread it to every other harness.
+func mcpBlock(name string, raw harness.Raw, env, vars, headers map[string]string, from string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[mcp.%s]\n", tomlKey(name))
+	fmt.Fprintf(&b, "harnesses = [%s]\n", tomlString(from))
 	inline := func(m map[string]string) string {
 		parts := make([]string, 0, len(m))
 		for _, k := range sortedKeys(m) {

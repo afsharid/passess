@@ -207,4 +207,14 @@ func TestMCPValidation(t *testing.T) {
 	if u.MCP["x"].Vars["LOG_LEVEL"] != "debug" || u.MCP["y"].Headers["X-Client"] != "passess" {
 		t.Fatalf("mcp = %+v", u.MCP)
 	}
+	u, err = LoadUser(write(t, "config.toml", head+"[mcp.x]\ncommand = [\"a\"]\nharnesses = [\"codex\"]\n[mcp.y]\ncommand = [\"b\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !u.MCP["x"].For("codex") || u.MCP["x"].For("claude") || !u.MCP["y"].For("claude") {
+		t.Fatalf("harnesses = %+v", u.MCP)
+	}
+	if _, err := LoadUser(write(t, "config.toml", head+"[mcp.x]\ncommand = [\"a\"]\nharnesses = [\"Claude Code\"]\n")); err == nil {
+		t.Fatal("a harness name that is not an ID was accepted")
+	}
 }

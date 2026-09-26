@@ -110,10 +110,14 @@ func passessPath() string {
 	return exe
 }
 
-func desiredServers(u *config.User) []harness.Desired {
+// desiredServers are the [mcp.*] servers passess wants the harness with ID
+// id to start ("" for all of them).
+func desiredServers(u *config.User, id string) []harness.Desired {
 	names := make([]string, 0, len(u.MCP))
-	for n := range u.MCP {
-		names = append(names, n)
+	for n, m := range u.MCP {
+		if id == "" || m.For(id) {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 	bin := passessPath()
@@ -169,22 +173,35 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		return failf(st, ExitUsage, "%v", err)
 	}
 
-	var desired []harness.Desired
+	var user *config.User
 	if verb != "uninstall" {
 		path, err := config.UserPath(st.Getenv)
 		if err != nil {
 			return failf(st, ExitConfig, "%v", err)
 		}
-		u, err := config.LoadUser(path)
-		if err != nil {
+		if user, err = config.LoadUser(path); err != nil {
 			return failf(st, ExitConfig, "%v", err)
 		}
-		desired = desiredServers(u)
+		known := map[string]bool{}
+		for _, a := range adapters(st) {
+			known[a.ID()] = true
+		}
+		for _, name := range sortedKeys(user.MCP) {
+			for _, h := range user.MCP[name].Harnesses {
+				if !known[h] {
+					return failf(st, ExitConfig, "mcp.%s: harnesses names %q, which is not a harness passess knows (%s)", name, h, knownHarnesses(st))
+				}
+			}
+		}
 	}
 
 	out := harnessOutput{Applied: *apply, Harnesses: []harnessReport{}}
 	healthy := true
 	for _, a := range targets {
+		var desired []harness.Desired
+		if user != nil {
+			desired = desiredServers(user, a.ID())
+		}
 		h := hooksFor(st, a.ID())
 		r := report(a, verb, desired, *force)
 		fillHooks(&r, h)
