@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -30,6 +31,17 @@ var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 type secretFlags []struct{ env, name string }
 
 func (s *secretFlags) String() string { return "" }
+
+// names are the secrets asked for, each once.
+func (s secretFlags) names() []string {
+	var out []string
+	for _, w := range s {
+		if !slices.Contains(out, w.name) {
+			out = append(out, w.name)
+		}
+	}
+	return out
+}
 
 func (s *secretFlags) Set(v string) error {
 	for _, item := range strings.Split(v, ",") {
@@ -75,9 +87,16 @@ func runExec(st *Streams, args []string) int {
 	if code != 0 {
 		return code
 	}
+	prog, code := checkExec(st, u, proj, argv, wanted, exec.LookPath)
+	if code != 0 {
+		return code
+	}
+	if code := askApproval(st, u, wanted.names(), argv); code != 0 {
+		return code
+	}
 	res, zero := newResolver(st, u)
 	defer zero()
-	spec, code := prepareExec(st, u, proj, os.Environ(), argv, wanted, res, exec.LookPath)
+	spec, code := resolveExec(st, u, prog, os.Environ(), argv, wanted, res)
 	if code != 0 {
 		return code
 	}
@@ -93,27 +112,33 @@ type secretSource interface {
 	Secret(ctx context.Context, s config.Secret) (secret.Value, error)
 }
 
-// prepareExec checks the policy for argv and every wanted secret, resolves
-// them and returns the child's spec without its streams. Refusals and
-// warnings go to st.Stderr; a non-zero code means nothing may run. The spec's
-// environment and redactor hold copies: res may forget its values at once.
-func prepareExec(st *Streams, u *config.User, proj *config.Project, environ, argv []string, wanted secretFlags,
-	res secretSource, lookPath func(string) (string, error)) (launch.Spec, int) {
+// checkExec finds argv's program and decides whether every wanted secret may
+// go to it. Refusals go to st.Stderr; a non-zero code means nothing may run.
+func checkExec(st *Streams, u *config.User, proj *config.Project, argv []string, wanted secretFlags,
+	lookPath func(string) (string, error)) (policy.Program, int) {
 	prog, err := policy.Inspect(argv[0], lookPath)
 	if err != nil {
-		return launch.Spec{}, failf(st, ExitNotFound, "%v", err)
+		return prog, failf(st, ExitNotFound, "%v", err)
 	}
 	for _, w := range wanted {
 		s, ok := u.Secrets[w.name]
 		if !ok {
-			return launch.Spec{}, failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>` (or add a [secrets.%s] table to %s)", w.name, w.name, w.name, u.Path)
+			return prog, failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>` (or add a [secrets.%s] table to %s)", w.name, w.name, w.name, u.Path)
 		}
 		d := policy.Check(w.name, prog, policy.Effective(s.Allow, proj.ProjectAllow(w.name)))
 		if !d.Allowed {
-			return launch.Spec{}, refuse(st, u, w.name, d)
+			return prog, refuse(st, u, w.name, d)
 		}
 	}
+	return prog, 0
+}
 
+// resolveExec resolves the wanted secrets and returns the spec of prog's
+// child without its streams. Failures and warnings go to st.Stderr. The
+// spec's environment and redactor hold copies: res may forget its values at
+// once.
+func resolveExec(st *Streams, u *config.User, prog policy.Program, environ, argv []string, wanted secretFlags,
+	res secretSource) (launch.Spec, int) {
 	inject := map[string]secret.Value{}
 	var named []redact.Secret
 	for _, w := range wanted {

@@ -258,10 +258,10 @@ func (p countingProvider) Resolve(_ context.Context, r ref.Ref) (secret.Value, e
 }
 
 func cacheServer(calls *atomic.Int32) *agentServer {
-	return &agentServer{live: map[*generation]bool{}, resolvers: func(*config.User) (*resolve.Resolver, func()) {
+	return newAgentServer(nil, "", func(*config.User) (*resolve.Resolver, func()) {
 		r := resolve.New(countingProvider{calls})
 		return r, r.Zero
-	}}
+	})
 }
 
 func cacheConfig(t *testing.T, ttl string) (*config.User, [sha256.Size]byte) {
