@@ -1,3 +1,5 @@
+<img src="docs/images/icon.png" alt="" width="96" align="right">
+
 # passess
 
 **The last mile between your password manager and your AI coding agents.**
