@@ -1,0 +1,1 @@
+{"hook_event_name": "beforeReadFile", "file_path": "/home/u/proj/.env", "content": "API_KEY=passess-fake-content-never-echoed"}

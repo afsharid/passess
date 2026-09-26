@@ -1,0 +1,1 @@
+{"hook_event_name": "BeforeTool", "cwd": "/home/u/proj", "tool_name": "run_shell_command", "tool_input": {"command": "printenv"}}

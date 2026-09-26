@@ -1,0 +1,4 @@
+exit: 2
+--- stdout
+--- stderr
+token [REDACTED:GITHUB_TOKEN]

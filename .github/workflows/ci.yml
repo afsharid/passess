@@ -62,3 +62,6 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The version .githooks/pre-commit runs, so both read .gitleaks.toml
+          # alike ([[allowlists]] needs 8.25 or later).
+          GITLEAKS_VERSION: 8.30.1

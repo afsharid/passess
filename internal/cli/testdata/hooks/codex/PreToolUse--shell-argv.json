@@ -1,0 +1,1 @@
+{"hook_event_name": "PreToolUse", "cwd": "/home/u/proj", "tool_name": "Bash", "tool_input": {"command": ["bash", "-lc", "cat .env"]}}

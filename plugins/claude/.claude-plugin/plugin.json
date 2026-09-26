@@ -1,0 +1,12 @@
+{
+  "name": "passess",
+  "version": "0.4.0-alpha",
+  "description": "Keeps secret values out of Claude Code's context. Needs the passess CLI on PATH; `passess install` registers the same hooks in ~/.claude/settings.json instead, so use one or the other.",
+  "author": {
+    "name": "afsharid"
+  },
+  "homepage": "https://github.com/afsharid/passess",
+  "repository": "https://github.com/afsharid/passess",
+  "license": "Apache-2.0",
+  "keywords": ["secrets", "credentials", "hooks"]
+}

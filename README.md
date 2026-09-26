@@ -7,7 +7,8 @@
 > `install` / `status` / `uninstall` for eleven harnesses, and `scan`, `audit`,
 > `migrate` and `inventory` for secrets already sitting in clear. References can point
 > at 1Password, Bitwarden (Secrets Manager or Password Manager), Vault / OpenBao, the OS
-> keychain or an environment variable. Plus the macOS menu bar app. Next: guard hooks.
+> keychain or an environment variable. Guard hooks refuse the few actions that would
+> put a value into an agent's context in seven harnesses. Plus the macOS menu bar app.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,
@@ -140,6 +141,59 @@ formatting stay, a symlinked config is changed where it points, and `uninstall`
 restores the file byte for byte ([ADR 7](docs/adr/0007-edit-harness-configs-by-splicing.md)).
 Files are backed up under `~/.local/state/passess/backups` first, and
 `passess uninstall --apply` takes everything out again.
+
+## Guard hooks
+
+`passess install` also registers `passess hook` with each harness. Before a tool runs, it
+refuses the actions that would put a secret value into the conversation:
+
+- environment dumps: `env`, `printenv`, `set`, `export -p`;
+- reads of `.env` files, keys and credential files (`~/.aws/credentials`, `gh`'s token,
+  harness sign-ins);
+- vault reads that print a value: `op read`, `bws secret get`, `bw get`, `vault kv get`,
+  `security … -w`, `gh auth token`;
+- `$TOKEN` in a command line for a credential;
+- a prompt with a pasted credential in it;
+- an agent rewriting the passess config.
+
+Each refusal tells the agent what to run instead. Tool output is redacted where the
+harness allows it, and a new session learns which secret names exist.
+
+| Harness | Where the hook goes | Refuses | Redacts output | Prompt guard | Session note |
+|---|---|---|---|---|---|
+| Claude Code | `~/.claude/settings.json`, or the plugin below | yes | yes | yes | yes |
+| Codex | `~/.codex/hooks.json` (trust it once with `/hooks`) | yes | no way to | yes | yes |
+| Gemini CLI | `~/.gemini/settings.json` | yes | yes | yes | yes |
+| Cursor | `~/.cursor/hooks.json` | yes | — | yes | yes |
+| OpenCode | `~/.config/opencode/plugins/passess.js` | yes | yes | yes | via `AGENTS.md` |
+| Antigravity | `~/.gemini/config/hooks.json` | yes | no way to | no such event | via its rules file |
+| Kiro | by hand, in an agent profile (below) | yes | no way to | yes | yes |
+
+Shell commands are parsed, not pattern-matched, so `bash -lc 'cat .env'` and
+`echo $(printenv)` are caught while `cp .env.example .env` and `printenv PATH` pass.
+Anything the hook cannot parse, or fails on, is allowed. A hook adds about 4–5 ms to a
+tool call. Hooks are a second line of defense: several ways into the context (file
+watchers, pasted attachments, compaction) never fire one. The first line is that the
+values are not in the agent's environment or files at all.
+
+In Claude Code you can use the plugin instead of `install`'s hook entries (not both). It
+needs `passess` on PATH:
+
+```text
+/plugin marketplace add afsharid/passess
+/plugin install passess@passess
+```
+
+Kiro keeps hooks inside agent profiles, which passess leaves to you. Add this to the
+profile's JSON:
+
+```json
+"hooks": {
+  "agentSpawn": [{"command": "passess hook kiro agentSpawn"}],
+  "userPromptSubmit": [{"command": "passess hook kiro userPromptSubmit"}],
+  "preToolUse": [{"matcher": "*", "command": "passess hook kiro preToolUse"}]
+}
+```
 
 ## Secrets already in clear
 

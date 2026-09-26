@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"decision":"deny","reason":"passess: `printenv` would print every variable in this environment, credentials included, into this conversation. Print only what you need, such as `printenv PATH`. Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names."}
+--- stderr

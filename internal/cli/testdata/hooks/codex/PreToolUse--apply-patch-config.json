@@ -1,0 +1,1 @@
+{"hook_event_name": "PreToolUse", "cwd": "/home/u/proj", "tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** Update File: /home/u/.config/passess/config.toml\n@@\n-a\n+b\n*** End Patch"}}

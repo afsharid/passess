@@ -1,8 +1,8 @@
-// Package jsonedit changes one member of a JSON or JSONC document and leaves
-// every other byte alone: comments, trailing commas, key order and the file's
-// own indentation survive. passess uses it to register MCP servers with
-// harnesses that have no command for it. Adding a member and deleting it again
-// gives back the original bytes.
+// Package jsonedit changes one member of a JSON or JSONC object, or one
+// element of an array, and leaves every other byte alone: comments, trailing
+// commas, key order and the file's own indentation survive. passess uses it to
+// register MCP servers and hooks with harnesses that have no command for it.
+// Adding something and removing it again gives back the original bytes.
 package jsonedit
 
 import (
@@ -67,6 +67,81 @@ func Set(src []byte, path []string, name string, value any) ([]byte, error) {
 	return insert(src, at, name, value, unit)
 }
 
+// Append returns src with value added as the last element of the array at
+// path; the array, and any object on the way, is created when missing.
+func Append(src []byte, path []string, value any) ([]byte, error) {
+	if len(path) == 0 {
+		return nil, fmt.Errorf("append needs a path to an array")
+	}
+	if len(bytes.TrimSpace(src)) == 0 {
+		src = []byte("{}\n")
+	}
+	root, err := hujson.Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	at, ok := find(&root, path)
+	if !ok {
+		return Set(src, path[:len(path)-1], path[len(path)-1], []any{value})
+	}
+	if _, isArray := at.Value.(*hujson.Array); !isArray {
+		return nil, fmt.Errorf("%s is not an array", pointer(path))
+	}
+	return insertItem(src, at, "", value, indentUnit(src))
+}
+
+// RemoveWhere returns src without the elements of the array at path for which
+// match, given the element decoded, reports true. A missing path leaves src as
+// it is.
+func RemoveWhere(src []byte, path []string, match func(any) bool) ([]byte, error) {
+	for {
+		if len(bytes.TrimSpace(src)) == 0 {
+			return src, nil
+		}
+		root, err := hujson.Parse(src)
+		if err != nil {
+			return nil, err
+		}
+		at, ok := find(&root, path)
+		if !ok {
+			return src, nil
+		}
+		arr, ok := at.Value.(*hujson.Array)
+		if !ok {
+			return nil, fmt.Errorf("%s is not an array", pointer(path))
+		}
+		idx := -1
+		for i := range arr.Elements {
+			var v any
+			if Decode(src[arr.Elements[i].StartOffset:arr.Elements[i].EndOffset], &v) == nil && match(v) {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return src, nil
+		}
+		src = removeItem(src, at, idx)
+	}
+}
+
+// find walks path through objects.
+func find(root *hujson.Value, path []string) (*hujson.Value, bool) {
+	at := root
+	for _, key := range path {
+		obj, ok := at.Value.(*hujson.Object)
+		if !ok {
+			return nil, false
+		}
+		m := member(obj, key)
+		if m == nil {
+			return nil, false
+		}
+		at = &m.Value
+	}
+	return at, true
+}
+
 // Delete returns src without member name of the object at path. A missing
 // member or path leaves src as it is.
 func Delete(src []byte, path []string, name string) ([]byte, error) {
@@ -84,7 +159,12 @@ func Delete(src []byte, path []string, name string) ([]byte, error) {
 			return src, nil
 		}
 		if key == "" { // reached the object that holds name
-			return remove(src, at, obj, name), nil
+			for i := range obj.Members {
+				if lit, ok := obj.Members[i].Name.Value.(hujson.Literal); ok && lit.String() == name {
+					return removeItem(src, at, i), nil
+				}
+			}
+			return src, nil
 		}
 		m := member(obj, key)
 		if m == nil {
@@ -105,36 +185,65 @@ func member(obj *hujson.Object, key string) *hujson.ObjectMember {
 }
 
 func insert(src []byte, at *hujson.Value, name string, value any, unit string) ([]byte, error) {
-	obj := at.Value.(*hujson.Object)
-	open, closing := at.StartOffset, at.EndOffset-1
 	key, err := marshal(name)
 	if err != nil {
 		return nil, err
 	}
+	return insertItem(src, at, key+": ", value, unit)
+}
+
+// item is one member of an object or one element of an array: where its text
+// starts (at the name, for a member) and its value.
+type item struct {
+	start int
+	val   *hujson.Value
+}
+
+func items(at *hujson.Value) (list []item, closer byte) {
+	switch c := at.Value.(type) {
+	case *hujson.Object:
+		for i := range c.Members {
+			list = append(list, item{c.Members[i].Name.StartOffset, &c.Members[i].Value})
+		}
+		return list, '}'
+	case *hujson.Array:
+		for i := range c.Elements {
+			list = append(list, item{c.Elements[i].StartOffset, &c.Elements[i]})
+		}
+		return list, ']'
+	}
+	return nil, 0
+}
+
+// insertItem adds prefix+value (prefix is `"name": ` for a member, "" for an
+// element) after the last item of the object or array at.
+func insertItem(src []byte, at *hujson.Value, prefix string, value any, unit string) ([]byte, error) {
+	list, _ := items(at)
+	open, closing := at.StartOffset, at.EndOffset-1
 	base := lineIndent(src, open)
-	if len(obj.Members) == 0 {
+	if len(list) == 0 {
 		text, err := render(value, base+unit, unit)
 		if err != nil {
 			return nil, err
 		}
 		inner := strings.TrimRight(string(src[open+1:closing]), " \t\r\n") // keep comments, if any
-		return splice(src, open+1, closing, inner+"\n"+base+unit+key+": "+text+"\n"+base), nil
+		return splice(src, open+1, closing, inner+"\n"+base+unit+prefix+text+"\n"+base), nil
 	}
-	first, last := obj.Members[0].Name, &obj.Members[len(obj.Members)-1].Value
-	if sameLine(src, open, closing) { // a one-line object stays one line
+	first, last := list[0], list[len(list)-1].val
+	if sameLine(src, open, closing) { // a one-line container stays one line
 		text, err := marshal(value)
 		if err != nil {
 			return nil, err
 		}
-		return splice(src, last.EndOffset, last.EndOffset, ", "+key+": "+text), nil
+		return splice(src, last.EndOffset, last.EndOffset, ", "+prefix+text), nil
 	}
-	indent := lineIndent(src, first.StartOffset)
+	indent := lineIndent(src, first.start)
 	text, err := render(value, indent, unit)
 	if err != nil {
 		return nil, err
 	}
-	trailing := last.AfterExtra != nil // the last member already has a comma after it
-	entry := indent + key + ": " + text
+	trailing := last.AfterExtra != nil // the last item already has a comma after it
+	entry := indent + prefix + text
 	if trailing {
 		entry += ","
 	}
@@ -143,62 +252,55 @@ func insert(src []byte, at *hujson.Value, name string, value any, unit string) (
 		edits = append(edits, edit{last.EndOffset, last.EndOffset, ","})
 	}
 	if ls := lineStart(src, closing); strings.TrimSpace(string(src[ls:closing])) == "" {
-		edits = append(edits, edit{ls, ls, entry + "\n"}) // the brace has its own line
+		edits = append(edits, edit{ls, ls, entry + "\n"}) // the closer has its own line
 	} else {
 		edits = append(edits, edit{closing, closing, "\n" + entry + "\n" + base})
 	}
 	return apply(src, edits), nil
 }
 
-func remove(src []byte, at *hujson.Value, obj *hujson.Object, name string) []byte {
-	idx := -1
-	for i := range obj.Members {
-		if lit, ok := obj.Members[i].Name.Value.(hujson.Literal); ok && lit.String() == name {
-			idx = i
-		}
-	}
-	if idx < 0 {
-		return src
-	}
-	m := obj.Members[idx]
-	from := m.Name.StartOffset
+// removeItem deletes item idx of the object or array at.
+func removeItem(src []byte, at *hujson.Value, idx int) []byte {
+	list, closer := items(at)
+	m := list[idx]
+	from := m.start
 	ownLine := false
 	if ls := lineStart(src, from); strings.TrimSpace(string(src[ls:from])) == "" {
-		from, ownLine = ls, true // the member starts its line: take the whole line
+		from, ownLine = ls, true // the item starts its line: take the whole line
 	}
-	comma := m.Value.EndOffset + len(m.Value.AfterExtra) // where a comma after the value sits
-	last := idx == len(obj.Members)-1
+	comma := m.val.EndOffset + len(m.val.AfterExtra) // where a comma after the value sits
+	last := idx == len(list)-1
 	switch {
 	case !last:
-		next := obj.Members[idx+1].Name.StartOffset
+		next := list[idx+1].start
 		to := comma + 1
 		if sameLine(src, to, next) {
-			to = next // members share a line
+			to = next // items share a line
 		} else {
 			to = lineEnd(src, to)
 		}
 		return splice(src, from, to, "")
-	case idx > 0 && m.Value.AfterExtra == nil:
-		// The last member, no trailing comma: the comma before it goes too,
+	case idx > 0 && m.val.AfterExtra == nil:
+		// The last item, no trailing comma: the comma before it goes too,
 		// but not a comment that follows that comma.
-		prev := obj.Members[idx-1].Value
+		prev := list[idx-1].val
 		prevComma := prev.EndOffset + len(prev.AfterExtra)
 		if !ownLine {
-			return splice(src, prevComma, m.Value.EndOffset, "")
+			return splice(src, prevComma, m.val.EndOffset, "")
 		}
-		return apply(src, []edit{{prevComma, prevComma + 1, ""}, {from, lineEnd(src, m.Value.EndOffset), ""}})
+		return apply(src, []edit{{prevComma, prevComma + 1, ""}, {from, lineEnd(src, m.val.EndOffset), ""}})
 	case idx > 0:
 		return splice(src, from, lineEnd(src, comma+1), "")
-	default: // the only member
-		to := m.Value.EndOffset
-		if m.Value.AfterExtra != nil {
+	default: // the only item
+		to := m.val.EndOffset
+		if m.val.AfterExtra != nil {
 			to = comma + 1
 		}
 		out := splice(src, from, lineEnd(src, to), "")
 		open := at.StartOffset
-		closing := bytes.IndexByte(out[open:], '}') + open
+		closing := bytes.IndexByte(out[open:], closer) + open
 		if strings.TrimSpace(string(out[open+1:closing])) == "" {
-			out = splice(out, open+1, closing, "") // {} again
+			out = splice(out, open+1, closing, "") // {} or [] again
 		}
 		return out
 	}

@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+--- stderr
+passess hook: the event could not be read; the action is allowed

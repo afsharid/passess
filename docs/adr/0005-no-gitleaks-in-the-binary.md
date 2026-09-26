@@ -32,8 +32,11 @@ detector per call is twice the hook budget.
 
 ## Consequences
 
-- The hook path keeps close to the 2.8 ms baseline; the paste-guard path gets its own
-  measurement when it is written (acceptance: p50 < 10 ms).
+- Measured with slice 5 on the same machine (`-s -w`, hyperfine, 300 runs, the payloads
+  in `internal/cli/testdata/hooks`): `passess hook claude PreToolUse` on a shell command
+  is p50 4.0 ms, p95 4.7 ms. `UserPromptSubmit`, which loads the rules and checks the
+  prompt, is p50 5.0 ms, p95 5.5 ms. Both are inside the 10 ms budget, so the bridge of
+  ADR 6 stays in the one binary.
 - Vendored rules must be refreshed from upstream deliberately; a test pins the rule count
   and file hash so updates are visible in review.
 - One local change, noted at the top of the file: upstream's `gcp-api-key` allowlist

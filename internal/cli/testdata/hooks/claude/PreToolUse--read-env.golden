@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"passess: /home/u/proj/.env holds secret values; reading it puts them into this conversation. Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names."}}
+--- stderr

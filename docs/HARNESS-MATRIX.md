@@ -13,13 +13,13 @@ verified yet.
 
 | Harness | Block a call | Rewrite input | Rewrite model-visible output | MCP env syntax | Instructions file |
 |---|---|---|---|---|---|
-| Claude Code 2.1.281 | yes, `permissionDecision` (bin) | yes, `updatedInput` (bin) | yes, PostToolUse `updatedToolOutput`, all tools, synchronous hooks only (bin) | `${VAR}`, `${VAR:-default}` (doc) | `CLAUDE.md` |
-| Codex 0.155 | yes (bin, doc) | yes, `updatedInput` (bin) | yes, PostToolUse `decision: block` (doc) | TOML; `bearer_token_env_var`, `env_http_headers` (doc) | `AGENTS.md` |
-| Gemini CLI | yes, BeforeTool (doc) | yes, `tool_input` (doc) | yes, AfterTool (doc) | `$VAR`, `${VAR}` (doc) | `GEMINI.md` |
-| Cursor | yes, `failClosed` available (doc) | yes, `updated_input` (doc) | MCP only, `updated_mcp_tool_output`; not shell (doc) | `${env:NAME}`, `envFile` (doc) | `AGENTS.md`, rules |
-| OpenCode 1.18 | yes, `tool.execute.before` throws (doc, bin) | yes, argument mutation (doc) | ? | `{env:NAME}`, `{file:path}` (doc, bin) | `AGENTS.md` |
-| Kiro CLI 2.21 | yes, preToolUse (doc, cfg) | ? | ? | JSON `env` (cfg) | steering files |
-| Antigravity | CLI hooks exist (?) | ? | ? | JSON `env` (cfg) | `GEMINI.md` |
+| Claude Code 2.1.281 | yes, `permissionDecision` (bin) | yes, `updatedInput` (bin) | yes, PostToolUse `updatedToolOutput`, which must keep the tool's output shape (bin) | `${VAR}`, `${VAR:-default}` (doc) | `CLAUDE.md` |
+| Codex 0.155 | yes, same fields as Claude Code (bin, doc) | yes, `updatedInput` (bin) | no documented field; no `updatedToolOutput` in the binary (bin) | TOML; `bearer_token_env_var`, `env_http_headers` (doc) | `AGENTS.md` |
+| Gemini CLI | yes, BeforeTool `decision: deny` (doc) | yes, `tool_input` (doc) | yes: AfterTool exit 2 replaces the result with stderr (doc) | `$VAR`, `${VAR}` (doc) | `GEMINI.md` |
+| Cursor | yes, `permission: deny`, exit 2 (doc) | yes, `updated_input` (doc) | MCP only, `updated_mcp_tool_output`; not shell (doc) | `${env:NAME}`, `envFile` (doc) | `AGENTS.md`, rules |
+| OpenCode 1.18 | yes, `tool.execute.before` throws (doc, bin) | yes, argument mutation (doc) | yes, `tool.execute.after` mutates `output.output` (doc) | `{env:NAME}`, `{file:path}` (doc, bin) | `AGENTS.md` |
+| Kiro CLI 2.21 | yes, preToolUse exit 2 (doc; events in the binary) | ? | no (doc) | JSON `env` (cfg) | steering files |
+| Antigravity (agy 1.2.11) | yes, PreToolUse `decision: deny` (doc); no prompt or session event | ? | no (doc) | JSON `env` (cfg) | `~/.gemini/config/rules/` (bin) |
 | VS Code / Copilot | config-level only for now | | | `${input:id}` with `password: true`, `${env:VAR}` (doc) | `copilot-instructions.md` |
 | Windsurf | pre-hooks only (doc) | no (doc) | no (doc) | JSON | |
 | Zed, Claude Desktop | config-level only for now | | | JSON `env` | |
@@ -61,6 +61,27 @@ What the harnesses did, rather than what their docs say:
 - Kiro agent profiles load `~/.kiro/settings/mcp.json` only with `includeMcpJson: true`,
   and the default is false (doc). 6 of 7 profiles on the maintainer's machine leave it
   off (cfg). `passess audit` lists such profiles.
+
+## How passess registers its hook handler
+
+`passess install` adds one handler per event, running `/absolute/path/to/passess hook
+HARNESS EVENT`; entries whose command runs `passess hook` are passess's, and `uninstall`
+removes exactly those (and any event list or file only they filled). The exchanges
+themselves, one per harness and event, are pinned in `internal/cli/testdata/hooks/`.
+
+| Harness | File | Events | Payload, as read |
+|---|---|---|---|
+| Claude Code | `~/.claude/settings.json` → `hooks` | PreToolUse (Bash, Read, Grep, Write, Edit, MultiEdit, Notebook*), PostToolUse, UserPromptSubmit, SessionStart | `tool_name`, `tool_input`, `tool_response`, `prompt` (doc, bin) |
+| Codex | `~/.codex/hooks.json` → `hooks` | PreToolUse, UserPromptSubmit, SessionStart | as Claude Code; the shell command may be an argv array; `apply_patch` names its files in the patch; the prompt may come as `user_prompt` (doc) |
+| Gemini CLI | `~/.gemini/settings.json` → `hooks` | BeforeTool, AfterTool, BeforeAgent, SessionStart | `tool_name`, `tool_input`, `tool_response.llmContent`, `prompt` (doc, unverified: Gemini CLI is not installed here, and whether a handler needs a `name` is open) |
+| Cursor | `~/.cursor/hooks.json` (`version: 1`) | beforeShellExecution, beforeReadFile, beforeSubmitPrompt, sessionStart | `command`, `file_path` (the file's `content` also arrives and is ignored), `prompt` (doc) |
+| OpenCode | `$XDG/opencode/plugins/passess.js`; 1.18.29 loads `{plugin,plugins}/*.{ts,js}` from its config directories (bin) | tool.execute.before/after, chat.message | passess's own JSON, from its plugin |
+| Antigravity | `~/.gemini/config/hooks.json` → `passess` | PreToolUse | `toolCall.name`, `toolCall.args` (`CommandLine`, `Cwd`; file tools by any `*Path`/`*File` argument) (doc, bin) |
+| Kiro | an agent profile's `hooks`, by hand | agentSpawn, userPromptSubmit, preToolUse | tool names `execute_bash`, `fs_read`, `fs_write` (bin); the stdin fields are not documented, so passess reads the Claude-style ones and `USER_PROMPT` (doc) |
+
+Codex runs hooks it has not seen before only once they are trusted in `/hooks` (doc).
+Claude Code reads hook settings when a session starts and has changes made outside it
+reviewed in `/hooks`, so open sessions keep their old hooks (doc); `install` says so.
 
 ## Insecure defaults
 
