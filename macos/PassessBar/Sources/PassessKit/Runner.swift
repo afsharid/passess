@@ -1,0 +1,99 @@
+import Foundation
+
+/// Runs the passess CLI and decodes its JSON. The app only ever asks for
+/// reports; no secret value crosses into this process.
+public struct Passess {
+    public let executable: URL
+
+    public init(executable: URL) {
+        self.executable = executable
+    }
+
+    public enum Failure: Error, CustomStringConvertible {
+        case notFound
+        case timedOut
+        case unreadable(String)
+
+        public var description: String {
+            switch self {
+            case .notFound: return "passess not found. Install it with `go install github.com/afsharid/passess/cmd/passess@latest`."
+            case .timedOut: return "passess did not answer in time"
+            case let .unreadable(why): return "could not read passess output: \(why)"
+            }
+        }
+    }
+
+    /// Directories searched for the CLI and handed to it as PATH. Apps started
+    /// from Finder get a minimal PATH, which would hide bws or op from passess.
+    public static func searchPath(home: String = NSHomeDirectory()) -> [String] {
+        ["\(home)/.local/bin", "\(home)/go/bin", "/opt/homebrew/bin", "/usr/local/bin",
+         "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    }
+
+    /// Prefers the copy bundled inside the app, then the search path.
+    public static func locate(bundle: Bundle = .main, fileManager: FileManager = .default) -> Passess? {
+        if let bundled = bundle.url(forResource: "passess", withExtension: nil),
+           fileManager.isExecutableFile(atPath: bundled.path) {
+            return Passess(executable: bundled)
+        }
+        for dir in searchPath() {
+            let candidate = URL(fileURLWithPath: dir).appendingPathComponent("passess")
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return Passess(executable: candidate)
+            }
+        }
+        return nil
+    }
+
+    /// Runs passess and returns its stdout. doctor and check exit 1 when
+    /// something needs attention and still print a full report, so the exit
+    /// status is not an error here.
+    public func run(_ arguments: [String], timeout: TimeInterval = 30) throws -> Data {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = [
+            "HOME": NSHomeDirectory(),
+            "USER": NSUserName(),
+            "PATH": Passess.searchPath().joined(separator: ":"),
+            "LANG": "en_US.UTF-8",
+        ]
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        try process.run()
+        var data = Data()
+        let reader = DispatchQueue(label: "passess.stdout")
+        let readDone = DispatchSemaphore(value: 0)
+        reader.async {
+            data = stdout.fileHandleForReading.readDataToEndOfFile()
+            readDone.signal()
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw Failure.timedOut
+        }
+        readDone.wait()
+        return data
+    }
+
+    public func doctor() throws -> Doctor {
+        try decode(Doctor.self, from: run(["doctor", "--json"]))
+    }
+
+    public func check() throws -> Check {
+        try decode(Check.self, from: run(["check", "--json"], timeout: 120))
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw Failure.unreadable(String(describing: error))
+        }
+    }
+}
