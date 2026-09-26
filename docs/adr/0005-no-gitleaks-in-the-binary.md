@@ -36,3 +36,7 @@ detector per call is twice the hook budget.
   measurement when it is written (acceptance: p50 < 10 ms).
 - Vendored rules must be refreshed from upstream deliberately; a test pins the rule count
   and file hash so updates are visible in review.
+- One local change, noted at the top of the file: upstream's `gcp-api-key` allowlist
+  lists sixteen public example keys verbatim, and GitHub's secret scanning reported each
+  one in this repository. passess writes their `AIza` as `AIz[a]`, which is the same regex
+  with no key-shaped text; a test keeps it so and checks the allowlist still works.
