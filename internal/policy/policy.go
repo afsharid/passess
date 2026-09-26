@@ -20,34 +20,62 @@ import (
 	"strings"
 )
 
-// denied lists program families that get no secrets by default.
+// denied lists the families that get no secrets by default.
 var denied = map[string]bool{}
 
+// aliases folds names into one family. Every shell is "sh": /bin/sh is dash on
+// Debian, bash on Fedora and busybox on Alpine, and allowing "sh" means allowing
+// a shell, whichever one it turns out to be.
+var aliases = map[string]string{}
+
+// lookups are the names searched on PATH to recognize renamed copies.
+var lookups = strings.Fields(`sh bash zsh dash ksh fish python3 python node nodejs deno bun perl ruby
+	php lua awk gawk mawk jq base64 base32 xxd od hexdump rev tr env printenv busybox osascript`)
+
 func init() {
-	for _, f := range strings.Fields(`
-		sh bash zsh fish dash ksh mksh csh tcsh ash busybox pwsh powershell nu elvish xonsh
-		python pypy node nodejs deno bun perl ruby irb php lua luajit tclsh wish expect
-		awk gawk mawk nawk osascript jshell rscript julia
-		env printenv base64 base32 xxd od hexdump rev tr jq`) {
+	for _, f := range strings.Fields(`sh python node deno bun perl ruby php lua tclsh wish expect
+		awk osascript jshell rscript julia env printenv base64 base32 xxd od hexdump rev tr jq busybox toybox`) {
 		denied[f] = true
+	}
+	for family, names := range map[string]string{
+		"sh":     "bash zsh dash ksh mksh ash csh tcsh fish pwsh powershell nu elvish xonsh",
+		"python": "pypy ipython",
+		"node":   "nodejs",
+		"ruby":   "irb",
+		"lua":    "luajit",
+		"awk":    "gawk mawk nawk",
+	} {
+		for _, n := range strings.Fields(names) {
+			aliases[n] = family
+		}
 	}
 }
 
 var versionSuffix = regexp.MustCompile(`[-_]?[0-9][0-9.]*$`)
 
-// Family normalizes a program name: lower case, trailing version stripped, so
-// python3.14, python3 and python are one family.
+// Family normalizes a program name: lower case, trailing version stripped and
+// aliases folded, so python3.14 is python and dash is sh.
 func Family(name string) string {
 	f := strings.ToLower(filepath.Base(name))
 	f = strings.TrimSuffix(f, ".exe")
+	if a, ok := aliases[f]; ok {
+		return a
+	}
 	if denied[f] {
 		return f // base64 is a name, not "base" version 64
 	}
 	if stripped := versionSuffix.ReplaceAllString(f, ""); stripped != "" {
 		f = stripped
 	}
+	if a, ok := aliases[f]; ok {
+		return a
+	}
 	return f
 }
+
+// multiCall reports whether a family is a multi-call binary whose applet is
+// chosen by argv[0].
+func multiCall(family string) bool { return family == "busybox" || family == "toybox" }
 
 // Denied reports whether a family is on the default deny list.
 func Denied(family string) bool { return denied[family] }
@@ -89,8 +117,12 @@ func Inspect(argv0 string, lookPath func(string) (string, error)) (Program, erro
 			p.Why[f] = why
 		}
 	}
-	add(Family(p.Name), "")
-	if typed := Family(argv0); typed != Family(p.Name) {
+	typed, own := Family(argv0), Family(p.Name)
+	if multiCall(own) && !multiCall(typed) {
+		own = typed // busybox runs the applet argv[0] names
+	}
+	add(own, "")
+	if typed != own {
 		add(typed, "")
 	}
 	for _, interp := range shebang(resolved) {
@@ -138,11 +170,12 @@ func copyOf(path string, lookPath func(string) (string, error)) (family, origina
 		return "", ""
 	}
 	var sum []byte
-	for f := range denied {
-		orig, err := lookPath(f)
+	for _, name := range lookups {
+		orig, err := lookPath(name)
 		if err != nil {
 			continue
 		}
+		f := Family(name)
 		if resolved, err := filepath.EvalSymlinks(orig); err == nil {
 			orig = resolved
 		}

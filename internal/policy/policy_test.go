@@ -11,7 +11,8 @@ import (
 func TestFamily(t *testing.T) {
 	for in, want := range map[string]string{
 		"python3.14": "python", "python3": "python", "/usr/bin/python": "python",
-		"bash": "bash", "bash-5.2": "bash", "node22": "node", "Perl5.30": "perl",
+		"bash": "sh", "bash-5.2": "sh", "dash": "sh", "zsh": "sh", "fish": "sh", "node22": "node",
+		"nodejs": "node", "gawk": "awk", "pypy3": "python", "Perl5.30": "perl", "busybox": "busybox",
 		"gh": "gh", "base64": "base64", "sha256sum": "sha256sum", "7z": "7z",
 	} {
 		if got := Family(in); got != want {
@@ -39,6 +40,25 @@ func TestShellIsRefusedUnlessAllowed(t *testing.T) {
 	}
 	if d := Check("TOKEN", sh, []string{"sh"}); !d.Allowed {
 		t.Fatalf("sh with allow=[sh]: %+v", d)
+	}
+
+	// Debian's /bin/sh is a symlink to dash; allowing "sh" must cover it.
+	for _, other := range []string{"dash", "bash", "zsh"} {
+		target, err := exec.LookPath(other)
+		if err != nil {
+			continue
+		}
+		link := filepath.Join(t.TempDir(), "sh")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		p := mustInspect(t, link)
+		if d := Check("TOKEN", p, []string{"sh"}); !d.Allowed {
+			t.Fatalf("sh -> %s with allow=[sh]: %+v (families %v)", other, d, p.Families)
+		}
+		if d := Check("TOKEN", p, nil); d.Allowed {
+			t.Fatalf("sh -> %s without allow: allowed", other)
+		}
 	}
 }
 
@@ -94,6 +114,43 @@ func TestDisguisesAreSeenThrough(t *testing.T) {
 		if why != "" && !strings.Contains(d.Reason, why) {
 			t.Fatalf("%s: reason %q does not say %q", path, d.Reason, why)
 		}
+	}
+}
+
+// TestMultiCallBinary builds a busybox-like layout: applets are symlinks to
+// one binary, so the applet name decides, and busybox itself stays denied.
+func TestMultiCallBinary(t *testing.T) {
+	dir := t.TempDir()
+	box := filepath.Join(dir, "busybox")
+	if err := os.WriteFile(box, []byte("\x7fELF not really busybox"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, applet := range []string{"ls", "sh"} {
+		if err := os.Symlink(box, filepath.Join(dir, applet)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	look := func(name string) (string, error) {
+		if strings.Contains(name, "/") {
+			return name, nil
+		}
+		return exec.LookPath(name)
+	}
+	check := func(name string) Decision {
+		p, err := Inspect(filepath.Join(dir, name), look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Check("TOKEN", p, nil)
+	}
+	if d := check("ls"); !d.Allowed {
+		t.Fatalf("ls applet refused: %+v", d)
+	}
+	if d := check("sh"); d.Allowed || d.Family != "sh" {
+		t.Fatalf("sh applet allowed: %+v", d)
+	}
+	if d := check("busybox"); d.Allowed {
+		t.Fatalf("busybox itself allowed: %+v", d)
 	}
 }
 
