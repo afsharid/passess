@@ -161,10 +161,14 @@ refuses the actions that would put a secret value into the conversation:
   `security … -w`, `gh auth token`;
 - `$TOKEN` in a command line for a credential;
 - a prompt with a pasted credential in it;
-- an agent rewriting the passess config.
+- an agent rewriting the passess config;
+- ways around the agent: `passess agent stop`, `serve` or `approve`, `passess helper`,
+  `PASSESS_CONFIG=` or `PASSESS_AGENT_SOCK=` in a command, and anything but passess
+  talking to the agent's socket.
 
 Each refusal tells the agent what to run instead. Tool output is redacted where the
-harness allows it, and a new session learns which secret names exist.
+harness allows it: with a running agent, first by the agent, which masks the values it
+holds and hands none back. A new session learns which secret names exist.
 
 | Harness | Where the hook goes | Refuses | Redacts output | Prompt guard | Session note |
 |---|---|---|---|---|---|
@@ -201,6 +205,27 @@ profile's JSON:
   "preToolUse": [{"matcher": "*", "command": "passess hook kiro preToolUse"}]
 }
 ```
+
+## A harness's own API key
+
+A harness that runs a command to get its API key can get it from passess, and the key
+leaves its settings file. For Claude Code, in `~/.claude/settings.json`:
+
+```json
+{ "apiKeyHelper": "passess helper ANTHROPIC_API_KEY" }
+```
+
+The value leaves passess on purpose here, so each secret opts in:
+
+```toml
+[secrets.ANTHROPIC_API_KEY]
+ref   = "op://Dev/Anthropic/credential"
+allow = ["passess-helper"]
+```
+
+`passess helper` prints nothing on a terminal, asks the agent first for a secret marked
+`approve`, and the hooks refuse it in agent shells. This keeps the key off disk. It
+does not keep it from the harness's own agent, which can run what the harness runs.
 
 ## Secrets already in clear
 

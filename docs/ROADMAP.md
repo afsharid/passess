@@ -57,7 +57,7 @@ is by hand. The measured cost is p50 4.0 ms for a shell check and 5.0 ms for a p
 check (ADR 5). Hooks are defense in depth; see the threat model for why they are not
 the boundary.
 
-**Slice 6 (in progress).** `passess agent` runs agent commands itself and keeps what
+**Slice 6 (done).** `passess agent` runs agent commands itself and keeps what
 vaults returned in memory for `agent.cache_ttl`; no value crosses its socket (ADR 8).
 Done:
 - the socket (the user's own processes only, stdio passed as descriptors);
@@ -66,10 +66,10 @@ Done:
 - approvals for secrets marked `approve`, keyed on secret, program family and the
   caller's anchor process (ADR 9). They fail closed and are answered with
   `passess agent approve`;
-- an audit log of names.
-
-Next: Touch ID answers in the menu bar app; then hook redaction with the agent's values,
-`passess helper` for `apiKeyHelper`, and hooks that refuse ways around the agent.
+- an audit log of names;
+- the menu bar app answers approvals with Touch ID (v0.5.0-alpha);
+- hooks mask tool output with the agent's values, refuse the ways around the agent,
+  and `passess helper` serves Claude Code's `apiKeyHelper`.
 
 **Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,
 must never show it in its output, transcripts or files. And the maintainer's machine

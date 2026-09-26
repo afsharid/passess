@@ -24,6 +24,7 @@ const (
 	Exec     Kind = "exec"     // run a command with secrets; the client's stdio is attached
 	Ask      Kind = "ask"      // may these secrets go to this command? No value either way
 	Approver Kind = "approver" // answer asks for as long as the connection lasts
+	Redact   Kind = "redact"   // mask the values the agent holds in a text; none of them comes back
 	Status   Kind = "status"   // describe the agent
 	Lock     Kind = "lock"     // forget every cached value and approval
 	Stop     Kind = "stop"     // stop accepting, forget, exit once running commands end
@@ -47,7 +48,16 @@ type Request struct {
 	Env     Environ  `json:"env,omitempty"`
 	Secrets []Secret `json:"secrets,omitempty"`
 	Config  string   `json:"config,omitempty"` // the user config path the client would read
+	Text    Blob     `json:"text,omitempty"`   // what a Redact request masks
 }
+
+// Blob is text that may hold a credential: a tool's output, before or after
+// masking. Every fmt verb prints only its length; JSON carries it whole.
+type Blob string
+
+func (b Blob) String() string             { return fmt.Sprintf("[%d bytes]", len(b)) }
+func (b Blob) GoString() string           { return b.String() }
+func (b Blob) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, b.String()) }
 
 // Environ is an environment in KEY=value form. Every fmt verb prints only how
 // many variables it holds; JSON carries it whole.
@@ -77,6 +87,7 @@ type Frame struct {
 	Ask    *AskFor `json:"ask,omitempty"`    // agent → approver: a question
 	Cancel string  `json:"cancel,omitempty"` // agent → approver: the question with this ID is settled
 	Answer *Answer `json:"answer,omitempty"` // approver → agent
+	Text   Blob    `json:"text,omitempty"`   // agent → client: the answer to Redact
 }
 
 // AskFor is a question for an approver: may these secrets go to this

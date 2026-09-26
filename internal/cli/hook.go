@@ -8,7 +8,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/afsharid/passess/internal/agent"
+	"github.com/afsharid/passess/internal/buildinfo"
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/hook"
 	"github.com/afsharid/passess/internal/redact"
@@ -92,5 +95,34 @@ func hookEnv(st *Streams) hook.Env {
 		knownOnce.Do(func() { known = hook.KnownFromEnviron(env.Environ, env.Secrets) })
 		return known
 	}
+	if sock, err := agent.SocketPath(st.Getenv); err == nil {
+		env.AgentSocket = sock
+		env.Agent = func(text string) (string, bool) { return agentMask(sock, text) }
+	}
 	return env
+}
+
+// agentMask asks the agent at sock to mask the values it holds in text. No
+// agent, a text too long or any trouble, and the hook goes on without it:
+// hooks fail open.
+func agentMask(sock, text string) (string, bool) {
+	if len(text) > agent.MaxRedact {
+		return "", false
+	}
+	c, err := agent.Dial(sock)
+	if err != nil {
+		return "", false
+	}
+	defer c.Close()
+	if c.SetDeadline(time.Now().Add(2*time.Second)) != nil {
+		return "", false
+	}
+	if c.Send(agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Redact, Text: agent.Blob(text)}, nil) != nil {
+		return "", false
+	}
+	f, err := c.ReadFrame()
+	if err != nil || f.Error != "" {
+		return "", false
+	}
+	return string(f.Text), true
 }

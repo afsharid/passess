@@ -27,6 +27,7 @@ import (
 	"github.com/afsharid/passess/internal/launch"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/provider"
+	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/resolve"
 	"github.com/afsharid/passess/internal/secret"
@@ -335,6 +336,8 @@ func (s *agentServer) handle(c *agent.Conn) {
 		_ = c.Write(agent.Frame{Status: &status, Error: msg.String()})
 	case agent.Approver:
 		s.serveApprover(c)
+	case agent.Redact:
+		_ = c.Write(agent.Frame{Text: s.mask(req.Text)})
 	case agent.Status:
 		_ = c.Write(agent.Frame{Info: s.info()})
 	case agent.Lock:
@@ -347,6 +350,54 @@ func (s *agentServer) handle(c *agent.Conn) {
 	default:
 		_ = c.Write(agent.Frame{Error: fmt.Sprintf("unknown request %q", req.Kind)})
 	}
+}
+
+// mask replaces, in text, every value the agent holds, in each encoding the
+// redactor knows; hooks send tool outputs here. What comes back holds no
+// value that was not in the text already. A generation busy with a vault call
+// is skipped rather than waited for: a hook must not sit behind a Touch ID
+// prompt.
+func (s *agentServer) mask(text agent.Blob) agent.Blob {
+	if len(text) > agent.MaxRedact {
+		return text
+	}
+	s.mu.Lock()
+	gens := make([]*generation, 0, len(s.live))
+	for g := range s.live {
+		gens = append(gens, g)
+	}
+	s.mu.Unlock()
+	var named []redact.Secret
+	for _, g := range gens {
+		if !g.mu.TryLock() {
+			continue
+		}
+		if !g.closed {
+			for name, sec := range g.user.Secrets {
+				for _, r := range sec.Refs {
+					if v, ok := g.res.CachedValue(r); ok {
+						named = append(named, redact.Secret{Name: name, Value: secret.New(v.Bytes())})
+						break
+					}
+				}
+			}
+		}
+		g.mu.Unlock()
+	}
+	defer func() {
+		for _, n := range named {
+			n.Value.Zero()
+		}
+	}()
+	if len(named) == 0 {
+		return text
+	}
+	rd, _, err := redact.New(named, redact.Options{})
+	if err != nil {
+		return text
+	}
+	defer rd.Zero()
+	return agent.Blob(rd.Redact([]byte(text)))
 }
 
 // stop closes the socket, forgets every value and lets serve return once
