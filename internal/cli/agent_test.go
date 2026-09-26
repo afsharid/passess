@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -452,6 +453,35 @@ func TestLookPathIn(t *testing.T) {
 	}
 	if _, err := look("missing"); !errors.Is(err, exec.ErrNotFound) {
 		t.Errorf("missing: %v", err)
+	}
+}
+
+// A hook asks the running agent to mask a tool output: the whole way, from
+// the harness's payload through the socket to the answer the harness gets.
+func TestHookMasksWithTheAgent(t *testing.T) {
+	setup(t)
+	var calls atomic.Int32
+	s := cacheServer(&calls)
+	l, err := agent.Listen(agentSocket(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.l = l
+	go s.serve()
+	t.Cleanup(s.stop)
+	u, sum := cacheConfig(t, "1h")
+	value, err := resolveVia(t, s, u, sum, nil, "K")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name": "PostToolUse", "cwd": "/tmp", "tool_name": "Bash", "tool_input": {"command": "cat notes.txt"},` +
+		` "tool_response": {"stdout": "vault token ` + value + `", "stderr": "", "interrupted": false}}`
+	var out, errb bytes.Buffer
+	if code := Main([]string{"hook", "claude", "PostToolUse"}, strings.NewReader(payload), &out, &errb); code != 0 {
+		t.Fatalf("exit %d, %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), value) || !strings.Contains(out.String(), `"stdout":"vault token [REDACTED:K]"`) {
+		t.Fatalf("hook answer: %s", out.String())
 	}
 }
 
