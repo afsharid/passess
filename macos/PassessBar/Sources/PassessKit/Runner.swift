@@ -9,6 +9,9 @@ public struct Passess {
         self.executable = executable
     }
 
+    /// How to install the CLI, for the panel to offer.
+    public static let installCommand = "brew install afsharid/tap/passess"
+
     public enum Failure: Error, CustomStringConvertible {
         case notFound
         case timedOut
@@ -16,7 +19,7 @@ public struct Passess {
 
         public var description: String {
             switch self {
-            case .notFound: return "passess not found. Install it with `go install github.com/afsharid/passess/cmd/passess@latest`."
+            case .notFound: return "The passess command line tool is not installed."
             case .timedOut: return "passess did not answer in time"
             case let .unreadable(why): return "could not read passess output: \(why)"
             }
@@ -79,6 +82,44 @@ public struct Passess {
         }
         readDone.wait()
         return data
+    }
+
+    /// The CLI that starts the agent: the one on the search path, which
+    /// harnesses run too, so the agent is the same build as its clients. The
+    /// bundled copy only when there is none.
+    public static func locateForAgent(bundle: Bundle = .main, fileManager: FileManager = .default) -> Passess? {
+        for dir in searchPath() {
+            let candidate = URL(fileURLWithPath: dir).appendingPathComponent("passess")
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return Passess(executable: candidate)
+            }
+        }
+        return locate(bundle: bundle, fileManager: fileManager)
+    }
+
+    /// `passess status --json`: how each coding agent is set up. It reads
+    /// config files only (0.01 s).
+    public func harnesses() throws -> HarnessStatus {
+        let data = try run(["status", "--json"])
+        do {
+            return try JSONDecoder().decode(HarnessStatus.self, from: data)
+        } catch {
+            throw Failure.unreadable(String(describing: error))
+        }
+    }
+
+    public func agentStatus() throws -> AgentStatus {
+        let data = try run(["agent", "status", "--json"])
+        do {
+            return try AgentJSON.decoder.decode(AgentStatus.self, from: data)
+        } catch {
+            throw Failure.unreadable(String(describing: error))
+        }
+    }
+
+    /// Runs `passess agent start`, `lock` or `stop`.
+    public func agent(_ subcommand: String) throws {
+        _ = try run(["agent", subcommand], timeout: 15)
     }
 
     public func doctor() throws -> Doctor {

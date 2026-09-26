@@ -98,12 +98,7 @@ func agentStatus(st *Streams, asJSON bool) int {
 		return failf(st, ExitUnavailable, "cannot reach the agent at %s: %v", path, err)
 	}
 	if asJSON {
-		out := struct {
-			Running bool `json:"running"`
-			*agent.Info
-		}{running, f.Info}
-		b, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Fprintln(st.Stdout, string(b))
+		fmt.Fprintln(st.Stdout, string(statusJSON(running, f.Info)))
 	} else if running {
 		printInfo(st.Stdout, f.Info)
 	} else {
@@ -113,6 +108,17 @@ func agentStatus(st *Streams, asJSON bool) int {
 		return ExitAgentStopped
 	}
 	return ExitOK
+}
+
+// statusJSON is `passess agent status --json`: the agent's Info under a
+// running field, which alone is present when no agent runs. The menu bar app
+// reads it (macos/PassessBar/Sources/PassessKit/Agent.swift).
+func statusJSON(running bool, info *agent.Info) []byte {
+	b, _ := json.MarshalIndent(struct {
+		Running bool `json:"running"`
+		*agent.Info
+	}{running, info}, "", "  ")
+	return b
 }
 
 func printInfo(w io.Writer, in *agent.Info) {

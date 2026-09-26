@@ -1,0 +1,51 @@
+{
+  "applied": false,
+  "harnesses": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "config": "/Users/you/.claude.json",
+      "servers": [],
+      "unmanaged": [],
+      "instructions": "/Users/you/.claude/CLAUDE.md",
+      "instructions_state": "ok",
+      "hooks": "ok",
+      "actions": [],
+      "errors": []
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "config": "/Users/you/.codex/config.toml",
+      "servers": [
+        {
+          "name": "landingfolio",
+          "state": "ok"
+        }
+      ],
+      "unmanaged": [],
+      "instructions": "/Users/you/.codex/AGENTS.md",
+      "instructions_state": "ok",
+      "hooks": "missing",
+      "actions": [
+        {
+          "kind": "add",
+          "server": "github"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "claude-desktop",
+      "label": "Claude Desktop",
+      "config": "/Users/you/Library/Application Support/Claude/claude_desktop_config.json",
+      "servers": [],
+      "unmanaged": [],
+      "instructions": "",
+      "instructions_state": "none",
+      "hooks": "none",
+      "actions": [],
+      "errors": []
+    }
+  ]
+}

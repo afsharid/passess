@@ -1,0 +1,22 @@
+{
+  "ask": {
+    "id": "7",
+    "secrets": [
+      "GITHUB_TOKEN"
+    ],
+    "program": "gh",
+    "path": "/opt/homebrew/bin/gh",
+    "argv": [
+      "gh",
+      "api",
+      "user"
+    ],
+    "dir": "/Users/you/project",
+    "harness": "claude-code",
+    "anchor": {
+      "pid": 4242,
+      "name": "claude"
+    },
+    "until": "2026-09-27T03:30:00.123456789Z"
+  }
+}
