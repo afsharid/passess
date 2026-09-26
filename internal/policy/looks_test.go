@@ -74,3 +74,26 @@ func TestSecretHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestLooksLikeSecretNamed(t *testing.T) {
+	digests := "3f2a" + strings.Repeat("9c1e7b5d", 7) + "a1," + "7d04" + strings.Repeat("e6b2c8f0", 7) + "c3"
+	pat := "gh" + "p_" + strings.Repeat("A1b2C3d4E5", 3) + "f6G7h8"
+	random := "Zq8Xw2Lm9P" + "v4Rt7YkB3nC6sD1fG5hJ0a" // built at run time, like every token-shaped test value
+	for _, c := range []struct {
+		name, value string
+		want        bool
+	}{
+		{"NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S", digests, false}, // a list of digests
+		{"GOOGLE_CLOUD_PROJECT", "gen-lang-client-0816463281", false},
+		{"TESLA_OAUTH_CLIENT_ID", random, false},
+		{"AWS_REGION", "eu-central-1", false},
+		{"GITHUB_ID", pat, true}, // a token prefix still counts
+		{"DB_PROJECT", "postgres://u:passess-fake-pw@db/x", true},
+		{"API_KEY", random, true},
+		{"CLIENT_SECRET", random, true},
+	} {
+		if got := LooksLikeSecretNamed(c.name, c.value); got != c.want {
+			t.Errorf("LooksLikeSecretNamed(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

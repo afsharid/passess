@@ -376,7 +376,7 @@ func (u *User) validateMCP(m MCPServer) error {
 			if !nameRe.MatchString(k) {
 				return fmt.Errorf("vars: %q is not a variable name", k)
 			}
-			if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+			if policy.Sensitive(k) || policy.LooksLikeSecretNamed(k, v) {
 				return fmt.Errorf("vars.%s looks like a credential; define it under [secrets] and map it in env", k)
 			}
 			if _, dup := m.Env[k]; dup {

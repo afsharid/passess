@@ -189,7 +189,7 @@ func (m *migration) env(file string) int {
 	project := strings.ToLower(strings.Trim(nonIdent.ReplaceAllString(filepath.Base(filepath.Dir(abs)), "-"), "-"))
 	var moves []envMove
 	for _, e := range dotenv.Parse(string(data)) {
-		secretish := policy.Sensitive(e.Key) || policy.LooksLikeSecret(e.Value)
+		secretish := policy.Sensitive(e.Key) || policy.LooksLikeSecretNamed(e.Key, e.Value)
 		switch {
 		case e.Value == "" || !secretish:
 			continue
@@ -409,7 +409,7 @@ func (m *migration) mcp(harnessID, server string) int {
 	envMap, vars := map[string]string{}, map[string]string{}
 	for _, k := range sortedKeys(raw.Env) {
 		v := raw.Env[k]
-		if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+		if policy.Sensitive(k) || policy.LooksLikeSecretNamed(k, v) {
 			name := pick(k)
 			moves = append(moves, mcpMove{from: "env." + k, secret: name, value: v, account: "mcp." + server + "." + name})
 			envMap[k] = name
