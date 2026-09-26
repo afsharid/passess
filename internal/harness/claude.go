@@ -63,6 +63,25 @@ func (c Claude) Entries() ([]Entry, error) {
 	return out, nil
 }
 
+func (c Claude) Raw(name string) (Raw, bool, error) {
+	data, err := os.ReadFile(c.ConfigPath())
+	if err != nil {
+		return Raw{}, false, err
+	}
+	defer clear(data)
+	var doc struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return Raw{}, false, errors.New(c.ConfigPath() + " is not valid JSON")
+	}
+	s, ok := doc.MCPServers[name]
+	if !ok {
+		return Raw{}, false, nil
+	}
+	return rawFrom(s, "headers"), true, nil
+}
+
 func (Claude) AddCommand(name string, argv []string) []string {
 	return append([]string{"claude", "mcp", "add", "--scope", "user", name, "--"}, argv...)
 }

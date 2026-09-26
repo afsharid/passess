@@ -184,6 +184,11 @@ func TestMCPValidation(t *testing.T) {
 		"literal header":  "[mcp.x]\nurl = \"https://h/mcp\"\nheaders = { Authorization = \"Bearer passess-fake-literal-0123456789\" }\n",
 		"unknown in tmpl": "[mcp.x]\nurl = \"https://h/mcp\"\nheaders = { Authorization = \"Bearer {{NOPE}}\" }\n",
 		"bad name":        "[mcp.\"bad name\"]\ncommand = [\"a\"]\n",
+		"sensitive var":   "[mcp.x]\ncommand = [\"a\"]\nvars = { API_TOKEN = \"x\" }\n",
+		"secret var":      "[mcp.x]\ncommand = [\"a\"]\nvars = { DSN = \"postgres://u:passess-fake-literal@db/x\" }\n",
+		"var and env":     "[mcp.x]\ncommand = [\"a\"]\nenv = { V = \"T\" }\nvars = { V = \"x\" }\n",
+		"vars on url":     "[mcp.x]\nurl = \"https://h/mcp\"\nvars = { V = \"x\" }\n",
+		"secret header":   "[mcp.x]\nurl = \"https://h/mcp\"\nheaders = { X-Api-Key = \"passess-fake-literal-0123456789\" }\n",
 	} {
 		_, err := LoadUser(write(t, "config.toml", head+body))
 		if err == nil {
@@ -194,5 +199,12 @@ func TestMCPValidation(t *testing.T) {
 	}
 	if _, err := LoadUser(write(t, "config.toml", head+"[mcp.x]\nurl = \"http://localhost:8080/mcp\"\nheaders = { Authorization = \"Bearer {{T}}\" }\n")); err != nil {
 		t.Fatalf("http on localhost refused: %v", err)
+	}
+	u, err := LoadUser(write(t, "config.toml", head+"[mcp.x]\ncommand = [\"a\"]\nvars = { LOG_LEVEL = \"debug\" }\n[mcp.y]\nurl = \"https://h/mcp\"\nheaders = { X-Client = \"passess\", Authorization = \"Bearer {{T}}\" }\n"))
+	if err != nil {
+		t.Fatalf("plain vars and headers refused: %v", err)
+	}
+	if u.MCP["x"].Vars["LOG_LEVEL"] != "debug" || u.MCP["y"].Headers["X-Client"] != "passess" {
+		t.Fatalf("mcp = %+v", u.MCP)
 	}
 }

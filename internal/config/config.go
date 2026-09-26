@@ -44,6 +44,7 @@ type MCPServer struct {
 	Command []string          // program and arguments
 	Env     map[string]string // variable -> secret name
 	Inherit []string          // extra caller variables passed through
+	Vars    map[string]string // plain, non-secret values
 	Redact  bool              // redact the server's output (default true)
 	URL     string
 	Headers map[string]string // header -> template with {{SECRET}} placeholders
@@ -185,6 +186,7 @@ type rawUser struct {
 		Command []string          `toml:"command"`
 		Env     map[string]string `toml:"env"`
 		Inherit []string          `toml:"inherit"`
+		Vars    map[string]string `toml:"vars"`
 		Redact  *bool             `toml:"redact"`
 		URL     string            `toml:"url"`
 		Headers map[string]string `toml:"headers"`
@@ -328,7 +330,7 @@ func LoadUser(path string) (*User, error) {
 		if !mcpNameRe.MatchString(name) {
 			return nil, fmt.Errorf("%s: mcp.%s: use letters, digits, - and _ in server names", path, name)
 		}
-		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Redact: true, URL: m.URL, Headers: m.Headers}
+		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Vars: m.Vars, Redact: true, URL: m.URL, Headers: m.Headers}
 		if m.Redact != nil {
 			srv.Redact = *m.Redact
 		}
@@ -369,10 +371,21 @@ func (u *User) validateMCP(m MCPServer) error {
 				return fmt.Errorf("inherit: %q is not a variable name", v)
 			}
 		}
+		for k, v := range m.Vars {
+			if !nameRe.MatchString(k) {
+				return fmt.Errorf("vars: %q is not a variable name", k)
+			}
+			if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+				return fmt.Errorf("vars.%s looks like a credential; define it under [secrets] and map it in env", k)
+			}
+			if _, dup := m.Env[k]; dup {
+				return fmt.Errorf("%s is set in both env and vars", k)
+			}
+		}
 		return nil
 	}
-	if len(m.Env) > 0 || len(m.Inherit) > 0 {
-		return errors.New("env and inherit apply to command servers; a url server gets headers")
+	if len(m.Env) > 0 || len(m.Inherit) > 0 || len(m.Vars) > 0 {
+		return errors.New("env, inherit and vars apply to command servers; a url server gets headers")
 	}
 	parsed, err := url.Parse(m.URL)
 	if err != nil || parsed.Host == "" {
@@ -390,8 +403,8 @@ func (u *User) validateMCP(m MCPServer) error {
 			return fmt.Errorf("headers.%s contains a line break", h)
 		}
 		names := placeholders(tmpl)
-		if len(names) == 0 {
-			return fmt.Errorf("headers.%s holds no {{SECRET}} placeholder; a literal value belongs in the vault, not here", h)
+		if len(names) == 0 && policy.SecretHeader(h, tmpl) {
+			return fmt.Errorf("headers.%s looks like a credential in clear; put the value in the vault and write {{SECRET}} here", h)
 		}
 		for _, s := range names {
 			if _, ok := u.Secrets[s]; !ok {

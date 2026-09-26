@@ -60,6 +60,18 @@ func TestMCPExecLocalServer(t *testing.T) {
 	}
 }
 
+func TestMCPExecVars(t *testing.T) {
+	setupMCP(t, `
+[mcp.vars]
+command = ["sh", "-c", 'read line; printf "{\"level\":\"%s\"}\n" "$LOG_LEVEL"']
+vars    = { LOG_LEVEL = "debug" }
+`)
+	var out, errb bytes.Buffer
+	if code := Main([]string{"mcp-exec", "vars"}, strings.NewReader("{}\n"), &out, &errb); code != 0 || !strings.Contains(out.String(), `"level":"debug"`) {
+		t.Fatalf("exit %d: %s%s", code, out.String(), errb.String())
+	}
+}
+
 func TestMCPExecRefusals(t *testing.T) {
 	setupMCP(t, "")
 	if _, errOut, code := run(t, "mcp-exec", "picky"); code != ExitNoPerm || !strings.Contains(errOut, "GH_ONLY") {

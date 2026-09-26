@@ -72,6 +72,25 @@ func (c Codex) Entries() ([]Entry, error) {
 	return out, nil
 }
 
+func (c Codex) Raw(name string) (Raw, bool, error) {
+	data, err := os.ReadFile(c.ConfigPath())
+	if err != nil {
+		return Raw{}, false, err
+	}
+	defer clear(data)
+	var doc struct {
+		MCPServers map[string]map[string]any `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &doc); err != nil {
+		return Raw{}, false, errors.New(c.ConfigPath() + " is not valid TOML")
+	}
+	s, ok := doc.MCPServers[name]
+	if !ok {
+		return Raw{}, false, nil
+	}
+	return rawFrom(s, "http_headers"), true, nil
+}
+
 func (Codex) AddCommand(name string, argv []string) []string {
 	return append([]string{"codex", "mcp", "add", name, "--"}, argv...)
 }
