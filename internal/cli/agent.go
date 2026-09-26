@@ -707,8 +707,10 @@ func canonical(p string) string {
 // agentFor returns a connection to the running agent when this exec goes
 // through it: an agent listens, and neither stdin nor stdout is a terminal,
 // which a child in the agent's session could not use as its own. With no
-// agent the command runs in this process; with an agent it cannot reach, it
-// does not run at all (a non-zero code).
+// agent the command runs in this process, and so it does inside a sandbox
+// that forbids the socket (Codex's seatbelt answers EPERM): the sandbox is
+// the boundary there. Any other failure to reach an agent stops the command
+// (a non-zero code).
 func agentFor(st *Streams) (*agent.Conn, int) {
 	if isTerminal(st.Stdin) || isTerminal(st.Stdout) {
 		return nil, 0
@@ -720,6 +722,9 @@ func agentFor(st *Streams) (*agent.Conn, int) {
 	c, err := agent.Dial(path)
 	switch {
 	case errors.Is(err, agent.ErrNotRunning):
+		return nil, 0
+	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
+		fmt.Fprintln(st.Stderr, "passess: the agent's socket is out of this sandbox's reach; running in this process")
 		return nil, 0
 	case err != nil:
 		return nil, failf(st, ExitUnavailable, "an agent socket is at %s but cannot be used: %v; stop that agent or set PASSESS_AGENT_SOCK", path, err)

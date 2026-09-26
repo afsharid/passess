@@ -139,6 +139,12 @@ waits on it.
   `config.toml` by `--profile NAME`, and their policy applies to those runs (run); 0.155
   refuses to start with the legacy `profile = "…"` key. audit reads `config.toml`, the
   layer every run gets.
+- Codex's seatbelt (run, `codex sandbox --`, 0.155.0-alpha.16.4) denies `connect()` on
+  Unix sockets (EPERM) and hides the login keychain from `security` ("not found"). A
+  sandboxed `passess exec` therefore reaches neither the agent nor a keychain-held
+  backend token. It runs in-process and says the agent is out of reach, and a `bws://`
+  secret then fails to resolve. Commands Codex runs outside the sandbox (an approved
+  escalation) are unaffected.
 - Claude Code: credentials in `settings.json` `env` reach every session, command and MCP
   server. It also keeps copies of `~/.claude.json` in `~/.claude.json.backup` and
   `~/.claude/backups/` (cfg), which still hold whatever the file held; `passess scan`

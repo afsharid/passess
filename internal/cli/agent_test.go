@@ -102,6 +102,27 @@ func TestExecIsTheSameThroughTheAgent(t *testing.T) {
 	}
 }
 
+// Codex runs commands under a seatbelt profile that denies connecting to Unix
+// sockets. There exec must run in-process, not fail.
+func TestExecInASandboxThatForbidsTheSocket(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/sandbox-exec"); err != nil {
+		t.Skip("needs macOS sandbox-exec")
+	}
+	setup(t)
+	startAgent(t)
+	cmd := exec.Command("/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network-outbound (remote unix-socket))",
+		binary, "exec", "-s", "X", "--", "sh", "-c", `echo "$X"`)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil || string(out) != "[REDACTED:X]\n" || !strings.Contains(stderr.String(), "out of this sandbox's reach") {
+		t.Fatalf("exec in the sandbox: %v, stdout %q, stderr %q", err, out, stderr.String())
+	}
+	if f, err := ask(os.Getenv("PASSESS_AGENT_SOCK"), agent.Status); err != nil || f.Info.Served != 0 {
+		t.Fatalf("the agent was reached from the sandbox: %v %+v", err, f.Info)
+	}
+}
+
 func TestAgentEndsTheCommandOfAClientThatDies(t *testing.T) {
 	setup(t)
 	agentPID := startAgent(t)
