@@ -6,6 +6,7 @@
 package hook
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -64,6 +65,12 @@ type Env struct {
 	Secrets    []string
 	ConfigDirs []string // where passess config lives: the default place and the one in use
 	StateDir   string   // passess's state, backups included
+	// AgentSocket is where the passess agent listens: no command but passess
+	// has business there.
+	AgentSocket string
+	// Agent asks a running agent to mask, in text, the values it holds; ok is
+	// false when there is none to ask. The values stay in the agent.
+	Agent func(text string) (masked string, ok bool)
 	// Rules and Known are loaded only for prompts and results; callers
 	// memoize them, since a result is redacted string by string.
 	Rules func() *scan.Rules
@@ -95,12 +102,19 @@ func Decide(ev Event, env Env) Verdict {
 		}
 	case Result:
 		if ev.Response != nil {
-			if out, changed := redactValue(ev.Response, env); changed {
+			resp, masked := agentMaskValue(ev.Response, env)
+			if out, changed := redactValue(resp, env); changed || masked {
 				return Verdict{Response: out, Changed: true}
 			}
 			break
 		}
-		if out, changed := redactOutput(ev.Text, env); changed {
+		text, masked := ev.Text, false
+		if env.Agent != nil {
+			if m, ok := env.Agent(text); ok && m != text {
+				text, masked = m, true
+			}
+		}
+		if out, changed := redactOutput(text, env); changed || masked {
 			return Verdict{Output: out, Changed: true}
 		}
 	case Start:
@@ -212,6 +226,7 @@ func checkShell(cmd, cwd string, env Env) string {
 		return "" // not ours to judge; the harness runs what it can
 	}
 	var reason string
+	others := false // a program other than passess runs
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if reason != "" {
 			return false
@@ -238,13 +253,55 @@ func checkShell(cmd, cwd string, env Env) string {
 				s, _ := literal(w) // a non-literal word stays "" and matches nothing
 				args = append(args, s)
 			}
-			reason = checkCall(args, cwd, env)
+			program := ""
+			if len(args) > 0 {
+				program = args[0]
+			}
+			if filepath.Base(program) != "passess" && len(args) > 0 {
+				others = true
+			}
+			for _, a := range n.Assigns {
+				if reason == "" && a.Name != nil {
+					reason = checkAssign(a.Name.Value, program)
+				}
+			}
+			if reason == "" {
+				reason = checkCall(args, cwd, env)
+			}
 		case *syntax.DeclClause: // export, declare, typeset, local, readonly
 			reason = checkDecl(n, env)
 		}
 		return true
 	})
+	// A path in quotes, a variable or a script can name the socket too, so
+	// the text is searched whole: $HOME/.local/state/passess/agent.sock.
+	if reason == "" && others && mentionsAgent(cmd, env) {
+		reason = socketReason
+	}
 	return reason
+}
+
+// passessSettings point passess at another config or agent: an agent's
+// command has no business setting them.
+var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOCK": true}
+
+// pathSettings move passess's config and socket with everything else; set
+// for a passess command, they point it elsewhere just the same.
+var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
+
+func checkAssign(name, program string) string {
+	if passessSettings[name] || (pathSettings[name] && filepath.Base(program) == "passess") {
+		return fmt.Sprintf("passess: setting %s in a command points passess at another config or agent than the user's, "+
+			"around the policy and the approvals the user set up. Run passess without it; its settings are the user's to change.", name)
+	}
+	return ""
+}
+
+const socketReason = "passess: that command talks to the passess agent's socket directly. Commands that need a secret go " +
+	"through `passess exec -s NAME -- command`; the agent's approval questions are the user's to answer."
+
+func mentionsAgent(text string, env Env) bool {
+	return strings.Contains(text, "agent.sock") || (env.AgentSocket != "" && strings.Contains(text, env.AgentSocket))
 }
 
 // checkDecl refuses the forms that print variables: export -p, bare
@@ -254,6 +311,7 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 		return ""
 	}
 	var flags, names []string
+	assigns := false
 	for _, a := range n.Args {
 		switch {
 		case a.Naked && a.Name != nil:
@@ -263,8 +321,16 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 				flags = append(flags, f)
 			}
 		default:
-			return "" // an assignment: nothing is printed
+			if a.Name != nil {
+				if r := checkAssign(a.Name.Value, ""); r != "" {
+					return r
+				}
+			}
+			assigns = true
 		}
+	}
+	if assigns {
+		return "" // an assignment: nothing is printed
 	}
 	cmd := strings.TrimSpace(n.Variant.Value + " " + strings.Join(flags, " "))
 	if len(names) == 0 && n.Variant.Value != "local" && n.Variant.Value != "readonly" {
@@ -361,17 +427,38 @@ func checkCall(args []string, cwd string, env Env) string {
 		return checkShell(strings.Join(args[1:], " "), cwd, env)
 	case "env":
 		rest := args[1:]
+		var set []string
 		for len(rest) > 0 && (strings.HasPrefix(rest[0], "-") || strings.Contains(rest[0], "=")) {
 			if rest[0] == "-u" || rest[0] == "--unset" || rest[0] == "-C" || rest[0] == "--chdir" || rest[0] == "-S" {
 				rest = rest[min(2, len(rest)):]
 				continue
+			}
+			if k, _, ok := strings.Cut(rest[0], "="); ok && !strings.HasPrefix(rest[0], "-") {
+				set = append(set, k)
 			}
 			rest = rest[1:]
 		}
 		if len(rest) == 0 {
 			return dump("env")
 		}
+		for _, k := range set {
+			if r := checkAssign(k, rest[0]); r != "" {
+				return r
+			}
+		}
 		return checkCall(rest, cwd, env)
+	case "passess":
+		switch {
+		case sub(1) == "agent" && (sub(2) == "stop" || sub(2) == "serve"):
+			return "passess: `passess agent " + sub(2) + "` is the user's to run: the agent asks the user before a secret " +
+				"marked approve goes anywhere, and replacing or stopping it would skip that. Tell the user if the agent needs it."
+		case sub(1) == "agent" && sub(2) == "approve":
+			return "passess: approving is the user's alone; an agent must not answer its own approval questions. " +
+				"Tell the user what you are waiting for."
+		case sub(1) == "helper":
+			return "passess: `passess helper` prints a secret value; it is for a harness's apiKeyHelper setting, not for commands. " +
+				useInstead
+		}
 	case "printenv":
 		if len(args) == 1 {
 			return dump("printenv")
@@ -551,6 +638,28 @@ func redactOutput(text string, env Env) (string, bool) {
 		}
 	}
 	return out, out != text
+}
+
+// agentMaskValue has the agent mask the values it holds anywhere in a decoded
+// JSON value, in one round trip: the value goes as JSON and comes back as
+// JSON, which [REDACTED:NAME], free of quotes and backslashes, keeps valid.
+func agentMaskValue(v any, env Env) (any, bool) {
+	if env.Agent == nil {
+		return v, false
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v, false
+	}
+	m, ok := env.Agent(string(b))
+	if !ok || m == string(b) {
+		return v, false
+	}
+	var out any
+	if json.Unmarshal([]byte(m), &out) != nil {
+		return v, false
+	}
+	return out, true
 }
 
 // redactValue redacts every string inside a decoded JSON value and keeps its
