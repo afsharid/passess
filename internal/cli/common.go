@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -20,6 +21,26 @@ import (
 func failf(st *Streams, code int, format string, args ...any) int {
 	fmt.Fprintf(st.Stderr, "passess: "+format+"\n", args...)
 	return code
+}
+
+// parseAnywhere parses flags wherever they sit among the positional
+// arguments, so `passess install claude --apply` works like
+// `passess install --apply claude`. Everything after "--" is positional.
+func parseAnywhere(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			return append(pos, rest...), nil
+		}
+		if len(rest) == 0 {
+			return pos, nil
+		}
+		pos, args = append(pos, rest[0]), rest[1:]
+	}
 }
 
 // loadConfig reads the user config and, if the working directory is inside a
@@ -46,6 +67,12 @@ func loadConfig(st *Streams) (*config.User, *config.Project, int) {
 		return nil, nil, failf(st, ExitConfig, "%v", err)
 	}
 	return u, p, 0
+}
+
+// newBootProviders are the providers that need no credential of their own;
+// backend credentials are resolved through them.
+func newBootProviders(st *Streams) []provider.Provider {
+	return []provider.Provider{provider.Env{}, provider.Keychain{Runner: provider.ExecRunner{}, Getenv: st.Getenv}}
 }
 
 // newResolver wires the providers the user config can use. The returned

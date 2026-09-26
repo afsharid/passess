@@ -60,6 +60,7 @@ type Redactor struct{ s unsafe.Pointer }
 type state struct {
 	pats    [][]byte // every variant of every value
 	repl    [][]byte // replacement for pats[i]
+	names   []string // secret that pats[i] belongs to
 	m       matcher
 	secrets int
 }
@@ -101,6 +102,7 @@ func New(secrets []Secret, opt Options) (*Redactor, []string, error) {
 			seen[string(p)] = true
 			st.pats = append(st.pats, p)
 			st.repl = append(st.repl, repl)
+			st.names = append(st.names, s.Name)
 		}
 	}
 	st.m = newMatcher(st.pats)
@@ -213,6 +215,22 @@ func (st *state) holdBack(b []byte) int {
 		}
 	}
 	return longest
+}
+
+// Each calls fn for every occurrence in b, leftmost-longest and without
+// overlaps, with the name of the secret it belongs to. It is what scanning
+// uses; fn gets offsets, never the matched bytes.
+func (r *Redactor) Each(b []byte, fn func(start, end int, name string)) {
+	st := r.st()
+	for i := 0; i < len(b); {
+		start, idx := st.m.next(b, i, len(b))
+		if idx < 0 {
+			return
+		}
+		end := start + len(st.pats[idx])
+		fn(start, end, st.names[idx])
+		i = end
+	}
 }
 
 // Len reports how many distinct secrets the Redactor knows.
