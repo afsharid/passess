@@ -56,19 +56,31 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 	keychain := provider.Keychain{Runner: run, Getenv: st.Getenv}
 	bws := &provider.BWS{Runner: run, Getenv: st.Getenv, ServerURL: u.Backends.BWS.ServerURL}
 
+	op := provider.OnePassword{Runner: run, Getenv: st.Getenv, Account: u.Backends.OP.Account}
+	vault := &provider.Vault{Address: u.Backends.Vault.Address, Namespace: u.Backends.Vault.Namespace,
+		CACert: u.Backends.Vault.CACert, Getenv: st.Getenv}
+	bw := provider.Bitwarden{Runner: run, Getenv: st.Getenv}
+
 	// Backend credentials come from providers that need no credential of their own.
 	boot := resolve.New(env, keychain)
-	switch tok := u.Backends.BWS.AccessToken; {
-	case tok != nil:
-		bws.Token = func(ctx context.Context) (secret.Value, error) {
-			return boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{*tok}})
+	from := func(name string, r *ref.Ref) func(context.Context) (secret.Value, error) {
+		if r == nil {
+			return nil
 		}
-	case st.Getenv("BWS_ACCESS_TOKEN") != "":
+		return func(ctx context.Context) (secret.Value, error) {
+			return boot.Secret(ctx, config.Secret{Name: name, Refs: []ref.Ref{*r}})
+		}
+	}
+	bws.Token = from("backends.bws.access_token", u.Backends.BWS.AccessToken)
+	if bws.Token == nil && st.Getenv("BWS_ACCESS_TOKEN") != "" {
 		bws.Token = func(context.Context) (secret.Value, error) {
 			return secret.FromString(st.Getenv("BWS_ACCESS_TOKEN")), nil
 		}
 	}
-	r := resolve.New(env, keychain, bws)
+	vault.Token = from("backends.vault.token", u.Backends.Vault.Token)
+	bw.Session = from("backends.bw.session", u.Backends.BW.Session)
+
+	r := resolve.New(env, keychain, bws, op, vault, bw)
 	return r, func() { r.Zero(); boot.Zero(); bws.Zero() }
 }
 

@@ -11,14 +11,14 @@
     {
       "scheme": "vault",
       "ok": false,
-      "detail": "backend unavailable: vault:// is not supported yet"
+      "detail": "backend unavailable: no vault address; set backends.vault.address or VAULT_ADDR"
     }
   ],
   "problems": [
     {
       "severity": "error",
       "message": "vault:// is not usable",
-      "fix": "vault:// arrives in a later release; see docs/ROADMAP.md"
+      "fix": "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"
     }
   ]
 }

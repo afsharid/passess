@@ -87,7 +87,28 @@ func Expand(template string, lookup func(string) string) string {
 
 // Backends holds per-backend settings.
 type Backends struct {
-	BWS BWS
+	BWS   BWS
+	OP    OP
+	Vault Vault
+	BW    BW
+}
+
+// OP configures 1Password.
+type OP struct {
+	Account string // --account for op; the default account when empty
+}
+
+// Vault configures HashiCorp Vault or OpenBao.
+type Vault struct {
+	Address   string   // else VAULT_ADDR / BAO_ADDR
+	Token     *ref.Ref // else VAULT_TOKEN / BAO_TOKEN / ~/.vault-token
+	Namespace string
+	CACert    string
+}
+
+// BW configures the Bitwarden Password Manager.
+type BW struct {
+	Session *ref.Ref // where an unlocked session key lives; else BW_SESSION
 }
 
 // BWS configures Bitwarden Secrets Manager.
@@ -135,6 +156,18 @@ type rawUser struct {
 			AccessToken string `toml:"access_token"`
 			ServerURL   string `toml:"server_url"`
 		} `toml:"bws"`
+		OP struct {
+			Account string `toml:"account"`
+		} `toml:"op"`
+		Vault struct {
+			Address   string `toml:"address"`
+			Token     string `toml:"token"`
+			Namespace string `toml:"namespace"`
+			CACert    string `toml:"ca_cert"`
+		} `toml:"vault"`
+		BW struct {
+			Session string `toml:"session"`
+		} `toml:"bw"`
 	} `toml:"backends"`
 	Secrets map[string]struct {
 		Ref   any      `toml:"ref"`
@@ -207,17 +240,34 @@ func LoadUser(path string) (*User, error) {
 	}
 	u := &User{Path: path, Secrets: map[string]Secret{}, Profiles: map[string]Profile{}}
 
-	if s := raw.Backends.BWS.AccessToken; s != "" {
-		r, err := ref.Parse(s)
+	// Backend credentials are resolved before any backend is usable, so they may
+	// only live where no credential is needed to read them.
+	for _, b := range []struct {
+		key    string
+		raw    string
+		target **ref.Ref
+	}{
+		{"backends.bws.access_token", raw.Backends.BWS.AccessToken, &u.Backends.BWS.AccessToken},
+		{"backends.vault.token", raw.Backends.Vault.Token, &u.Backends.Vault.Token},
+		{"backends.bw.session", raw.Backends.BW.Session, &u.Backends.BW.Session},
+	} {
+		if b.raw == "" {
+			continue
+		}
+		r, err := ref.Parse(b.raw)
 		if err != nil {
-			return nil, fmt.Errorf("%s: backends.bws.access_token: %w", path, err)
+			return nil, fmt.Errorf("%s: %s: %w", path, b.key, err)
 		}
-		if r.Scheme == ref.BWS {
-			return nil, fmt.Errorf("%s: backends.bws.access_token cannot itself live in bws", path)
+		if r.Scheme != ref.Keychain && r.Scheme != ref.Env {
+			return nil, fmt.Errorf("%s: %s must live in keychain:// or env://, not in another vault", path, b.key)
 		}
-		u.Backends.BWS.AccessToken = &r
+		*b.target = &r
 	}
 	u.Backends.BWS.ServerURL = raw.Backends.BWS.ServerURL
+	u.Backends.OP.Account = raw.Backends.OP.Account
+	u.Backends.Vault.Address = raw.Backends.Vault.Address
+	u.Backends.Vault.Namespace = raw.Backends.Vault.Namespace
+	u.Backends.Vault.CACert = raw.Backends.Vault.CACert
 
 	for name, s := range raw.Secrets {
 		if !nameRe.MatchString(name) {
