@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// Where harnesses keep MCP servers and settings, relative to HOME.
+// Where harnesses keep MCP servers and settings, relative to HOME; ".config/…"
+// follows XDG_CONFIG_HOME when it is set.
 var configPaths = []string{
 	".claude.json", ".claude/settings.json", ".claude/settings.local.json",
 	".codex/config.toml",
@@ -16,7 +17,7 @@ var configPaths = []string{
 	".kiro/settings/mcp.json",
 	".gemini/settings.json", ".gemini/config/mcp_config.json",
 	".cursor/mcp.json",
-	".codeium/windsurf/mcp_config.json",
+	".codeium/windsurf/mcp_config.json", ".config/devin/mcp_config.json",
 	".config/zed/settings.json",
 	".config/goose/config.yaml",
 	"Library/Application Support/Claude/claude_desktop_config.json",
@@ -43,8 +44,12 @@ var transcriptRoots = []struct {
 	{".codex/sessions", []string{".jsonl"}},
 	{".codex", []string{"history.jsonl"}},
 	{".gemini/tmp", []string{".json", ".jsonl"}},
+	{".gemini/antigravity-cli", []string{"history.jsonl"}},
 	{".local/share/opencode/storage", []string{".json"}},
 }
+
+// Transcript roots whose subdirectories hold other things.
+var topLevelOnly = map[string]bool{".codex": true, ".gemini/antigravity-cli": true}
 
 var (
 	envFile      = regexp.MustCompile(`^\.env(\..+)?$`)
@@ -68,22 +73,38 @@ var CredentialFiles = []struct{ Path, Holds string }{
 	{".netrc", "machine passwords for curl, git and others"},
 	{".npmrc", "npm registry token"},
 	{".pypirc", "PyPI upload token"},
+	{".gemini/jetski-standalone-oauth-token", "Antigravity sign-in"},
+	{".gemini/antigravity-cli/antigravity-oauth-token", "Antigravity CLI sign-in"},
 }
 
-// KnownConfigs returns the harness config files that exist under home.
-func KnownConfigs(home string) []string {
+// under joins a HOME-relative path, moving ".config/…" to configHome when set.
+func under(home, configHome, rel string) string {
+	if rest, ok := strings.CutPrefix(rel, ".config/"); ok && configHome != "" {
+		return filepath.Join(configHome, rest)
+	}
+	return filepath.Join(home, rel)
+}
+
+// KnownConfigs returns the harness config files that exist, each once even
+// when one is a symlink to another.
+func KnownConfigs(home, configHome string) []string {
 	var out []string
-	for _, p := range configPaths {
-		if isFile(filepath.Join(home, p)) {
-			out = append(out, filepath.Join(home, p))
+	seen := map[string]bool{}
+	add := func(p string) {
+		real, err := filepath.EvalSymlinks(p)
+		if err != nil || seen[real] || !isFile(p) {
+			return
 		}
+		seen[real] = true
+		out = append(out, p)
+	}
+	for _, p := range configPaths {
+		add(under(home, configHome, p))
 	}
 	for _, g := range configGlobs {
 		matches, _ := filepath.Glob(filepath.Join(home, g))
 		for _, m := range matches {
-			if isFile(m) {
-				out = append(out, m)
-			}
+			add(m)
 		}
 	}
 	return out
@@ -97,6 +118,7 @@ func isFile(path string) bool {
 // Where says what Discover looks at.
 type Where struct {
 	Home        string // harness configs, their backups and dotfiles
+	ConfigHome  string // XDG_CONFIG_HOME, if set
 	Dir         string // .env files under it
 	Backups     string // passess's own backups, which keep the files migrate and install replaced
 	Transcripts bool
@@ -112,14 +134,14 @@ func Discover(w Where) []Target {
 			out = append(out, Target{Path: path, Category: category})
 		}
 	}
-	for _, p := range KnownConfigs(w.Home) {
+	for _, p := range KnownConfigs(w.Home, w.ConfigHome) {
 		add(p, "config")
 	}
 	// Harnesses (and people) keep copies next to a config: .claude.json.backup,
 	// config.toml.bak-2026…; Claude Code also keeps ~/.claude/backups.
 	for _, p := range configPaths {
 		for _, suffix := range []string{".bak*", ".backup*", ".orig", ".old"} {
-			matches, _ := filepath.Glob(filepath.Join(w.Home, p) + suffix)
+			matches, _ := filepath.Glob(under(w.Home, w.ConfigHome, p) + suffix)
 			for _, m := range matches {
 				add(m, "backup")
 			}
@@ -137,7 +159,7 @@ func Discover(w Where) []Target {
 		})
 	}
 	for _, p := range dotfiles {
-		add(filepath.Join(w.Home, p), "dotfile")
+		add(under(w.Home, w.ConfigHome, p), "dotfile")
 	}
 	out = append(out, envFiles(w.Dir, 4)...)
 	if w.Transcripts {
@@ -149,7 +171,7 @@ func Discover(w Where) []Target {
 					return nil
 				}
 				if d.IsDir() {
-					if p != base && root.dir == ".codex" {
+					if p != base && topLevelOnly[root.dir] {
 						return filepath.SkipDir // only the top-level history file there
 					}
 					return nil

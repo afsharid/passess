@@ -172,3 +172,48 @@ X-Client = "passess-test"
 		t.Fatal("a value reached the passess config")
 	}
 }
+
+func TestMigrateMCPEditedHarness(t *testing.T) {
+	noHarness(t)
+	stored := fakeKeychain(t)
+	home, calls := fakeHarnesses(t)
+	cfg := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte(`{
+  // mine
+  "mcp": {
+    "tracker": {
+      "type": "local",
+      "command": ["npx", "-y", "tracker"],
+      "environment": {"TRACKER_TOKEN": "passess-fake-tracker-0123456789abcdef", "REGION": "eu"}
+    }
+  }
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, "migrate", "mcp", "opencode", "tracker", "--apply", "--yes")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	if stored["passess/mcp.tracker.TRACKER_TOKEN"] != "passess-fake-tracker-0123456789abcdef" {
+		t.Fatalf("stored = %v", stored)
+	}
+	got, _ := os.ReadFile(cfg)
+	if strings.Contains(string(got), "passess-fake-tracker") || !strings.Contains(string(got), "// mine") ||
+		!strings.Contains(string(got), `"`+passessPath()+`",`) || !strings.Contains(string(got), `"mcp-exec",`) {
+		t.Fatalf("opencode config after migrate:\n%s", got)
+	}
+	u, err := config.LoadUser(os.Getenv("PASSESS_CONFIG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := u.MCP["tracker"]; strings.Join(m.Command, " ") != "npx -y tracker" || m.Env["TRACKER_TOKEN"] != "TRACKER_TOKEN" || m.Vars["REGION"] != "eu" {
+		t.Fatalf("mcp.tracker = %+v", m)
+	}
+	if readCalls(t, calls) != "" {
+		t.Fatal("OpenCode has no CLI to call")
+	}
+}

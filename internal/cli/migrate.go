@@ -356,7 +356,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		}
 	}
 	if adapter == nil {
-		return failf(st, ExitUsage, "unknown harness %q (known: claude, codex)", harnessID)
+		return failf(st, ExitUsage, "unknown harness %q (known: %s)", harnessID, knownHarnesses(st))
 	}
 	cfgPath, u, code := m.userConfig()
 	if code != 0 {
@@ -480,16 +480,10 @@ func (m *migration) mcp(harnessID, server string) int {
 	if err := appendConfig(cfgPath, blocks); err != nil {
 		return failf(st, ExitSoftware, "%v (backup: %s)", err, backup)
 	}
-	self := passessPath()
-	for _, cmd := range [][]string{adapter.RemoveCommand(server), adapter.AddCommand(server, []string{self, "mcp-exec", server})} {
-		res, err := (provider.ExecRunner{}).Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
-		if err == nil && res.Exit != 0 {
-			err = errors.New(provider.CLIMessage(res.Stderr))
-		}
-		if err != nil {
-			return failf(st, ExitUnavailable, "%s: %v; passess config is updated, finish with `passess install %s --apply --force` (backup: %s)",
-				strings.Join(cmd[:3], " "), err, harnessID, backup)
-		}
+	action := harness.ReplaceAction(adapter, server, []string{passessPath(), "mcp-exec", server})
+	if err := applyActions(adapter, []harness.Action{action}); err != nil {
+		return failf(st, ExitUnavailable, "%v; passess config is updated, finish with `passess install %s --apply --force` (backup: %s)",
+			err, harnessID, backup)
 	}
 	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), server)
 	accounts := make([]string, len(moves))

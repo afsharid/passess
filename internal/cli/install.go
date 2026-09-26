@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,10 +45,14 @@ type harnessOutput struct {
 
 func adapters(st *Streams) []harness.Adapter {
 	home := st.Getenv("HOME")
-	return []harness.Adapter{
+	out := []harness.Adapter{
 		harness.Claude{Home: home},
 		harness.Codex{Home: home, CodexHome: st.Getenv("CODEX_HOME")},
 	}
+	for _, spec := range harness.JSONSpecs(runtime.GOOS) {
+		out = append(out, harness.JSONFile{Spec: spec, Home: home, ConfigHome: st.Getenv("XDG_CONFIG_HOME")})
+	}
+	return out
 }
 
 // selectAdapters returns the installed harnesses, or the named ones.
@@ -56,6 +62,8 @@ func selectAdapters(st *Streams, names []string) ([]harness.Adapter, error) {
 		switch {
 		case len(names) == 0 && a.Installed():
 			out = append(out, a)
+		case contains(names, a.ID()) && a.ConfigPath() == "":
+			return nil, fmt.Errorf("%s has no config location passess knows on this system", a.Label())
 		case contains(names, a.ID()):
 			out = append(out, a)
 		}
@@ -66,10 +74,18 @@ func selectAdapters(st *Streams, names []string) ([]harness.Adapter, error) {
 			found = found || a.ID() == n
 		}
 		if !found {
-			return nil, fmt.Errorf("unknown harness %q (known: claude, codex)", n)
+			return nil, fmt.Errorf("unknown harness %q (known: %s)", n, knownHarnesses(st))
 		}
 	}
 	return out, nil
+}
+
+func knownHarnesses(st *Streams) string {
+	var ids []string
+	for _, a := range adapters(st) {
+		ids = append(ids, a.ID())
+	}
+	return strings.Join(ids, ", ")
 }
 
 // passessPath is the binary harnesses should start: the PATH entry if it is
@@ -211,8 +227,11 @@ func report(a harness.Adapter, verb string, desired []harness.Desired, force boo
 			r.Unmanaged = append(r.Unmanaged, e)
 		}
 	}
-	doc, _ := os.ReadFile(a.InstructionsPath())
-	r.InstructionsState = harness.BlockState(string(doc))
+	r.InstructionsState = harness.BlockNone
+	if p := a.InstructionsPath(); p != "" {
+		doc, _ := os.ReadFile(p)
+		r.InstructionsState = harness.BlockState(string(doc))
+	}
 	if verb == "uninstall" {
 		r.Actions = append(r.Actions, harness.PlanRemoval(a, entries, self)...)
 		return r
@@ -226,6 +245,9 @@ func report(a harness.Adapter, verb string, desired []harness.Desired, force boo
 }
 
 func instructionsChange(verb, state string) bool {
+	if state == harness.BlockNone {
+		return false
+	}
 	if verb == "uninstall" {
 		return state != harness.BlockMissing
 	}
@@ -244,7 +266,7 @@ func settled(r harnessReport) bool {
 			return false
 		}
 	}
-	return r.InstructionsState == harness.BlockOK
+	return r.InstructionsState == harness.BlockOK || r.InstructionsState == harness.BlockNone
 }
 
 func applyReport(st *Streams, a harness.Adapter, verb string, r *harnessReport) {
@@ -254,23 +276,97 @@ func applyReport(st *Streams, a harness.Adapter, verb string, r *harnessReport) 
 		return
 	}
 	r.Backup = backup
-	for _, action := range r.Actions {
-		for _, cmd := range action.Commands {
-			res, err := (provider.ExecRunner{}).Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
-			if err == nil && res.Exit != 0 {
-				err = errors.New(provider.CLIMessage(res.Stderr))
-			}
-			if err != nil {
-				r.Errors = append(r.Errors, fmt.Sprintf("%s: %v", strings.Join(cmd[:3], " "), err))
-				return
-			}
-		}
+	if err := applyActions(a, r.Actions); err != nil {
+		r.Errors = append(r.Errors, err.Error())
+		return
 	}
 	if instructionsChange(verb, r.InstructionsState) {
 		if err := writeInstructions(a.InstructionsPath(), verb); err != nil {
 			r.Errors = append(r.Errors, err.Error())
 		}
 	}
+}
+
+// applyActions carries out actions on one harness: through its CLI, or by
+// editing its config when the harness has no command for it.
+func applyActions(a harness.Adapter, actions []harness.Action) error {
+	var edits []harness.Action
+	for _, action := range actions {
+		if len(action.Commands) == 0 {
+			edits = append(edits, action)
+			continue
+		}
+		for _, cmd := range action.Commands {
+			res, err := (provider.ExecRunner{}).Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
+			if err == nil && res.Exit != 0 {
+				err = errors.New(provider.CLIMessage(res.Stderr))
+			}
+			if err != nil {
+				return fmt.Errorf("%s: %w", strings.Join(cmd[:min(3, len(cmd))], " "), err)
+			}
+		}
+	}
+	if len(edits) == 0 {
+		return nil
+	}
+	ed, ok := a.(harness.Editor)
+	if !ok {
+		return fmt.Errorf("%s: no way to %s %s", a.Label(), edits[0].Kind, edits[0].Server)
+	}
+	return editConfig(a, ed, edits)
+}
+
+// editConfig changes the harness config in place (a symlinked config keeps
+// its link: ConfigPath is the file it points at), then reads it back through
+// the adapter and restores the old bytes if the harness would not see the
+// change.
+func editConfig(a harness.Adapter, ed harness.Editor, actions []harness.Action) error {
+	path := a.ConfigPath()
+	before, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	after, err := ed.Edit(before, actions)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	perm := os.FileMode(0o600)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
+	}
+	if err := writeFileAtomic(path, after, perm); err != nil { // never creates the harness's directory
+		return err
+	}
+	if err := readsBack(a, actions); err != nil {
+		if before == nil {
+			_ = os.Remove(path)
+		} else {
+			_ = writeFileAtomic(path, before, perm)
+		}
+		return fmt.Errorf("%s left unchanged: %w", path, err)
+	}
+	return nil
+}
+
+func readsBack(a harness.Adapter, actions []harness.Action) error {
+	entries, err := a.Entries()
+	if err != nil {
+		return err
+	}
+	byName := map[string]harness.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	for _, act := range actions {
+		e, ok := byName[act.Server]
+		switch {
+		case act.Kind == "remove" && ok:
+			return fmt.Errorf("%s is still there after removing it", act.Server)
+		case act.Kind != "remove" && (!ok || e.Command != act.Argv[0] || !slices.Equal(e.Args, act.Argv[1:])):
+			return fmt.Errorf("%s does not read back as %s", act.Server, strings.Join(act.Argv, " "))
+		}
+	}
+	return nil
 }
 
 func writeInstructions(path, verb string) error {
@@ -285,6 +381,13 @@ func writeInstructions(path, verb string) error {
 	next := harness.Splice(string(doc))
 	if verb == "uninstall" {
 		next = harness.Unsplice(string(doc))
+		// A file passess named for itself goes once its block is out.
+		if filepath.Base(path) == "passess.md" && strings.TrimSpace(next) == "" {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -292,9 +395,20 @@ func writeInstructions(path, verb string) error {
 	return writeFileAtomic(path, []byte(next), perm)
 }
 
+// describeAction is the command passess runs, or the edit it makes.
+func describeAction(a harness.Action, config string) string {
+	switch {
+	case len(a.Commands) > 0:
+		return strings.Join(a.Commands[len(a.Commands)-1], " ")
+	case a.Kind == "remove":
+		return "remove it from " + config
+	}
+	return "set it to `" + strings.Join(a.Argv, " ") + "` in " + config
+}
+
 func printHarnesses(st *Streams, verb string, out harnessOutput) {
 	if len(out.Harnesses) == 0 {
-		fmt.Fprintln(st.Stdout, "No supported harness found (Claude Code, Codex).")
+		fmt.Fprintf(st.Stdout, "No supported harness found (%s).\n", knownHarnesses(st))
 		return
 	}
 	pending := false
@@ -315,7 +429,7 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 			if out.Applied {
 				verbWord = map[string]string{"add": "added", "replace": "replaced", "remove": "removed"}[a.Kind]
 			}
-			fmt.Fprintf(st.Stdout, "  %s %s: %s\n", verbWord, a.Server, strings.Join(a.Commands[len(a.Commands)-1], " "))
+			fmt.Fprintf(st.Stdout, "  %s %s: %s\n", verbWord, a.Server, describeAction(a, r.Config))
 		}
 		if !out.Applied && instructionsChange(verb, r.InstructionsState) {
 			pending = true

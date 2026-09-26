@@ -31,6 +31,7 @@ const (
 	BlockOK      = "ok"
 	BlockMissing = "missing"
 	BlockDrift   = "drift" // present, but not the current text
+	BlockNone    = "none"  // the harness reads no user-level instructions file
 )
 
 // span locates the block in doc; ok is false when either marker is missing.

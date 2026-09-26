@@ -35,12 +35,13 @@ type Finding struct {
 
 // Input is what the checks look at.
 type Input struct {
-	Home     string
-	Dir      string   // the working directory, for project settings
-	Environ  []string // the environment passess runs in
-	Harness  string   // the harness passess runs under, if any
-	Adapters []harness.Adapter
-	Config   string // the passess user config
+	Home       string
+	ConfigHome string   // XDG_CONFIG_HOME, if set
+	Dir        string   // the working directory, for project settings
+	Environ    []string // the environment passess runs in
+	Harness    string   // the harness passess runs under, if any
+	Adapters   []harness.Adapter
+	Config     string // the passess user config
 }
 
 // Run performs every check. Errors are files that exist but could not be read.
@@ -48,7 +49,7 @@ func Run(in Input) ([]Finding, []error) {
 	var out []Finding
 	var errs []error
 	for _, check := range []func(Input) ([]Finding, error){
-		claudeSettingsEnv, mcpInline, codexShellEnv, dotfileCredentials, environment, permissions,
+		claudeSettingsEnv, mcpInline, kiroAgents, codexShellEnv, dotfileCredentials, environment, permissions,
 	} {
 		f, err := check(in)
 		out = append(out, f...)
@@ -103,6 +104,63 @@ func mcpInline(in Input) ([]Finding, error) {
 				Fix:    fmt.Sprintf("passess migrate mcp %s %s", a.ID(), e.Name),
 			})
 		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// kiroAgents reports Kiro agent profiles that do not load the global MCP
+// config (includeMcpJson defaults to false), so servers installed there never
+// reach them, and servers a profile defines itself with credentials in clear.
+func kiroAgents(in Input) ([]Finding, error) {
+	paths, _ := filepath.Glob(filepath.Join(in.Home, ".kiro", "agents", "*.json"))
+	sort.Strings(paths)
+	var ignoring []string
+	var out []Finding
+	var errs []error
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		var agent struct {
+			IncludeMCPJSON *bool                     `json:"includeMcpJson"`
+			MCPServers     map[string]map[string]any `json:"mcpServers"`
+		}
+		err = json.Unmarshal(data, &agent)
+		clear(data)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s is not valid JSON", p))
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(p), ".json")
+		if agent.IncludeMCPJSON == nil || !*agent.IncludeMCPJSON {
+			ignoring = append(ignoring, name)
+		}
+		for _, server := range sortedKeys(agent.MCPServers) {
+			env, _ := agent.MCPServers[server]["env"].(map[string]any)
+			var clearKeys []string
+			for _, k := range sortedKeys(env) {
+				if v, ok := env[k].(string); ok && secretInClear(k, v) {
+					clearKeys = append(clearKeys, "env."+k)
+				}
+			}
+			if len(clearKeys) > 0 {
+				out = append(out, Finding{
+					Area: "Kiro", Check: "mcp-inline", Path: p,
+					Detail: fmt.Sprintf("agent %s's MCP server %q holds %s in clear; agents can read this file", name, server, strings.Join(clearKeys, ", ")),
+					Fix:    "store the value with `passess add NAME --keychain`, define the server under [mcp] in the passess config, and point the agent's entry at `passess mcp-exec " + server + "`",
+				})
+			}
+		}
+	}
+	if len(ignoring) > 0 {
+		out = append(out, Finding{
+			Area: "Kiro", Check: "kiro-agents", Path: filepath.Join(in.Home, ".kiro", "agents"),
+			Detail: fmt.Sprintf("%d agent profile(s) do not load ~/.kiro/settings/mcp.json, so servers passess installs there never reach them: %s",
+				len(ignoring), strings.Join(ignoring, ", ")),
+			Fix: "set \"includeMcpJson\": true in each profile that should get them (a profile's own mcpServers still come first)",
+		})
 	}
 	return out, errors.Join(errs...)
 }
@@ -315,7 +373,7 @@ func environment(in Input) ([]Finding, error) {
 func permissions(in Input) ([]Finding, error) {
 	type file struct{ path, holds string }
 	var files []file
-	for _, p := range scan.KnownConfigs(in.Home) {
+	for _, p := range scan.KnownConfigs(in.Home, in.ConfigHome) {
 		if definesServersOrEnv(p) {
 			files = append(files, file{p, "harness config, which can hold credentials"})
 		}

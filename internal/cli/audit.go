@@ -37,7 +37,7 @@ func runAudit(st *Streams, args []string) int {
 	cfg, _ := config.UserPath(st.Getenv)
 	wd, _ := os.Getwd()
 	findings, errs := audit.Run(audit.Input{
-		Home: st.Getenv("HOME"), Dir: wd, Environ: os.Environ(), Harness: detect.Harness(st.Getenv),
+		Home: st.Getenv("HOME"), ConfigHome: st.Getenv("XDG_CONFIG_HOME"), Dir: wd, Environ: os.Environ(), Harness: detect.Harness(st.Getenv),
 		Adapters: adapters(st), Config: cfg,
 	})
 	out := auditOutput{Findings: findings, Errors: []string{}}

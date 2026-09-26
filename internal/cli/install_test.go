@@ -30,7 +30,10 @@ func fakeHarnesses(t *testing.T) (home, calls string) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Only the fake harness CLIs and the system: a real agy or gemini on PATH
+	// would count as an installed harness and get written to.
+	t.Setenv("PATH", strings.Join([]string{bin, "/usr/bin", "/bin", "/usr/sbin", "/sbin"}, string(os.PathListSeparator)))
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	writeFile := func(path, body string) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -146,7 +149,7 @@ func TestStatusExitCodeAndUnknownHarness(t *testing.T) {
 	if _, _, code := run(t, "status"); code != 1 {
 		t.Fatalf("status with missing entries: exit %d, want 1", code)
 	}
-	if _, errOut, code := run(t, "install", "vscode"); code != ExitUsage || !strings.Contains(errOut, "unknown harness") {
+	if _, errOut, code := run(t, "install", "notepad"); code != ExitUsage || !strings.Contains(errOut, "unknown harness") {
 		t.Fatalf("unknown harness: exit %d: %s", code, errOut)
 	}
 }
@@ -175,11 +178,17 @@ func TestLiveInstall(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatal(err)
 	}
+	ids := map[string]bool{}
 	for _, h := range got.Harnesses {
+		ids[h.ID] = true
 		if len(h.Servers) != 1 || h.Servers[0].State != harness.StateOK || h.InstructionsState != harness.BlockOK {
 			t.Fatalf("%s after install: %+v", h.ID, h)
 		}
 	}
+	if _, err := exec.LookPath("agy"); err == nil && !ids["antigravity"] {
+		t.Fatalf("agy is installed but Antigravity was not covered: %v", ids)
+	}
+	t.Logf("covered: %v", ids)
 	if out, errOut, code := run(t, "uninstall", "--apply"); code != 0 {
 		t.Fatalf("uninstall: exit %d:\n%s\n%s", code, out, errOut)
 	}
