@@ -6,7 +6,7 @@ BAR := macos/PassessBar
 APP := bin/Passess.app
 APP_VERSION := $(shell echo '$(VERSION)' | sed -E 's/^v//; s/[^0-9.].*//; s/^$$/0.0.0/')
 
-.PHONY: build test vet lint check hooks clean macos-app macos-check
+.PHONY: build test vet lint check hooks clean macos-app macos-check macos-previews
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/passess ./cmd/passess
@@ -42,6 +42,12 @@ macos-app: build
 # Headless checks of the app's logic against the JSON fixtures the Go tests write.
 macos-check:
 	swift run -c release --package-path $(BAR) PassessKitCheck $(BAR)/Fixtures
+
+# The panel and the approval window in sample states, light and dark, as PNG
+# files: a look at a change without clicking through the menu bar.
+PREVIEWS ?= bin/previews
+macos-previews:
+	swift run -c release --package-path $(BAR) PassessBar --render-previews $(abspath $(PREVIEWS))
 
 clean:
 	rm -rf bin $(BAR)/.build

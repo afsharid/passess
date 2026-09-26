@@ -284,19 +284,36 @@ value, in `agent-audit.jsonl` next to its socket.
 
 ## macOS menu bar app
 
-`Passess.app` sits in the menu bar and shows `passess doctor`: whether the config
-loads, whether each backend is usable, and every problem with its fix one click
-away on the clipboard. "Check secrets now" reports which secrets resolve — names and
-sources only; the app never receives a value. It bundles its own copy of the CLI.
+`Passess.app` puts passess in the menu bar. Its panel shows:
+- whether everything is fine, and every problem with its fix, copyable;
+- which secrets resolve (names and sources only);
+- whether each backend is usable;
+- the agent: a switch, the names it holds and until when, the live Allows, and a
+  lock button.
+
+When an agent needs your approval, a window asks who wants which secret for which
+command, and Allow takes Touch ID. The app never receives a value.
+
+<p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-panel-dark.png">
+  <img alt="The passess panel: all clear, three secrets resolve, bws and keychain ready, the agent holding two values and one Allow for gh" src="docs/images/menubar-panel-light.png" width="340">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-approval-dark.png">
+  <img alt="An approval window: claude wants GITHUB_TOKEN for gh, with the command, the directory and the process, and Deny or Allow with Touch ID" src="docs/images/menubar-approval-light.png" width="400">
+</picture>
+</p>
 
 ```sh
-make macos-app            # needs only the Xcode Command Line Tools
+make macos-app        # needs only the Xcode Command Line Tools
 open bin/Passess.app
+make macos-previews   # the panel and the window in sample states, as PNG files
 ```
 
-The build is ad-hoc signed, so the first launch of a copy downloaded from elsewhere
-needs right-click → Open. Touch ID approvals for the upcoming `passess agent` will
-live here too.
+It bundles its own copy of the CLI, and starts the agent with the `passess` on your
+PATH, which is the one your harnesses run. The build is ad-hoc signed, so the first
+launch of a copy downloaded from elsewhere needs right-click → Open.
 
 ## What it protects against — and what it does not
 

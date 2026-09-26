@@ -2,12 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/afsharid/passess/internal/agent"
 )
 
 var update = flag.Bool("update", false, "rewrite the menu bar app's JSON fixtures")
@@ -57,6 +61,28 @@ func noHarness(t *testing.T) {
 		"VAULT_ADDR", "BAO_ADDR", "VAULT_TOKEN", "BAO_TOKEN", "BW_SESSION", "BWS_ACCESS_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN"} {
 		t.Setenv(v, "")
 	}
+}
+
+// TestMenuBarAgentFixtures pins the agent's JSON the macOS app reads: `agent
+// status --json`, running and not, and a question as an approver receives it.
+// The times carry nanoseconds, as Go writes them.
+func TestMenuBarAgentFixtures(t *testing.T) {
+	at := time.Date(2026, 9, 26, 19, 30, 0, 123456789, time.UTC)
+	info := &agent.Info{PID: 4242, Build: "v0.0.0-test", Protocol: agent.Version, Started: at,
+		Socket: "/Users/you/.local/state/passess/agent.sock", Config: "/Users/you/.config/passess/config.toml",
+		CacheTTL: "10m0s", Cached: []string{"GITHUB_TOKEN"}, Expires: at.Add(10 * time.Minute), Served: 3, Approvers: 1,
+		Approvals: []agent.Approval{{Secret: "GITHUB_TOKEN", Program: "gh", Anchor: agent.Proc{PID: 4141, Name: "claude"},
+			Until: at.Add(8 * time.Hour)}}}
+	const home = "/Users/you/.config/passess"
+	golden(t, "agent-status.json", string(statusJSON(true, info))+"\n", home)
+	golden(t, "agent-status-stopped.json", string(statusJSON(false, nil))+"\n", home)
+	ask, err := json.MarshalIndent(agent.Frame{Ask: &agent.AskFor{ID: "7", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh",
+		Path: "/opt/homebrew/bin/gh", Argv: []string{"gh", "api", "user"}, Dir: "/Users/you/project", Harness: "claude-code",
+		Anchor: &agent.Proc{PID: 4242, Name: "claude"}, Until: at.Add(8 * time.Hour)}}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "agent-ask.json", string(ask)+"\n", home)
 }
 
 // TestMenuBarFixtures pins the JSON contract between the CLI and the macOS app.
