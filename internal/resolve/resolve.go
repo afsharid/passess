@@ -57,23 +57,37 @@ func (r *Resolver) Secret(ctx context.Context, s config.Secret) (secret.Value, e
 func (r *Resolver) SecretFrom(ctx context.Context, s config.Secret) (secret.Value, ref.Ref, error) {
 	var attempts []error
 	for _, rf := range s.Refs {
-		if v, ok := r.cache[rf.String()]; ok {
-			return v, rf, nil
-		}
-		p, ok := r.providers[rf.Scheme]
-		if !ok {
-			attempts = append(attempts, &provider.Error{Ref: rf, Err: fmt.Errorf("%w: %s:// is not supported yet", provider.ErrUnavailable, rf.Scheme)})
-			continue
-		}
-		v, err := p.Resolve(ctx, rf)
+		v, err := r.Ref(ctx, rf)
 		if err != nil {
 			attempts = append(attempts, err) // try the next candidate, report all if none works
 			continue
 		}
-		r.cache[rf.String()] = v
 		return v, rf, nil
 	}
 	return secret.Value{}, ref.Ref{}, &MissingError{Name: s.Name, Attempts: attempts}
+}
+
+// Ref returns the value one reference points to.
+func (r *Resolver) Ref(ctx context.Context, rf ref.Ref) (secret.Value, error) {
+	if v, ok := r.cache[rf.String()]; ok {
+		return v, nil
+	}
+	p, ok := r.providers[rf.Scheme]
+	if !ok {
+		return secret.Value{}, &provider.Error{Ref: rf, Err: fmt.Errorf("%w: %s:// is not supported yet", provider.ErrUnavailable, rf.Scheme)}
+	}
+	v, err := p.Resolve(ctx, rf)
+	if err != nil {
+		return secret.Value{}, err
+	}
+	r.cache[rf.String()] = v
+	return v, nil
+}
+
+// Cached reports whether the value rf points to is held.
+func (r *Resolver) Cached(rf ref.Ref) bool {
+	_, ok := r.cache[rf.String()]
+	return ok
 }
 
 // Available reports, per scheme, whether its provider can be used right now.

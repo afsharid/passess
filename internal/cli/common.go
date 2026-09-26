@@ -58,11 +58,7 @@ func loadConfig(st *Streams) (*config.User, *config.Project, int) {
 	if err != nil {
 		return u, nil, 0
 	}
-	pf := config.FindProject(wd)
-	if pf == "" {
-		return u, nil, 0
-	}
-	p, err := config.LoadProject(pf)
+	p, err := loadProject(wd)
 	if err != nil {
 		return nil, nil, failf(st, ExitConfig, "%v", err)
 	}
