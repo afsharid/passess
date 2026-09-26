@@ -59,6 +59,7 @@ func TestAudit(t *testing.T) {
 	write(t, filepath.Join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\nexport OPENAI_API_KEY="+openaiKey+"\nexport GITHUB_TOKEN=$(gh auth token)\nexport NPM_TOKEN=${NPM_TOKEN_FROM_VAULT}\n", 0o644)
 	write(t, filepath.Join(home, ".config", "fish", "config.fish"), "set -gx EDITOR vim\nset -gx HF_TOKEN "+hfToken+"\n", 0o600)
 	write(t, filepath.Join(home, ".config", "opencode", "opencode.jsonc"), "{}", 0o644)
+	write(t, filepath.Join(home, ".config", "zed", "settings.json"), `{"theme": "One Dark"}`, 0o644) // plain editor settings: not flagged
 	cfg := filepath.Join(home, ".config", "passess", "config.toml")
 	write(t, cfg, "version = 1\n", 0o600)
 	t.Setenv("PATH", t.TempDir()) // no harness binaries: installed means "has a config"

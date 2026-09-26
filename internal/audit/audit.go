@@ -5,6 +5,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -315,7 +316,9 @@ func permissions(in Input) ([]Finding, error) {
 	type file struct{ path, holds string }
 	var files []file
 	for _, p := range scan.KnownConfigs(in.Home) {
-		files = append(files, file{p, "harness config, which can hold credentials"})
+		if definesServersOrEnv(p) {
+			files = append(files, file{p, "harness config, which can hold credentials"})
+		}
 	}
 	if in.Config != "" {
 		files = append(files, file{in.Config, "passess config"})
@@ -341,6 +344,26 @@ func permissions(in Input) ([]Finding, error) {
 		})
 	}
 	return out, nil
+}
+
+// definesServersOrEnv tells files made for MCP servers apart from editor
+// settings files, which are 0644 by default and usually hold no credential:
+// a settings.json counts only once it defines servers or an environment.
+func definesServersOrEnv(path string) bool {
+	if b := filepath.Base(path); b != "settings.json" && b != "settings.local.json" {
+		return true
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	defer clear(data)
+	for _, key := range []string{`"mcpServers"`, `"mcp"`, `"context_servers"`, `"env"`} {
+		if bytes.Contains(data, []byte(key)) {
+			return true
+		}
+	}
+	return false
 }
 
 func shellQuote(s string) string {

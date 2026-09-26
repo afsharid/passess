@@ -45,7 +45,10 @@ settings. The entries carry no secret, so passing them as arguments exposes noth
   Method: `codex sandbox -- /usr/bin/env` with an empty `CODEX_HOME` and fake variables,
   varying `-c shell_environment_policy.…`. That is the seatbelt runner, not the agent's
   own shell tool; alpha defaults move, so audit re-reads the config rather than trusting
-  a version number.
+  a version number. Profiles are `$CODEX_HOME/NAME.config.toml` files layered over
+  `config.toml` by `--profile NAME`, and their policy applies to those runs (run); 0.155
+  refuses to start with the legacy `profile = "…"` key. audit reads `config.toml`, the
+  layer every run gets.
 - Claude Code: credentials in `settings.json` `env` reach every session, command and MCP
   server. It also keeps copies of `~/.claude.json` in `~/.claude.json.backup` and
   `~/.claude/backups/` (cfg), which still hold whatever the file held; `passess scan`
