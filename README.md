@@ -104,9 +104,13 @@ command = ["github-mcp-server", "stdio"]
 env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "GITHUB_TOKEN" }
 
 [mcp.tracker]                                 # a remote streamable-HTTP server
-url     = "https://mcp.example.com/mcp"
-headers = { Authorization = "Bearer {{TRACKER_TOKEN}}" }
+url       = "https://mcp.example.com/mcp"
+headers   = { Authorization = "Bearer {{TRACKER_TOKEN}}" }
+harnesses = ["codex"]                         # only there; without it, every harness gets it
 ```
+
+`passess migrate mcp` sets `harnesses` to the harness a server came from, so moving it
+into passess does not spread it anywhere else.
 
 Then let passess register them with your harnesses:
 

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -48,6 +49,14 @@ type MCPServer struct {
 	Redact  bool              // redact the server's output (default true)
 	URL     string
 	Headers map[string]string // header -> template with {{SECRET}} placeholders
+	// Harnesses are the harness IDs (claude, codex, …) to register the server
+	// with; empty means every installed one.
+	Harnesses []string
+}
+
+// For reports whether the server belongs in the harness with this ID.
+func (m MCPServer) For(harness string) bool {
+	return len(m.Harnesses) == 0 || slices.Contains(m.Harnesses, harness)
 }
 
 // Secrets returns the secret names the server uses, sorted.
@@ -184,13 +193,14 @@ type rawUser struct {
 		Env      map[string]string `toml:"env"`
 	} `toml:"profiles"`
 	MCP map[string]struct {
-		Command []string          `toml:"command"`
-		Env     map[string]string `toml:"env"`
-		Inherit []string          `toml:"inherit"`
-		Vars    map[string]string `toml:"vars"`
-		Redact  *bool             `toml:"redact"`
-		URL     string            `toml:"url"`
-		Headers map[string]string `toml:"headers"`
+		Command   []string          `toml:"command"`
+		Env       map[string]string `toml:"env"`
+		Inherit   []string          `toml:"inherit"`
+		Vars      map[string]string `toml:"vars"`
+		Redact    *bool             `toml:"redact"`
+		URL       string            `toml:"url"`
+		Headers   map[string]string `toml:"headers"`
+		Harnesses []string          `toml:"harnesses"`
 	} `toml:"mcp"`
 }
 
@@ -331,7 +341,8 @@ func LoadUser(path string) (*User, error) {
 		if !mcpNameRe.MatchString(name) {
 			return nil, fmt.Errorf("%s: mcp.%s: use letters, digits, - and _ in server names", path, name)
 		}
-		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Vars: m.Vars, Redact: true, URL: m.URL, Headers: m.Headers}
+		srv := MCPServer{Name: name, Command: m.Command, Env: m.Env, Inherit: m.Inherit, Vars: m.Vars, Redact: true,
+			URL: m.URL, Headers: m.Headers, Harnesses: m.Harnesses}
 		if m.Redact != nil {
 			srv.Redact = *m.Redact
 		}
@@ -345,7 +356,14 @@ func LoadUser(path string) (*User, error) {
 
 var mcpNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+var harnessIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
 func (u *User) validateMCP(m MCPServer) error {
+	for _, h := range m.Harnesses {
+		if !harnessIDRe.MatchString(h) {
+			return fmt.Errorf("harnesses: %q is not a harness ID (claude, codex, opencode, …)", h)
+		}
+	}
 	switch {
 	case len(m.Command) > 0 && m.URL != "":
 		return errors.New("set either command or url, not both")
@@ -376,7 +394,7 @@ func (u *User) validateMCP(m MCPServer) error {
 			if !nameRe.MatchString(k) {
 				return fmt.Errorf("vars: %q is not a variable name", k)
 			}
-			if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+			if policy.Sensitive(k) || policy.LooksLikeSecretNamed(k, v) {
 				return fmt.Errorf("vars.%s looks like a credential; define it under [secrets] and map it in env", k)
 			}
 			if _, dup := m.Env[k]; dup {

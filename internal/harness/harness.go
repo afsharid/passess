@@ -92,7 +92,7 @@ func rawFrom(s map[string]any, headerKey string) Raw {
 func keysAndLeaks(m map[string]any, prefix string) (keys, leaks []string) {
 	for k, v := range m {
 		keys = append(keys, k)
-		if s, ok := v.(string); ok && policy.LooksLikeSecret(s) {
+		if s, ok := v.(string); ok && policy.LooksLikeSecretNamed(k, s) {
 			leaks = append(leaks, prefix+k)
 		}
 	}

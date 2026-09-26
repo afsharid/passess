@@ -29,3 +29,13 @@ func Harness(getenv func(string) string) string {
 	}
 	return ""
 }
+
+// OwnPrefix is the prefix of the variables a harness sets for its own use
+// (CLAUDE_CODE_MESSAGING_TOKEN under Claude Code), or "". Variables the user
+// sets for a harness, such as GEMINI_API_KEY, are not the harness's own.
+func OwnPrefix(harness string) string {
+	return map[string]string{
+		"claude-code": "CLAUDE_CODE_", "codex": "CODEX_", "cursor": "CURSOR_", "opencode": "OPENCODE_",
+		"antigravity": "ANTIGRAVITY_", "zed": "ZED_",
+	}[harness]
+}

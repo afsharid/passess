@@ -17,6 +17,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/dotenv"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/policy"
@@ -76,7 +77,7 @@ func secretInClear(name, value string) bool {
 	if v == "" || policy.IsReference(v) || strings.HasPrefix(v, "$(") || strings.HasPrefix(v, "`") {
 		return false
 	}
-	return policy.Sensitive(name) || policy.LooksLikeSecret(v)
+	return policy.Sensitive(name) || policy.LooksLikeSecretNamed(name, v)
 }
 
 // mcpInline reports MCP entries that hold credentials in clear.
@@ -346,9 +347,14 @@ func dotfileCredentials(in Input) ([]Finding, error) {
 // every harness started from it inherits them.
 func environment(in Input) ([]Finding, error) {
 	var names []string
+	own, skipped := detect.OwnPrefix(in.Harness), 0
 	for _, kv := range in.Environ {
 		k, v, ok := strings.Cut(kv, "=")
-		if ok && v != "" && policy.Sensitive(k) {
+		switch {
+		case !ok || v == "" || !policy.Sensitive(k):
+		case own != "" && strings.HasPrefix(k, own):
+			skipped++ // the harness's own, not the user's to move
+		default:
 			names = append(names, k)
 		}
 	}
@@ -359,6 +365,9 @@ func environment(in Input) ([]Finding, error) {
 	where := "this shell"
 	if in.Harness != "" {
 		where = in.Harness + "'s environment"
+		if skipped > 0 {
+			where += fmt.Sprintf(" (leaving out %d it sets for itself)", skipped)
+		}
 	}
 	return []Finding{{
 		Area: "shell", Check: "environment",
@@ -374,6 +383,9 @@ func permissions(in Input) ([]Finding, error) {
 	type file struct{ path, holds string }
 	var files []file
 	for _, p := range scan.KnownConfigs(in.Home, in.ConfigHome) {
+		if kiroProfile(in, p) && !holdsCredential(p) {
+			continue // kiroAgents reports what a profile holds; its mode alone says little
+		}
 		if definesServersOrEnv(p) {
 			files = append(files, file{p, "harness config, which can hold credentials"})
 		}
@@ -402,6 +414,35 @@ func permissions(in Input) ([]Finding, error) {
 		})
 	}
 	return out, nil
+}
+
+func kiroProfile(in Input, p string) bool {
+	return filepath.Dir(p) == filepath.Join(in.Home, ".kiro", "agents")
+}
+
+// holdsCredential reports a JSON config with a credential in clear in any
+// server's env.
+func holdsCredential(p string) bool {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return false
+	}
+	defer clear(data)
+	var doc struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if json.Unmarshal(data, &doc) != nil {
+		return false
+	}
+	for _, srv := range doc.MCPServers {
+		env, _ := srv["env"].(map[string]any)
+		for k, v := range env {
+			if s, ok := v.(string); ok && secretInClear(k, s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // definesServersOrEnv tells files made for MCP servers apart from editor

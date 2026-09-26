@@ -189,7 +189,7 @@ func (m *migration) env(file string) int {
 	project := strings.ToLower(strings.Trim(nonIdent.ReplaceAllString(filepath.Base(filepath.Dir(abs)), "-"), "-"))
 	var moves []envMove
 	for _, e := range dotenv.Parse(string(data)) {
-		secretish := policy.Sensitive(e.Key) || policy.LooksLikeSecret(e.Value)
+		secretish := policy.Sensitive(e.Key) || policy.LooksLikeSecretNamed(e.Key, e.Value)
 		switch {
 		case e.Value == "" || !secretish:
 			continue
@@ -409,7 +409,7 @@ func (m *migration) mcp(harnessID, server string) int {
 	envMap, vars := map[string]string{}, map[string]string{}
 	for _, k := range sortedKeys(raw.Env) {
 		v := raw.Env[k]
-		if policy.Sensitive(k) || policy.LooksLikeSecret(v) {
+		if policy.Sensitive(k) || policy.LooksLikeSecretNamed(k, v) {
 			name := pick(k)
 			moves = append(moves, mcpMove{from: "env." + k, secret: name, value: v, account: "mcp." + server + "." + name})
 			envMap[k] = name
@@ -444,7 +444,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		return ExitOK
 	}
 
-	block := mcpBlock(server, raw, envMap, vars, headers)
+	block := mcpBlock(server, raw, envMap, vars, headers, harnessID)
 	for _, mv := range moves {
 		fmt.Fprintf(st.Stdout, "  %s -> %s at keychain://%s/%s\n", mv.from, mv.secret, keychainService, mv.account)
 	}
@@ -499,9 +499,12 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // mcpBlock renders [mcp.NAME]; it holds names and non-secret values only.
-func mcpBlock(name string, raw harness.Raw, env, vars, headers map[string]string) []byte {
+// The server stays in the harness it came from (harnesses = [...]): moving
+// it into passess must not spread it to every other harness.
+func mcpBlock(name string, raw harness.Raw, env, vars, headers map[string]string, from string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[mcp.%s]\n", tomlKey(name))
+	fmt.Fprintf(&b, "harnesses = [%s]\n", tomlString(from))
 	inline := func(m map[string]string) string {
 		parts := make([]string, 0, len(m))
 		for _, k := range sortedKeys(m) {

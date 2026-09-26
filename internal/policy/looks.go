@@ -45,11 +45,25 @@ func SecretHeader(name, value string) bool {
 	return Sensitive(strings.ReplaceAll(name, "-", "_")) || LooksLikeSecret(value)
 }
 
+// identifierName matches names whose values identify something rather than
+// unlock it: a project, a region, a client ID, a list of SHA-256 sums. Their
+// values are often long and random-looking, which alone proves nothing.
+var identifierName = regexp.MustCompile(`(?i)(^|_)(sha\d*s?|hash(es)?|digests?|checksums?|fingerprints?|project|region|zone|location|ids?)$`)
+
+// LooksLikeSecretNamed is LooksLikeSecret with the variable's name in view:
+// for an identifier-like name, only a token prefix or a URL with a password
+// counts, not entropy alone.
+func LooksLikeSecretNamed(name, v string) bool {
+	return looksLikeSecret(v, !identifierName.MatchString(name))
+}
+
 // LooksLikeSecret is a conservative test for a credential stored in clear: a
 // known token prefix, a URL with a password, or a long, high-entropy string
 // that is not a path, a reference or prose. An auth scheme ("Bearer …") is
 // looked through.
-func LooksLikeSecret(v string) bool {
+func LooksLikeSecret(v string) bool { return looksLikeSecret(v, true) }
+
+func looksLikeSecret(v string, byEntropy bool) bool {
 	v = strings.TrimSpace(v)
 	if IsReference(v) {
 		return false
@@ -71,7 +85,7 @@ func LooksLikeSecret(v string) bool {
 			}
 		}
 	}
-	if len(v) < 20 || strings.ContainsAny(v, " /\\") {
+	if !byEntropy || len(v) < 20 || strings.ContainsAny(v, " /\\") {
 		return false
 	}
 	return Entropy(v) >= 3.5

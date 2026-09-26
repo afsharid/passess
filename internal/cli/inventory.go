@@ -43,7 +43,7 @@ func runInventory(st *Streams, args []string) int {
 	var harnesses []harnessReport
 	for _, a := range adapters(st) {
 		if a.Installed() {
-			harnesses = append(harnesses, report(a, "status", desiredServers(u), false))
+			harnesses = append(harnesses, report(a, "status", desiredServers(u, a.ID()), false))
 		}
 	}
 	fmt.Fprint(st.Stdout, inventory(u, proj, harnesses, st.Getenv("HOME"), time.Now()))
@@ -167,6 +167,9 @@ func inventory(u *config.User, proj *config.Project, harnesses []harnessReport, 
 			}
 			for _, v := range sortedKeys(m.Env) {
 				creds = append(creds, v+" ← "+m.Env[v])
+			}
+			if len(m.Harnesses) > 0 {
+				runs += " (" + strings.Join(m.Harnesses, ", ") + " only)"
 			}
 			cells := []string{code(name), cell(runs), cell(strings.Join(creds, ", "))}
 			for _, h := range harnesses {
