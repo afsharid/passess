@@ -47,10 +47,19 @@ type Adapter interface {
 	Entries() ([]Entry, error)
 	// Raw returns one entry with its values, for migration.
 	Raw(name string) (Raw, bool, error)
-	// AddCommand and RemoveCommand return the harness CLI invocation.
+	// AddCommand and RemoveCommand return the harness CLI invocation, or nil
+	// when passess edits the config itself (see Editor).
 	AddCommand(name string, argv []string) []string
 	RemoveCommand(name string) []string
+	// InstructionsPath is the user-level instructions file, or "" if none.
 	InstructionsPath() string
+}
+
+// Editor is an adapter whose config passess edits itself, for harnesses with
+// no command that registers a server without prompting. Edit applies actions
+// to the config's bytes (nil when the file does not exist yet).
+type Editor interface {
+	Edit(data []byte, actions []Action) ([]byte, error)
 }
 
 // Raw is an entry with its values, read only by `passess migrate` to move them
