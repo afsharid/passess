@@ -66,11 +66,19 @@ where the protection stops. Read the last section before relying on it.
   it runs the command itself (ADR 8). A same-user process that reads its memory some
   other way is T6.
 - **The agent is not a boundary.** A same-user process can skip it: a command at a
-  terminal, or one run after `passess agent stop`, resolves in-process. The agent adds
-  a cache now and approvals next. Once approvals exist, a hook that refuses
-  `passess agent stop` and overridden `PASSESS_CONFIG` or `PASSESS_AGENT_SOCK` in agent
-  commands is what keeps them from being skipped. That makes it part of T5, not a hard
-  line.
+  terminal, or one run after `passess agent stop`, resolves in-process. The hooks refuse
+  the plain ways around it in agent commands: `passess agent stop`, `serve` and
+  `approve`, `PASSESS_CONFIG` or `PASSESS_AGENT_SOCK` set in a command, and programs
+  other than passess naming the agent's socket. That is part of T5, not a hard line:
+  what the hooks cannot parse (a script, an interpreter one-liner that builds the
+  path) still gets through.
+- **The agent answers whether a text holds one of its values.** Hooks send tool output
+  to it for masking, and so could any same-user process, with a guess. For a short,
+  guessable value, a password, that is an oracle. Reaching the socket at all is T6.
+- **`passess helper` prints a value by design.** It is for a harness's own API key
+  (Claude Code's `apiKeyHelper`). Each secret opts in, a terminal never gets it, and the
+  hooks refuse it in agent shells. But the harness's agent can run what the harness
+  runs, so this keeps the key off disk, not away from the agent.
 - **Approvals stop an agent that uses passess, not one that attacks it.** Any process
   running as the user can connect to the agent as an approver, and so could approve its
   own requests. The agent refuses approvers anchored at a harness executable, and
