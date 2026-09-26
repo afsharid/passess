@@ -9,7 +9,8 @@ follow the slices.
 | v0.1.0-alpha | 2 | `mcp-exec` (local stdio proxy and remote HTTP bridge), `install` / `uninstall` / `status` for Claude Code and Codex |
 | v0.2.0-alpha | 3 | `scan`, `audit`, `inventory`, `migrate`; 1Password, Vault/OpenBao and Bitwarden Password Manager providers |
 | v0.3.0-alpha | 4 | Config-level support for OpenCode, Kiro, Antigravity, Cursor, Gemini CLI, VS Code / Copilot, Windsurf, Zed, Claude Desktop |
-| **v0.4** | 5 | Guard hooks and native plugin packages for Claude Code, Codex, OpenCode, Kiro, Antigravity, Cursor and Gemini CLI — the first complete release |
+| v0.4.0-alpha | 5 | Guard hooks for Claude Code, Codex, OpenCode, Kiro, Antigravity, Cursor and Gemini CLI, registered by `install`; the Claude Code plugin |
+| **v0.4.0** | — | The first complete release: slice 5 once the canary matrix is green and the maintainer's own machine runs on passess (both need the maintainer) |
 | v0.5 | 6 | `passess agent`: in-memory cache, approvals (Touch ID in the macOS menu bar app), audit log, session-wide redaction |
 | v0.6+ | 7 | Host-bound egress proxy, transcript clean-up, `fnox://`, `passess trust`, Linux and Windows polish, signed releases |
 
@@ -45,10 +46,21 @@ the path to its servers, the entry shape and its instructions file. `audit` repo
 agent profiles that ignore the global MCP config. Writing into those profiles, and the
 `tools` lists that gate them, is left for when the hooks for Kiro land.
 
-**Slice 5.** One hook handler, `passess hook <harness> <event>`, normalizes each
-harness's hook JSON and applies a deny-only policy: no reading `.env` or credential
-files, no environment dumps, a paste guard for prompts, context at session start.
-Hooks are defense in depth; see the threat model for why they are not the boundary.
+**Slice 5 (done).** One handler, `passess hook <harness> <event>`, normalizes each
+harness's hook payload and applies a deny-only policy. Shell commands are parsed
+(mvdan.cc/sh), not pattern-matched. It refuses environment dumps, reads of `.env` and
+credential files, vault reads that print a value, `$TOKEN` in a command line, pasted
+credentials in prompts, and agent writes to the passess config. It redacts tool output
+where the harness allows, and adds a session note. It fails open, and one golden per
+harness and event is the contract. `install` registers it with six harnesses; Kiro
+is by hand. The measured cost is p50 4.0 ms for a shell check and 5.0 ms for a prompt
+check (ADR 5). Hooks are defense in depth; see the threat model for why they are not
+the boundary.
+
+**Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,
+must never show it in its output, transcripts or files. And the maintainer's machine
+must run on passess: its MCP servers through `mcp-exec`, its secrets moved, `audit`
+clean. Both use the maintainer's accounts, so they wait for them.
 
 **macOS menu bar app (first version done).** A thin AppKit client, `macos/PassessBar`,
 that shows `passess doctor --json`, runs `check` on request and bundles the CLI. From

@@ -41,12 +41,16 @@ where the protection stops. Read the last section before relying on it.
   credential to a signed passess binary is planned, and even then T6 stays out of scope.
 - **The agent can edit passess's own config.** It runs as the same user, so it could
   add an allow list entry or an `[mcp.*]` server that hands a secret to a program of
-  its choosing. Slice 5's hooks refuse agent writes under `~/.config/passess`; until
-  then this is part of T5, and `passess status` / `doctor` are where a changed config
-  shows up.
+  its choosing. The hooks refuse agent writes to `~/.config/passess`, through file
+  tools and through shell redirects, `tee`, `sed -i`, `cp` and `mv`. A write the parser
+  cannot see (a script it runs, an interpreter one-liner) still gets through, so this
+  stays part of T5. `passess status` and `doctor` are where a changed config shows up.
 - **Parallel hooks can clobber each other.** In Claude Code, hooks run on the original
   tool output and the last rewrite wins; another plugin that rewrites output can undo a
-  redaction. `passess audit` will warn about this once the hooks exist (slice 5).
+  redaction. `audit` does not check for this yet.
+- **Hooks fail open.** A broken config, an unknown event or a bug lets the action
+  through. That is deliberate, because a hook that blocks everything gets removed. It
+  is also why the hooks are not the boundary.
 - **Backups keep what they copied.** `migrate` and `install` back up every file before
   changing it (0600, in a 0700 directory under `~/.local/state/passess/backups`). After a
   migrate, that backup is the one place passess leaves a value on disk: the original file,
