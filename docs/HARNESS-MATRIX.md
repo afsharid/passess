@@ -73,13 +73,15 @@ themselves, one per harness and event, are pinned in `internal/cli/testdata/hook
 |---|---|---|---|
 | Claude Code | `~/.claude/settings.json` → `hooks` | PreToolUse (Bash, Read, Grep, Write, Edit, MultiEdit, Notebook*), PostToolUse, UserPromptSubmit, SessionStart | `tool_name`, `tool_input`, `tool_response`, `prompt` (doc, bin) |
 | Codex | `~/.codex/hooks.json` → `hooks` | PreToolUse, UserPromptSubmit, SessionStart | as Claude Code; the shell command may be an argv array; `apply_patch` names its files in the patch; the prompt may come as `user_prompt` (doc) |
-| Gemini CLI | `~/.gemini/settings.json` → `hooks` | BeforeTool, AfterTool, BeforeAgent, SessionStart | `tool_name`, `tool_input`, `tool_response.llmContent`, `prompt` (doc) |
+| Gemini CLI | `~/.gemini/settings.json` → `hooks` | BeforeTool, AfterTool, BeforeAgent, SessionStart | `tool_name`, `tool_input`, `tool_response.llmContent`, `prompt` (doc, unverified: Gemini CLI is not installed here, and whether a handler needs a `name` is open) |
 | Cursor | `~/.cursor/hooks.json` (`version: 1`) | beforeShellExecution, beforeReadFile, beforeSubmitPrompt, sessionStart | `command`, `file_path` (the file's `content` also arrives and is ignored), `prompt` (doc) |
-| OpenCode | `$XDG/opencode/plugins/passess.js` | tool.execute.before/after, chat.message | passess's own JSON, from its plugin |
+| OpenCode | `$XDG/opencode/plugins/passess.js`; 1.18.29 loads `{plugin,plugins}/*.{ts,js}` from its config directories (bin) | tool.execute.before/after, chat.message | passess's own JSON, from its plugin |
 | Antigravity | `~/.gemini/config/hooks.json` → `passess` | PreToolUse | `toolCall.name`, `toolCall.args` (`CommandLine`, `Cwd`; file tools by any `*Path`/`*File` argument) (doc, bin) |
 | Kiro | an agent profile's `hooks`, by hand | agentSpawn, userPromptSubmit, preToolUse | tool names `execute_bash`, `fs_read`, `fs_write` (bin); the stdin fields are not documented, so passess reads the Claude-style ones and `USER_PROMPT` (doc) |
 
 Codex runs hooks it has not seen before only once they are trusted in `/hooks` (doc).
+Claude Code reads hook settings when a session starts and has changes made outside it
+reviewed in `/hooks`, so open sessions keep their old hooks (doc); `install` says so.
 
 ## Insecure defaults
 

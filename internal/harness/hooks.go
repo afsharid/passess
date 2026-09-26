@@ -54,7 +54,8 @@ func HookSpecs() []HookSpec {
 	tools := "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit"
 	return []HookSpec{
 		{ID: "claude", Harness: "claude", Path: ".claude/settings.json", Style: HookGroups, Create: true, Events: []HookEvent{
-			{"PreToolUse", tools}, {"PostToolUse", "*"}, {"UserPromptSubmit", ""}, {"SessionStart", ""}}},
+			{"PreToolUse", tools}, {"PostToolUse", "*"}, {"UserPromptSubmit", ""}, {"SessionStart", ""}},
+			Note: "Claude Code reads hooks when a session starts: restart open sessions, or review the change in /hooks."},
 		{ID: "codex", Harness: "codex", Path: ".codex/hooks.json", Style: HookGroups, Create: true, Events: []HookEvent{
 			{"PreToolUse", ".*"}, {"UserPromptSubmit", ""}, {"SessionStart", ""}},
 			Note: "Codex runs new hooks only after you trust them: open Codex and review them with /hooks."},
