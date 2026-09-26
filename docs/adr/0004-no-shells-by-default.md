@@ -22,6 +22,12 @@ resolved, a script is judged by the interpreter on its `#!` line (including
 same policy code serves `exec`, `run` profiles and `mcp-exec`. `mcp-exec` takes its
 command from user config only, never from its caller's argv.
 
+Names fold into families before comparison: every shell is `sh` (Debian's `/bin/sh` is
+dash, Fedora's is bash, Alpine's is busybox, and allowing a shell should not depend on
+which one), `python3.14` is `python`, `nodejs` is `node`. For a multi-call binary such as
+busybox the applet named by argv[0] decides, so `ls` on Alpine stays an ordinary program
+while `sh` and `busybox` itself stay denied.
+
 ## Consequences
 
 - Common tools that read credentials from the environment (`gh`, `git`, `aws`, `psql`,

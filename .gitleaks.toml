@@ -1,0 +1,11 @@
+# gitleaks' default rules, plus one exception: test fixtures mark every fake
+# secret with "passess-fake", so a line carrying that marker is not a finding.
+# Never use the marker in anything but tests.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "fake secrets in tests"
+regexTarget = "line"
+regexes = ['''passess-fake''']
