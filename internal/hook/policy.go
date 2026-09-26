@@ -86,8 +86,7 @@ func Decide(ev Event, env Env) Verdict {
 	case Write:
 		for _, p := range ev.Paths {
 			if inConfig(abs(p, ev.CWD, env.Home), env) {
-				return Verdict{Deny: true, Reason: "passess: " + p + " is the passess config, which decides which program receives which secret. " +
-					"Changes to it are the user's to make: tell them what you need and let them run `passess add` or edit it themselves."}
+				return Verdict{Deny: true, Reason: configReason(p)}
 			}
 		}
 	case Prompt:
@@ -143,6 +142,11 @@ func abs(p, cwd, home string) string {
 	return filepath.Clean(p)
 }
 
+func configReason(p string) string {
+	return "passess: " + p + " is the passess config, which decides which program receives which secret. " +
+		"Changes to it are the user's to make: tell them what you need and let them run `passess add` or edit it themselves."
+}
+
 func inConfig(p string, env Env) bool {
 	for _, d := range env.ConfigDirs {
 		if d != "" && within(p, d) {
@@ -193,7 +197,10 @@ var readers = map[string]bool{
 }
 
 // Commands whose last argument is a destination: only the others are read.
-var copiers = map[string]bool{"cp": true, "scp": true, "rsync": true, "install": true}
+var copiers = map[string]bool{"cp": true, "scp": true, "rsync": true, "install": true, "mv": true}
+
+// Commands that change the files they name (sed only with -i).
+var writers = map[string]bool{"tee": true, "sed": true, "truncate": true, "rm": true, "ln": true, "chmod": true, "touch": true}
 
 // Programs that run the rest of their arguments as a command.
 var wrappers = map[string]bool{"sudo": true, "command": true, "builtin": true, "exec": true, "nohup": true,
@@ -215,12 +222,15 @@ func checkShell(cmd, cwd string, env Env) string {
 				reason = checkParam(n.Param.Value, env)
 			}
 		case *syntax.Redirect:
-			if n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut {
-				if p, ok := literal(n.Word); ok {
-					if why := deniedPath(p, cwd, env); why != "" {
-						reason = readReason(p, why)
-					}
+			p, ok := literal(n.Word)
+			switch {
+			case !ok:
+			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
+				if why := deniedPath(p, cwd, env); why != "" {
+					reason = readReason(p, why)
 				}
+			case inConfig(abs(p, cwd, env.Home), env): // > >> &> into the config
+				reason = configReason(p)
 			}
 		case *syntax.CallExpr:
 			var args []string
@@ -424,6 +434,16 @@ func checkCall(args []string, cwd string, env Env) string {
 	case "kubectl":
 		if sub(1) == "config" && sub(2) == "view" && has("--raw", "--flatten") {
 			return vault("kubectl config view --raw")
+		}
+	}
+	// Commands that write the files they name: none may touch the config.
+	if writers[name] || copiers[name] {
+		for _, a := range args[1:] {
+			if a != "" && !strings.HasPrefix(a, "-") && inConfig(abs(a, cwd, env.Home), env) {
+				if name != "sed" || slices.ContainsFunc(args[1:], func(f string) bool { return strings.HasPrefix(f, "-i") }) {
+					return configReason(a)
+				}
+			}
 		}
 	}
 	if readers[name] || copiers[name] {

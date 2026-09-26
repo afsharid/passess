@@ -49,13 +49,16 @@ func TestShellCommands(t *testing.T) {
 		"security find-generic-password -s x -w", "secret-tool lookup service x", "gh auth token",
 		"gcloud auth print-access-token", "aws configure get aws_secret_access_key", "kubectl config view --raw",
 		"echo $GITHUB_TOKEN", `curl -H "Authorization: Bearer $API_KEY" https://api.example.com`, "echo ${DATABASE_URL:-none}",
+		"echo 'allow = [\"sh\"]' >> ~/.config/passess/config.toml", "tee -a ~/.config/passess/config.toml",
+		"sed -i '' s/gh/sh/ ~/.config/passess/config.toml", "cp /tmp/x ~/.config/passess/config.toml", "rm ~/.config/passess/config.toml",
 	}
 	allow := []string{
 		"ls -la", "echo hello", "cat README.md", "cat .env.example", "cp .env.example .env", "echo '.env' >> .gitignore",
 		"printenv PATH", "env FOO=1 npm test", "env -u X make", "bws run -- make", "op run -- npm start", "op item get x",
 		"security find-generic-password -s x", "export FOO=bar", "export PATH", "declare -p PATH", "local x=1", "echo $HOME $PATH", "passess exec -s GITHUB_TOKEN -- gh api user",
 		"grep -r TODO .", "git status", "set -e", "vault kv list secret/", "gh auth status", "cat ~/.ssh/id_ed25519.pub",
-		`echo "unterminated`, "",
+		`echo "unterminated`, "", "cat ~/.config/passess/config.toml", "sed -n 1p ~/.config/passess/config.toml",
+		"echo hi > /tmp/out.txt",
 	}
 	for _, c := range deny {
 		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
