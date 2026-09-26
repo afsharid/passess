@@ -1,0 +1,1 @@
+{"hook_event_name": "BeforeTool", "cwd": "/home/u/proj", "tool_name": "read_file", "tool_input": {"absolute_path": "/home/u/proj/.env.local"}}

@@ -1,0 +1,1 @@
+{"hook_event_name": "AfterTool", "cwd": "/home/u/proj", "tool_name": "run_shell_command", "tool_response": {"llmContent": "token passess-fake-gh-token-0123456789", "returnDisplay": "token passess-fake-gh-token-0123456789"}}

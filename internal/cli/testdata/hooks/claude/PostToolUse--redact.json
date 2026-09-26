@@ -1,0 +1,1 @@
+{"hook_event_name": "PostToolUse", "cwd": "/home/u/proj", "tool_name": "Bash", "tool_input": {"command": "git push"}, "tool_response": {"stdout": "remote: token passess-fake-gh-token-0123456789", "stderr": "", "interrupted": false}}

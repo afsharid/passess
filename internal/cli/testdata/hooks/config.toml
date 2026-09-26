@@ -1,0 +1,5 @@
+version = 1
+[secrets.API_KEY]
+ref = "env://PASSESS_HOOK_TEST_API_KEY"
+[secrets.DATABASE_URL]
+ref = "env://PASSESS_HOOK_TEST_DB"

@@ -1,0 +1,1 @@
+{"hook_event_name": "PostToolUse", "cwd": "/home/u/proj", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": "main.go\n", "stderr": "", "interrupted": false}}

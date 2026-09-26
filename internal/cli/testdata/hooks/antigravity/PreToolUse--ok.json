@@ -1,0 +1,1 @@
+{"conversationId": "c1", "workspacePaths": ["/home/u/proj"], "toolCall": {"name": "run_command", "args": {"CommandLine": "npm test", "Cwd": "/home/u/proj"}}}

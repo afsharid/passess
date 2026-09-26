@@ -1,0 +1,4 @@
+exit: 2
+--- stdout
+--- stderr
+passess: `op read` prints a secret value into this conversation. Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names.

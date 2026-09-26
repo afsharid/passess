@@ -1,0 +1,1 @@
+{"hook_event_name": "preToolUse", "cwd": "/home/u/proj", "tool_name": "fs_read", "tool_input": {"operations": [{"mode": "Line", "path": "/home/u/.aws/credentials"}]}}

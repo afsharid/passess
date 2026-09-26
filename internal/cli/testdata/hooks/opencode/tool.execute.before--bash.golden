@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"block":"passess: `security find-generic-password -w` prints a secret value into this conversation. Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names."}
+--- stderr

@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"additional_context":"passess manages secrets on this machine. Secret names available: API_KEY, DATABASE_URL (names only; values never enter this conversation). Never read .env or credential files and never print environment variables. Run a command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows who may use each. If a secret is missing, ask the user to run `passess add NAME`; never ask them to paste a value."}
+--- stderr

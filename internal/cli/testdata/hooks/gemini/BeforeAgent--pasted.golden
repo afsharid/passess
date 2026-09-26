@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"decision":"deny","reason":"passess: this message looks like it contains a github-pat credential, so it was not sent: whatever reaches the model also reaches its logs and this transcript. Store it with `passess add NAME --keychain` (you type it into the keychain), then ask the agent to use `passess exec -s NAME -- command`. If it was a real credential that already went somewhere, rotate it."}
+--- stderr
