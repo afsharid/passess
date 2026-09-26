@@ -57,7 +57,7 @@ func (m MCPServer) Secrets() []string {
 		seen[s] = true
 	}
 	for _, h := range m.Headers {
-		for _, s := range placeholders(h) {
+		for _, s := range Placeholders(h) {
 			seen[s] = true
 		}
 	}
@@ -71,7 +71,8 @@ func (m MCPServer) Secrets() []string {
 
 var placeholderRe = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
 
-func placeholders(s string) []string {
+// Placeholders returns the {{NAME}} secret names in a header template.
+func Placeholders(s string) []string {
 	var out []string
 	for _, m := range placeholderRe.FindAllStringSubmatch(s, -1) {
 		out = append(out, m[1])
@@ -402,7 +403,7 @@ func (u *User) validateMCP(m MCPServer) error {
 		if strings.ContainsAny(tmpl, "\r\n") {
 			return fmt.Errorf("headers.%s contains a line break", h)
 		}
-		names := placeholders(tmpl)
+		names := Placeholders(tmpl)
 		if len(names) == 0 && policy.SecretHeader(h, tmpl) {
 			return fmt.Errorf("headers.%s looks like a credential in clear; put the value in the vault and write {{SECRET}} here", h)
 		}
