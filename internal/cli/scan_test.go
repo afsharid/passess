@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseAnywhere(t *testing.T) {
@@ -19,6 +20,68 @@ func TestParseAnywhere(t *testing.T) {
 	}
 	if _, err := parseAnywhere(fs, []string{"claude", "--nope"}); err == nil {
 		t.Fatal("unknown flag after a positional accepted")
+	}
+}
+
+// scan --scrub replaces a configured value in the transcripts that hold it:
+// a dry run first, then --apply with a backup of the originals.
+func TestScanScrubsTranscripts(t *testing.T) {
+	noHarness(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	value := "passess-fake-scrub-" + "Kd83Lp2Qx9Vm4Ns7"
+	t.Setenv("PASSESS_TEST_SCRUB", value)
+	cfg := filepath.Join(home, ".config", "passess", "config.toml")
+	t.Setenv("PASSESS_CONFIG", cfg)
+	session := filepath.Join(home, ".claude", "projects", "-home-u-app", "s1.jsonl")
+	for path, body := range map[string]string{
+		cfg:     "version = 1\n[secrets.DEMO]\nref = \"env://PASSESS_TEST_SCRUB\"\n",
+		session: `{"type":"user","message":"use ` + value + `"}` + "\n" + `{"type":"assistant","message":"ok"}` + "\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(session, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, _ := run(t, "scan", "--scrub")
+	if !strings.Contains(out, "Would scrub") || !strings.Contains(out, "DEMO ×1") {
+		t.Fatalf("dry run:\n%s%s", out, errOut)
+	}
+	if b, _ := os.ReadFile(session); !strings.Contains(string(b), value) {
+		t.Fatal("the dry run changed the transcript")
+	}
+
+	out, errOut, _ = run(t, "scan", "--scrub", "--apply", "--json")
+	var res scanOutput
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("%v\n%s%s", err, out, errOut)
+	}
+	if len(res.Scrubbed) != 1 || !res.Scrubbed[0].Written || res.Backup == "" || strings.Contains(out, value) {
+		t.Fatalf("apply: %+v", res)
+	}
+	if b, _ := os.ReadFile(session); strings.Contains(string(b), value) || !strings.Contains(string(b), "[REDACTED:DEMO]") {
+		t.Fatalf("scrubbed transcript: %s", b)
+	}
+	copies, _ := filepath.Glob(filepath.Join(res.Backup, "*s1.jsonl"))
+	if len(copies) != 1 {
+		t.Fatalf("backup %s holds %v", res.Backup, copies)
+	}
+	if b, _ := os.ReadFile(copies[0]); !strings.Contains(string(b), value) {
+		t.Fatal("the backup is not the original")
+	}
+
+	if _, _, code := run(t, "scan", "--apply"); code != ExitUsage {
+		t.Fatalf("--apply alone: exit %d", code)
 	}
 }
 

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/afsharid/passess/internal/harness"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/redact"
@@ -30,6 +32,10 @@ type scanOutput struct {
 	Findings   []scan.Finding `json:"findings"`
 	Errors     []string       `json:"errors"`
 	Notes      []string       `json:"notes,omitempty"`
+	// With --scrub: what was done to each transcript, and where the
+	// originals went (--apply).
+	Scrubbed []scan.Scrubbed `json:"scrubbed,omitempty"`
+	Backup   string          `json:"backup,omitempty"`
 }
 
 func runScan(st *Streams, args []string) int {
@@ -39,14 +45,24 @@ func runScan(st *Streams, args []string) int {
 	transcripts := fs.Bool("transcripts", false, "also search harness session transcripts for your configured values")
 	transcriptRules := fs.Bool("transcript-rules", false, "with --transcripts, also run the rules on them (slow on a large history)")
 	noKnown := fs.Bool("no-known", false, "do not resolve configured secrets to search for their values")
+	scrub := fs.Bool("scrub", false, "replace your configured values in the transcripts found holding them (a dry run without --apply; implies --transcripts)")
+	apply := fs.Bool("apply", false, "with --scrub, back the transcripts up and rewrite them")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts [--transcript-rules]] [--no-known] [--json] [PATH...]")
+		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts [--transcript-rules]] [--scrub [--apply]] [--no-known] [--json] [PATH...]")
 		fmt.Fprintln(st.Stderr, "Without PATH: harness configs and dotfiles in your home, .env files under this directory.")
 		fs.PrintDefaults()
 	}
 	paths, err := parseAnywhere(fs, args)
 	if err != nil {
 		return ExitUsage
+	}
+	switch {
+	case *apply && !*scrub:
+		return failf(st, ExitUsage, "--apply goes with --scrub")
+	case *scrub && (len(paths) > 0 || *noKnown):
+		return failf(st, ExitUsage, "--scrub works on the transcripts a scan finds, with your configured values; drop the paths and --no-known")
+	case *scrub:
+		*transcripts = true
 	}
 	augmentPath(st.Getenv)
 
@@ -92,6 +108,11 @@ func runScan(st *Streams, args []string) int {
 	for _, e := range errs {
 		out.Errors = append(out.Errors, e.Error())
 	}
+	if *scrub {
+		if code := scrubTranscripts(st, s.Known, *apply, &out); code != ExitOK {
+			return code
+		}
+	}
 
 	if *asJSON {
 		if code := writeJSON(st, out); code != ExitOK {
@@ -102,6 +123,47 @@ func runScan(st *Streams, args []string) int {
 	}
 	if len(out.Findings) > 0 {
 		return 1
+	}
+	return ExitOK
+}
+
+// scrubTranscripts replaces the configured values in the transcripts the scan
+// found holding them. It is a dry run unless apply; with apply the files are
+// backed up first, in one directory, and the backup keeps the values: its
+// removal is the user's call, like every backup's.
+func scrubTranscripts(st *Streams, known *redact.Redactor, apply bool, out *scanOutput) int {
+	if known == nil {
+		out.Notes = append(out.Notes, "nothing to scrub with: no configured value could be resolved")
+		return ExitOK
+	}
+	now := time.Now()
+	seen := map[string]bool{}
+	var paths, live []string
+	for _, f := range out.Findings {
+		if f.Category != "transcript" || f.Kind != "known" || seen[f.Path] {
+			continue
+		}
+		seen[f.Path] = true
+		if fi, err := os.Stat(f.Path); err == nil && now.Sub(fi.ModTime()) < scan.InUse {
+			live = append(live, f.Path) // Scrub leaves it alone; no copy needed
+		} else {
+			paths = append(paths, f.Path)
+		}
+	}
+	if apply && len(paths) > 0 {
+		dir, err := harness.Backup(filepath.Join(stateDir(st.Getenv), "backups"), paths, now)
+		if err != nil {
+			return failf(st, ExitSoftware, "backing the transcripts up: %v; nothing was changed", err)
+		}
+		out.Backup = dir
+	}
+	for _, p := range append(paths, live...) {
+		res, err := scan.Scrub(p, known, apply, now)
+		if err != nil {
+			out.Errors = append(out.Errors, err.Error())
+			continue
+		}
+		out.Scrubbed = append(out.Scrubbed, res)
 	}
 	return ExitOK
 }
@@ -200,10 +262,39 @@ func printScan(st *Streams, out scanOutput) {
 			fmt.Fprintf(st.Stdout, "  %s\n", short(d))
 		}
 	}
+	printScrubbed(st, out, short)
 	for _, e := range out.Errors {
 		fmt.Fprintf(st.Stdout, "could not read: %s\n", e)
 	}
 	for _, n := range out.Notes {
 		fmt.Fprintf(st.Stdout, "note: %s\n", n)
+	}
+}
+
+func printScrubbed(st *Streams, out scanOutput, short func(string) string) {
+	if len(out.Scrubbed) == 0 {
+		return
+	}
+	if out.Backup == "" {
+		fmt.Fprintln(st.Stdout, "\nWould scrub (a dry run; --apply backs the files up and rewrites them):")
+	} else {
+		fmt.Fprintln(st.Stdout, "\nScrubbed:")
+	}
+	for _, r := range out.Scrubbed {
+		var parts []string
+		for _, name := range sortedKeys(r.Replaced) {
+			parts = append(parts, fmt.Sprintf("%s ×%d", name, r.Replaced[name]))
+		}
+		switch {
+		case r.Skipped != "":
+			fmt.Fprintf(st.Stdout, "  %s  left as it is: %s\n", short(r.Path), r.Skipped)
+		default:
+			fmt.Fprintf(st.Stdout, "  %s  %s\n", short(r.Path), strings.Join(parts, ", "))
+		}
+	}
+	if out.Backup != "" {
+		fmt.Fprintf(st.Stdout, "The originals are in %s, and they still hold the values. Once the sessions look right, remove it:\n  rm -r %s\n",
+			short(out.Backup), out.Backup)
+		fmt.Fprintln(st.Stdout, "Scrubbing a transcript does not unsend it: rotate what it held at the provider.")
 	}
 }
