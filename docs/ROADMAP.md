@@ -71,6 +71,10 @@ Done:
 - hooks mask tool output with the agent's values, refuse the ways around the agent,
   and `passess helper` serves Claude Code's `apiKeyHelper`.
 
+**Slice 7 (in progress).** Done: `scan --scrub`, the backed-up, explicitly applied
+transcript clean-up. Next: the host-bound egress proxy, `fnox://`, `passess trust`,
+Linux and Windows polish, signed releases.
+
 **Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,
 must never show it in its output, transcripts or files. And the maintainer's machine
 must run on passess: its MCP servers through `mcp-exec`, its secrets moved, `audit`

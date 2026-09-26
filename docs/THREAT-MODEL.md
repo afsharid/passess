@@ -88,7 +88,8 @@ where the protection stops. Read the last section before relying on it.
   agent share it.
 - **Moving a value does not unleak it.** A token that sat in a file an agent could read,
   or in a transcript, may already have reached a model provider. `migrate` says to
-  rotate; `scan --transcripts` shows where a known value went.
+  rotate; `scan --transcripts` shows where a known value went; `scan --scrub` takes it
+  out of the transcripts on disk, and the provider's copy stays where it is.
 
 ## Consequences for the design
 
