@@ -65,7 +65,9 @@ func runExec(st *Streams, args []string) int {
 		return ExitUsage
 	}
 
-	if c := agentFor(st); c != nil {
+	if c, code := agentFor(st); code != 0 {
+		return code
+	} else if c != nil {
 		return execThroughAgent(st, c, argv, wanted)
 	}
 

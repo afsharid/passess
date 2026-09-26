@@ -176,9 +176,16 @@ func agentStart(st *Streams) int {
 		return failf(st, ExitSoftware, "%v", err)
 	}
 	defer logf.Close()
+	cfg, err := config.UserPath(st.Getenv)
+	if err != nil {
+		return failf(st, ExitConfig, "%v", err)
+	}
 	cmd := exec.Command(self, "agent", "serve")
 	cmd.Stdout, cmd.Stderr = logf, logf
+	// The agent runs from / so it pins no directory; relative paths in its
+	// environment would then point elsewhere, so it gets them absolute.
 	cmd.Dir = "/"
+	cmd.Env = append(os.Environ(), "PASSESS_CONFIG="+absolute(cfg), "PASSESS_AGENT_SOCK="+absolute(path))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return failf(st, ExitSoftware, "%v", err)
@@ -223,6 +230,8 @@ func agentServe(st *Streams) int {
 	go func() {
 		<-sigs
 		s.stop()
+		<-sigs // a second one while commands drain: leave them to it
+		os.Exit(128 + int(syscall.SIGINT))
 	}()
 	fmt.Fprintf(st.Stderr, "passess agent: pid %d serving %s on %s\n", os.Getpid(), s.configPath, path)
 	s.serve()
@@ -672,6 +681,14 @@ func executable(p string) error {
 	return nil
 }
 
+// absolute is p made absolute against the working directory, or p itself.
+func absolute(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
 // canonical is p absolute with symlinks resolved, as far as it exists, so
 // two spellings of one config file compare equal.
 func canonical(p string) string {
@@ -689,21 +706,25 @@ func canonical(p string) string {
 
 // agentFor returns a connection to the running agent when this exec goes
 // through it: an agent listens, and neither stdin nor stdout is a terminal,
-// which a child in the agent's session could not use as its own. Otherwise
-// the command runs in this process, as it does without an agent.
-func agentFor(st *Streams) *agent.Conn {
+// which a child in the agent's session could not use as its own. With no
+// agent the command runs in this process; with an agent it cannot reach, it
+// does not run at all (a non-zero code).
+func agentFor(st *Streams) (*agent.Conn, int) {
 	if isTerminal(st.Stdin) || isTerminal(st.Stdout) {
-		return nil
+		return nil, 0
 	}
 	path, err := agent.SocketPath(st.Getenv)
 	if err != nil {
-		return nil // no agent can listen where no socket path exists
+		return nil, 0 // no agent can listen where no socket path exists
 	}
 	c, err := agent.Dial(path)
-	if err != nil {
-		return nil
+	switch {
+	case errors.Is(err, agent.ErrNotRunning):
+		return nil, 0
+	case err != nil:
+		return nil, failf(st, ExitUnavailable, "an agent socket is at %s but cannot be used: %v; stop that agent or set PASSESS_AGENT_SOCK", path, err)
 	}
-	return c
+	return c, 0
 }
 
 // execThroughAgent hands the command, this process's streams and its

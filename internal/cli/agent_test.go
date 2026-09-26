@@ -51,6 +51,8 @@ func startAgent(t *testing.T) int {
 	cmd := exec.Command(binary, "agent", "serve")
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.Dir = "/" // where `agent start` puts it: nothing may depend on the agent's cwd
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +82,7 @@ func TestExecIsTheSameThroughTheAgent(t *testing.T) {
 		{"exec", "-s", "NOPE", "--", "ls"},
 		{"exec", "-s", "X", "--", "no-such-command-passess"},
 		{"exec", "-s", "X", "--", "./config.toml"},
+		{"exec", "-s", "X", "--", "sh", "-c", "pwd; /bin/pwd -P"},
 	}
 	type result struct {
 		out, err string
@@ -188,12 +191,24 @@ func TestAgentStartRunsOne(t *testing.T) {
 		}
 		return string(out)
 	}
+	// A relative config path must survive the agent's move to /.
+	t.Setenv("PASSESS_CONFIG", "config.toml")
 	if out := passess("agent", "start"); !strings.Contains(out, "started, pid") {
 		t.Fatalf("start: %q", out)
 	}
 	t.Cleanup(func() { _, _ = exec.Command(binary, "agent", "stop").CombinedOutput() })
 	if out := passess("agent", "start"); !strings.Contains(out, "already running") {
 		t.Fatalf("second start: %q", out)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := passess("exec", "-s", "X", "--", "sh", "-c", `/bin/pwd -P; echo "$X"`); out != canonical(wd)+"\n[REDACTED:X]\n" {
+		t.Fatalf("exec through the started agent: %q", out)
+	}
+	if out, _, _ := run(t, "agent", "status"); !strings.Contains(out, "1 since it started") {
+		t.Fatalf("the exec did not go through the agent: %q", out)
 	}
 	if out := passess("agent", "stop"); !strings.Contains(out, "stopped") {
 		t.Fatalf("stop: %q", out)
@@ -296,9 +311,9 @@ func TestAgentCacheLifetime(t *testing.T) {
 		t.Fatal("a cache-off command left a generation behind")
 	}
 
-	u, sum = cacheConfig(t, "30ms")
+	u, sum = cacheConfig(t, "50ms")
 	expect("short lifetime", 6)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	if names, _, _ := s.cacheState(); len(names) != 0 {
 		t.Fatalf("expiry left %v", names)
 	}
