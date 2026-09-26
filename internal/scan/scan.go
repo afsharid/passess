@@ -47,6 +47,12 @@ type Scanner struct {
 	Known   *redact.Redactor
 	KnownFP map[string]string // secret name -> s.Fingerprint of its value
 	Rules   *Rules
+	// TranscriptRules runs the rules on transcripts too. Off by default: on a
+	// transcript the question is whether a value you use left the machine,
+	// which known-value matching answers at hundreds of MB/s, while the rules
+	// crawl through lines that run to megabytes and say "key" and "token"
+	// everywhere (under 1 MB/s measured on such a line).
+	TranscriptRules bool
 
 	keyOnce sync.Once
 	key     [32]byte
@@ -101,7 +107,7 @@ func (s *Scanner) line(t Target, n int, line []byte) []Finding {
 				Secret: name, Fingerprint: s.KnownFP[name]})
 		})
 	}
-	if s.Rules != nil {
+	if s.Rules != nil && (t.Category != "transcript" || s.TranscriptRules) {
 		for _, m := range s.Rules.Line(t.Path, string(line)) {
 			overlaps := false
 			for _, k := range known {

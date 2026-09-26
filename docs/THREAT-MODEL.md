@@ -48,6 +48,9 @@ where the protection stops. Read the last section before relying on it.
 - **Parallel hooks can clobber each other.** In Claude Code, hooks run on the original
   tool output and the last rewrite wins; another plugin that rewrites output can undo a
   redaction. `audit` does not check for this yet.
+- **Another hook can keep what passess redacts.** Hooks run side by side on the same
+  tool output. One that records it (context-mode indexes tool output, for example)
+  stores the unredacted text before passess's replacement reaches the model.
 - **Hooks fail open.** A broken config, an unknown event or a bug lets the action
   through. That is deliberate, because a hook that blocks everything gets removed. It
   is also why the hooks are not the boundary.

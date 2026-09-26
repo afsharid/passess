@@ -48,7 +48,7 @@ func SecretHeader(name, value string) bool {
 // identifierName matches names whose values identify something rather than
 // unlock it: a project, a region, a client ID, a list of SHA-256 sums. Their
 // values are often long and random-looking, which alone proves nothing.
-var identifierName = regexp.MustCompile(`(?i)(^|_)(sha\d*s?|hash(es)?|digests?|checksums?|fingerprints?|project|region|zone|location|ids?)$`)
+var identifierName = regexp.MustCompile(`(?i)(^|_)(sha\d*s?|hash(es)?|digests?|checksums?|fingerprints?|project|region|zone|location|bucket|ids?)$`)
 
 // LooksLikeSecretNamed is LooksLikeSecret with the variable's name in view:
 // for an identifier-like name, only a token prefix or a URL with a password

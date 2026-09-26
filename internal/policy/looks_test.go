@@ -87,6 +87,7 @@ func TestLooksLikeSecretNamed(t *testing.T) {
 		{"GOOGLE_CLOUD_PROJECT", "gen-lang-client-0816463281", false},
 		{"TESLA_OAUTH_CLIENT_ID", random, false},
 		{"AWS_REGION", "eu-central-1", false},
+		{"OBJECT_STORAGE_BUCKET", "replit-objstore-" + "8f3c2a91-4b7d-4e2f-9a6c-1d5e7b3f0a24", false},
 		{"GITHUB_ID", pat, true}, // a token prefix still counts
 		{"DB_PROJECT", "postgres://u:passess-fake-pw@db/x", true},
 		{"API_KEY", random, true},
