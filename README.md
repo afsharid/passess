@@ -3,9 +3,10 @@
 **The last mile between your password manager and your AI coding agents.**
 
 > Status: pre-alpha. Nothing here is ready to trust with a real secret yet.
-> Works today: `exec`, `run`, `list`, `check`, `add`, `doctor` with `env://`, `keychain://`
-> and `bws://` references, and the macOS menu bar app. Next: `mcp-exec`, harness
-> installers, then 1Password, Vault and `bw`.
+> Works today: `exec`, `run`, `list`, `check`, `add`, `doctor`, `mcp-exec`, and
+> `install` / `status` / `uninstall` for Claude Code and Codex, with `env://`,
+> `keychain://` and `bws://` references; plus the macOS menu bar app. Next: scanning
+> and migrating plaintext secrets, then 1Password, Vault and `bw`.
 
 AI coding agents need API keys and passwords to do real work, and today those secrets
 end up everywhere: plaintext tokens in MCP config files, `.env` files the agent reads,
@@ -79,6 +80,35 @@ Other commands: `passess list` (names, backends, who may receive them), `passess
 check` (which secrets resolve, never their values), `passess add NAME --ref …` or
 `passess add NAME --keychain` (you type the value into the keychain yourself), and
 `passess doctor` (what is wrong and the command that fixes it). Each takes `--json`.
+
+## MCP servers without tokens in harness configs
+
+Define each server once, in passess config:
+
+```toml
+[mcp.github]                                  # a local stdio server
+command = ["github-mcp-server", "stdio"]
+env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "GITHUB_TOKEN" }
+
+[mcp.tracker]                                 # a remote streamable-HTTP server
+url     = "https://mcp.example.com/mcp"
+headers = { Authorization = "Bearer {{TRACKER_TOKEN}}" }
+```
+
+Then let passess register them with your harnesses:
+
+```sh
+passess install            # dry run: shows what would change in Claude Code and Codex
+passess install --apply    # registers each server as `passess mcp-exec NAME`
+passess status             # what each harness runs, and any credentials still in clear
+```
+
+The harness config ends up holding only `passess mcp-exec github`. The local server
+gets its secret in its environment; for a remote server passess runs a stdio bridge
+that adds the header itself, so even harnesses started from the Dock work. Output
+from either comes back redacted. Changes go through `claude mcp` and `codex mcp`,
+files are backed up under `~/.local/state/passess/backups` first, and
+`passess uninstall --apply` takes everything out again.
 
 ## macOS menu bar app
 

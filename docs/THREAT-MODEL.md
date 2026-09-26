@@ -39,6 +39,11 @@ where the protection stops. Read the last section before relying on it.
 - **Keychain ACLs do not stop the same user.** Any same-user process that shells out to
   `security` can read an item that `security` is trusted for. Binding the bootstrap
   credential to a signed passess binary is planned, and even then T6 stays out of scope.
+- **The agent can edit passess's own config.** It runs as the same user, so it could
+  add an allow list entry or an `[mcp.*]` server that hands a secret to a program of
+  its choosing. Slice 5's hooks refuse agent writes under `~/.config/passess`; until
+  then this is part of T5, and `passess status` / `doctor` are where a changed config
+  shows up.
 - **Parallel hooks can clobber each other.** In Claude Code, hooks run on the original
   tool output and the last rewrite wins; another plugin that rewrites output can undo a
   redaction. `passess audit` will warn about this.
