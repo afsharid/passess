@@ -254,6 +254,34 @@ refuses clients of another version rather than run them under its old policy
 cache_ttl = "30m"   # "0" resolves for every command
 ```
 
+### Approvals
+
+A secret marked `approve = true` waits for your Allow before it goes to a program. You
+answer once per program and per agent session: an Allow is remembered for that program
+family and the harness process that asked. That process is the caller's nearest
+ancestor that is not a shell, so an Allow given to one Claude Code session is not one
+for another session, or for anything else on the machine
+([ADR 9](docs/adr/0009-approvals-belong-to-the-callers-anchor.md)).
+
+```toml
+[secrets.GITHUB_TOKEN]
+ref     = "op://Dev/GitHub PAT/credential"
+approve = true
+
+[agent]
+approval_ttl     = "8h"    # how long an Allow lasts; "0" asks every time
+approval_timeout = "60s"   # how long a question waits
+```
+
+```sh
+passess agent approve   # answer questions here, in a terminal of your own
+```
+
+With no approver running, the answer is no, and so it is when no agent runs.
+Passess.app will answer with Touch ID. `passess agent status` lists the live Allows;
+`lock` forgets them. The agent keeps a log of names, programs and answers, never a
+value, in `agent-audit.jsonl` next to its socket.
+
 ## macOS menu bar app
 
 `Passess.app` sits in the menu bar and shows `passess doctor`: whether the config
