@@ -10,9 +10,9 @@ follow the slices.
 | v0.2.0-alpha | 3 | `scan`, `audit`, `inventory`, `migrate`; 1Password, Vault/OpenBao and Bitwarden Password Manager providers |
 | v0.3.0-alpha | 4 | Config-level support for OpenCode, Kiro, Antigravity, Cursor, Gemini CLI, VS Code / Copilot, Windsurf, Zed, Claude Desktop |
 | v0.4.0-alpha | 5 | Guard hooks for Claude Code, Codex, OpenCode, Kiro, Antigravity, Cursor and Gemini CLI, registered by `install`; the Claude Code plugin |
-| **v0.4.0** | — | The first complete release: slice 5 once the canary matrix is green and the maintainer's own machine runs on passess (both need the maintainer) |
-| v0.5 | 6 | `passess agent`: in-memory cache, approvals (Touch ID in the macOS menu bar app), audit log, session-wide redaction |
-| v0.6+ | 7 | Host-bound egress proxy, transcript clean-up, `fnox://`, `passess trust`, Linux and Windows polish, signed releases |
+| v0.5.0-alpha | 6 | `passess agent`: in-memory cache, approvals (Touch ID in the macOS menu bar app), audit log, session-wide redaction |
+| v0.5.2-alpha | 7 (in progress) | `passess http`, which takes a secret only to the hosts it names, and transcript clean-up (`scan --scrub`); next: a proxy for programs other than curl, `fnox://`, `passess trust`, Linux and Windows polish, signed releases |
+| **First release without `-alpha`** | — | Once the canary matrix is green for every harness; Codex and OpenCode are still open |
 
 ## Slice details
 
@@ -79,10 +79,11 @@ Done:
 Next: a transparent proxy for programs other than curl, `fnox://`, `passess trust`,
 Linux and Windows polish, signed releases.
 
-**Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,
-must never show it in its output, transcripts or files. And the maintainer's machine
-must run on passess: its MCP servers through `mcp-exec`, its secrets moved, `audit`
-clean. Both use the maintainer's accounts, so they wait for them.
+**Before the first release without `-alpha`.** The canary matrix: each harness, run for
+real with a canary secret, must never show it in its output, transcripts or files.
+Claude Code, Kiro and Antigravity pass; Codex and OpenCode wait for a working model
+provider. The maintainer's machine has run on passess since 2026-09-26, its MCP servers
+through `mcp-exec` and its secrets moved.
 
 **macOS menu bar app (first version done).** A thin AppKit client, `macos/PassessBar`,
 that shows `passess doctor --json`, runs `check` on request and bundles the CLI. From

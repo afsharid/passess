@@ -80,7 +80,7 @@ private func samples() -> [(String, AnyView)] {
     """)
     let agentOn = decode(AgentStatus.self, """
     {"running": true, "pid": 81095, "build": "0.5.0-alpha", "cache_ttl": "10m0s",
-     "cached": ["GITHUB_TOKEN", "NVIDIA_API_KEY"], "expires": "\(later)", "jobs": 0, "served": 14,
+     "cached": ["GITHUB_TOKEN", "OPENAI_API_KEY"], "expires": "\(later)", "jobs": 0, "served": 14,
      "approvers": 1, "pending": 0,
      "approvals": [{"secret": "GITHUB_TOKEN", "program": "gh", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}]}
     """)
@@ -105,8 +105,8 @@ private func samples() -> [(String, AnyView)] {
     let check = decode(Check.self, """
     {"config": "/Users/you/.config/passess/config.toml", "ok": true,
      "secrets": [{"name": "GITHUB_TOKEN", "state": "ok", "from": "op://Dev/GitHub PAT/credential"},
-                 {"name": "NVIDIA_API_KEY", "state": "ok", "from": "bws://ai-stack/NVIDIA_API_KEY"},
-                 {"name": "OPENROUTER_API_KEY", "state": "ok", "from": "bws://ai-stack/OPENROUTER_API_KEY"}]}
+                 {"name": "OPENAI_API_KEY", "state": "ok", "from": "bws://dev/OPENAI_API_KEY"},
+                 {"name": "STRIPE_TEST_KEY", "state": "ok", "from": "keychain://passess/stripe-test"}]}
     """)
     let ask = decode(AgentAsk.self, """
     {"id": "7", "secrets": ["GITHUB_TOKEN"], "program": "gh", "path": "/opt/homebrew/bin/gh",

@@ -47,15 +47,21 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what lands when.
 ## Install
 
 ```sh
+brew install afsharid/tap/passess
+```
+
+Or with Go 1.27.1 or newer:
+
+```sh
 go install github.com/afsharid/passess/cmd/passess@latest
 ```
 
-Requires Go 1.27.1 or newer. Or download a release: macOS and Linux binaries for
-arm64 and amd64, `checksums.txt`, and the menu bar app for Apple silicon. Each file
-carries a build provenance attestation:
+Or download a release: macOS and Linux binaries for arm64 and amd64, `checksums.txt`,
+and the menu bar app for Apple silicon. Each file carries a build provenance
+attestation:
 
 ```sh
-gh attestation verify passess_0.2.0-alpha_darwin_arm64.tar.gz --repo afsharid/passess
+gh attestation verify passess_*_darwin_arm64.tar.gz --repo afsharid/passess
 ```
 
 ## Quick start
