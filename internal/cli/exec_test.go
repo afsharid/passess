@@ -129,7 +129,7 @@ func testExecRefusesShell(t *testing.T, _ int) {
 	if out != "" {
 		t.Fatalf("the command must not run, stdout %q", out)
 	}
-	for _, want := range []string{"refusing to give Y", "curl --variable %Y", `add "sh" to secrets.Y.allow`} {
+	for _, want := range []string{"refusing to give Y", "passess http -s Y -H", `add "sh" to secrets.Y.allow`} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("stderr lacks %q:\n%s", want, errOut)
 		}

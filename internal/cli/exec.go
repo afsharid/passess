@@ -176,8 +176,8 @@ func refuse(st *Streams, u *config.User, name string, d policy.Decision) int {
 	fmt.Fprintf(st.Stderr, "passess: refusing to give %s to this command: %s.\n", name, d.Reason)
 	fmt.Fprintf(st.Stderr, "  Run a program that reads %s from its environment instead, for example:\n", name)
 	fmt.Fprintf(st.Stderr, "    passess exec -s %s -- gh api user\n", name)
-	fmt.Fprintf(st.Stderr, "  For HTTP, curl can read it without a shell:\n")
-	fmt.Fprintf(st.Stderr, "    passess exec -s %[1]s -- curl --variable %%%[1]s --expand-header 'Authorization: Bearer {{%[1]s}}' https://…\n", name)
+	fmt.Fprintf(st.Stderr, "  For HTTP, passess sends the request itself, to the hosts the secret lists:\n")
+	fmt.Fprintf(st.Stderr, "    passess http -s %[1]s -H 'Authorization: Bearer {{%[1]s}}' https://…\n", name)
 	if policy.Denied(d.Family) {
 		fmt.Fprintf(st.Stderr, "  To allow %s anyway, add %q to secrets.%s.allow in %s.\n", d.Family, d.Family, name, u.Path)
 	} else {

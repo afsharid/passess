@@ -18,8 +18,9 @@ Secret values never enter this conversation, and that is deliberate.
 - Run a command that needs one through passess:
   ` + "`passess exec -s NAME -- command args`" + `. The value goes into that command's
   environment only and is redacted from its output.
-- For HTTP, let curl read the value itself instead of opening a shell:
-  ` + "`passess exec -s TOKEN -- curl --variable %TOKEN --expand-header 'Authorization: Bearer {{TOKEN}}' https://…`" + `
+- For HTTP, let passess send the request; it takes the value only to the hosts the
+  secret lists: ` + "`passess http -s TOKEN -H 'Authorization: Bearer {{TOKEN}}' https://…`" + `.
+  If it lists none, ask the user to add the host to the secret's ` + "`hosts`" + `.
 - ` + "`$NAME`" + ` in your own shell is empty; never put a secret in an argument.
 - Never read ` + "`.env`" + ` files or credential files, and never ask the user to paste a
   secret. If one is missing, ask the user to run ` + "`passess add NAME --ref <reference>`" + `
