@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/agent"
+	"github.com/afsharid/passess/internal/buildinfo"
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/resolve"
@@ -237,6 +238,66 @@ func TestAgentStartRunsOne(t *testing.T) {
 	}
 }
 
+// After an upgrade the running agent is another build, which refuses the new
+// clients; start replaces it rather than leaving exec refused.
+func TestAgentStartReplacesAnotherBuild(t *testing.T) {
+	setup(t)
+	sock := agentSocket(t)
+	old := filepath.Join(filepath.Dir(sock), "passess-old")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", old,
+		"-ldflags", "-X github.com/afsharid/passess/internal/buildinfo.Version=0.0.1-old", "github.com/afsharid/passess/cmd/passess")
+	build.Dir = pkgDir
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		t.Fatal(err)
+	}
+	serve := exec.Command(old, "agent", "serve")
+	serve.Env = os.Environ()
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- serve.Wait() }()
+	t.Cleanup(func() { _ = serve.Process.Kill() })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if f, err := ask(sock, agent.Status); err == nil && f.Info.Build == "0.0.1-old" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the old agent never answered")
+		}
+	}
+
+	// A start that would serve another config leaves it alone.
+	other := exec.Command(binary, "agent", "start")
+	other.Env = append(os.Environ(), "PASSESS_CONFIG="+filepath.Join(t.TempDir(), "other.toml"))
+	var ee *exec.ExitError
+	if out, err := other.CombinedOutput(); !errors.As(err, &ee) || ee.ExitCode() != ExitConfig || !strings.Contains(string(out), "so it is left running") {
+		t.Fatalf("start with another config: %v\n%s", err, out)
+	}
+	if f, err := ask(sock, agent.Status); err != nil || f.Info.Build != "0.0.1-old" {
+		t.Fatalf("the old agent was replaced: %+v, %v", f.Info, err)
+	}
+
+	out, err := exec.Command(binary, "agent", "start").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "replaced passess 0.0.1-old") {
+		t.Fatalf("start: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _, _ = exec.Command(binary, "agent", "stop").CombinedOutput() })
+	if f, err := ask(sock, agent.Status); err != nil || !sameBuild(f.Info.Build, buildinfo.String()) {
+		t.Fatalf("after start: %+v, %v", f.Info, err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old agent kept running")
+	}
+	// The same build is left alone.
+	if out, _ := exec.Command(binary, "agent", "start").CombinedOutput(); !strings.Contains(string(out), "already running") {
+		t.Fatalf("second start: %s", out)
+	}
+}
+
 func TestAgentUsage(t *testing.T) {
 	for _, args := range [][]string{{"agent"}, {"agent", "nope"}, {"agent", "stop", "now"}, {"agent", "status", "--yaml"}} {
 		if _, _, code := run(t, args...); code != ExitUsage {
@@ -398,7 +459,7 @@ func TestAgentRefusesAnotherBuild(t *testing.T) {
 	s := cacheServer(new(atomic.Int32))
 	code := s.exec(&agent.Conn{}, agent.Request{V: agent.Version, Build: "0.0.0-another", Kind: agent.Exec}, files)
 	msg, _ := io.ReadAll(stderr)
-	if code != ExitUnavailable || !strings.Contains(string(msg), "passess agent stop && passess agent start") {
+	if code != ExitUnavailable || !strings.Contains(string(msg), "run passess agent start, which replaces it") {
 		t.Fatalf("exit %d, stderr %q", code, msg)
 	}
 }

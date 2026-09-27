@@ -74,9 +74,11 @@ where the protection stops. Read the last section before relying on it.
   terminal, or one run after `passess agent stop`, resolves in-process. The hooks refuse
   the plain ways around it in agent commands: `passess agent stop`, `serve` and
   `approve`, `PASSESS_CONFIG` or `PASSESS_AGENT_SOCK` set in a command, and programs
-  other than passess naming the agent's socket. That is part of T5, not a hard line:
-  what the hooks cannot parse (a script, an interpreter one-liner that builds the
-  path) still gets through.
+  other than passess naming the agent's socket. `passess agent start` replaces an agent
+  of another build only with one serving the same config; an older passess can replace
+  a newer agent that way, which forgets the cache and the approvals, as `agent lock`
+  does. That is part of T5, not a hard line: what the hooks cannot parse (a script, an
+  interpreter one-liner that builds the path) still gets through.
 - **The agent answers whether a text holds one of its values.** Hooks send tool output
   to it for masking, and so could any same-user process, with a guess. For a short,
   guessable value, a password, that is an oracle. Reaching the socket at all is T6.

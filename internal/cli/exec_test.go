@@ -20,9 +20,15 @@ const execValue = "passess-fake-exec-0123456789abcdef"
 
 var binary string // passess built once for tests that need a real process
 
+// pkgDir is where the tests start, inside the module; builds run from it.
+var pkgDir string
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "passess-cli-test")
 	if err != nil {
+		panic(err)
+	}
+	if pkgDir, err = os.Getwd(); err != nil {
 		panic(err)
 	}
 	binary = filepath.Join(dir, "passess")

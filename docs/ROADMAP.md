@@ -88,4 +88,6 @@ clean. Both use the maintainer's accounts, so they wait for them.
 that shows `passess doctor --json`, runs `check` on request and bundles the CLI. From
 slice 6 it asks for Touch ID approval when the daemon needs it. It never receives a
 secret value; the JSON it reads is pinned by fixtures that the Go tests write and the
-app's headless checks decode.
+app's headless checks decode. Next: after an upgrade it notices an agent of another
+build and replaces it, as `passess agent start` does; until then the Agent tile shows
+such an agent as running while it refuses every command.
