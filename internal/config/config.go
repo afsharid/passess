@@ -158,6 +158,9 @@ type Secret struct {
 	// Approve makes every new (program, caller) pair wait for the user's
 	// Allow, given through `passess agent`.
 	Approve bool
+	// Hosts are where `passess http` may send it: host names, or
+	// *.example.com for its subdomains. Empty: nowhere.
+	Hosts []string
 }
 
 // Profile is a named bundle for `passess run`.
@@ -184,6 +187,10 @@ type Need struct {
 
 var nameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// hostPattern is a host name, optionally *. for its subdomains, optionally
+// with a port: no scheme, no path.
+var hostPattern = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*(:[0-9]{1,5})?$`)
+
 type rawUser struct {
 	Version  int `toml:"version"`
 	Backends struct {
@@ -209,6 +216,7 @@ type rawUser struct {
 		Allow   []string `toml:"allow"`
 		Note    string   `toml:"note"`
 		Approve bool     `toml:"approve"`
+		Hosts   []string `toml:"hosts"`
 	} `toml:"secrets"`
 	Profiles map[string]struct {
 		Secrets  []string          `toml:"secrets"`
@@ -354,7 +362,12 @@ func ParseUser(path string, data []byte) (*User, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: secrets.%s.allow: %w", path, name, err)
 		}
-		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note, Approve: s.Approve}
+		for _, h := range s.Hosts {
+			if !hostPattern.MatchString(h) {
+				return nil, fmt.Errorf("%s: secrets.%s.hosts: %q is not a host name such as \"api.github.com\" or \"*.example.com\"", path, name, h)
+			}
+		}
+		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note, Approve: s.Approve, Hosts: s.Hosts}
 	}
 
 	for name, p := range raw.Profiles {
