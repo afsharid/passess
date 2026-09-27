@@ -300,8 +300,9 @@ passess agent stop
 The agent never hands a value to anyone. `exec` gives it the command, its environment
 and its stdin, stdout and stderr; the agent applies the same policy, starts the child,
 redacts what it prints and returns its exit status. Commands at a terminal, `run` and
-`mcp-exec` keep running in-process. After upgrading passess, restart the agent: it
-refuses clients of another version rather than run them under its old policy
+`mcp-exec` keep running in-process. After upgrading passess, run `passess agent start`:
+the running agent refuses clients of another version rather than run them under its old
+policy, and `start` replaces it with one of this version serving the same config
 ([ADR 8](docs/adr/0008-the-agent-runs-the-child.md)).
 
 ```toml

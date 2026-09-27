@@ -67,4 +67,8 @@ The agent never returns a value. It is ssh-agent's shape turned into an exec ser
   environment variable away from being skipped.
 - After an upgrade, a running agent refuses the new client until it is restarted. That
   is the price of never running a request under another version's policy.
+- Later, once the hooks refused `passess agent stop`, `passess agent start` came to
+  replace an agent of another build, so an agent command can restart it after an
+  upgrade. It does so only when the new agent would serve the config the old one
+  served: a start cannot bring another config in.
 - The agent's log (`agent.log`, next to its socket) holds passess's own messages only.
