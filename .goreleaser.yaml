@@ -25,6 +25,9 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# The release notes are the tag's message: the release workflow hands it over
+# with --release-notes, which takes the place of this list of commits. Do not
+# disable the changelog; that would drop the file too and leave the notes empty.
 changelog:
   use: github
   sort: asc
@@ -32,7 +35,7 @@ changelog:
 release:
   prerelease: auto
   footer: |
-    **macOS menu bar app:** `Passess-{{ .Tag }}-macos-arm64.zip` is attached by a separate job once it builds.
-    It is ad-hoc signed, so the first launch needs right-click → Open.
+    **macOS menu bar app:** `Passess-{{ .Tag }}-macos-arm64.zip`, for Apple silicon, follows the other files
+    by a few minutes. It is ad-hoc signed, so the first launch needs right-click → Open.
 
     Verify a download: `gh attestation verify <file> --repo afsharid/passess`.
