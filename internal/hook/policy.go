@@ -380,8 +380,8 @@ func checkParam(name string, env Env) string {
 	}
 	return fmt.Sprintf("passess: $%s would put a credential into the command line and this conversation. "+
 		"Run the program through passess, which hands the value to it alone: `passess exec -s %s -- program args` "+
-		"(without $%s). For an HTTP header, let curl expand it: `passess exec -s %s -- curl --variable %%%s --expand-header 'Authorization: Bearer {{%s}}' URL`.",
-		name, name, name, name, name, name)
+		"(without $%s). For an HTTP request, let passess send it, to the hosts the secret lists: `passess http -s %s -H 'Authorization: Bearer {{%s}}' URL`.",
+		name, name, name, name, name)
 }
 
 func checkCall(args []string, cwd string, env Env) string {

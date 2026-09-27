@@ -33,9 +33,14 @@ where the protection stops. Read the last section before relying on it.
   credential file reached the transcript despite a PreToolUse hook), pasted text,
   `@`-mentions, subagent results, compaction. Hooks stop the obvious mistakes early and
   suggest the right command; they are not what keeps a value out of the context.
-- **Allowing `curl` means allowing every host.** Until the egress proxy exists, a secret
-  whose allow list contains `curl` can be sent to any URL the agent chooses. The curl
-  form passess teaches agents is also the exfiltration form.
+- **Allowing `curl` means allowing every host.** A secret whose allow list contains
+  `curl` can be sent through `exec` to any URL the agent chooses. `passess http` closes
+  that for secrets that name their `hosts`: passess sends the request itself, only to
+  those hosts, over https, and follows redirects only among them, and no child process
+  holds the value. It binds the host, not what the request does there: an agent can
+  still use a token for anything the API allows it. Programs other than curl (gh, a
+  cloud CLI) reach their hosts through `exec` as before; a transparent proxy for them
+  is future work.
 - **Keychain ACLs do not stop the same user.** Any same-user process that shells out to
   `security` can read an item that `security` is trusted for. Binding the bootstrap
   credential to a signed passess binary is planned, and even then T6 stays out of scope.

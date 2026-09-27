@@ -206,6 +206,27 @@ profile's JSON:
 }
 ```
 
+## HTTP requests, bound to their hosts
+
+A token given to `curl` through `exec` goes wherever the agent points curl. Name the
+hosts a secret belongs to, and let passess send the request:
+
+```toml
+[secrets.GITHUB_TOKEN]
+ref   = "op://Dev/GitHub PAT/credential"
+hosts = ["api.github.com"]          # *.example.com covers subdomains
+```
+
+```sh
+passess http -s GITHUB_TOKEN -H 'Authorization: Bearer {{GITHUB_TOKEN}}' https://api.github.com/user
+```
+
+`{{NAME}}` stands for the secret in headers, the body (`-d`, `-d @file`) and the URL.
+The request goes out over https only (plain http only to this machine), to a host
+every secret in it names. Redirects are followed only among those hosts. What comes
+back is redacted. A secret without `hosts` goes nowhere through `passess http`. The
+agents' instructions and the hooks now teach this form.
+
 ## A harness's own API key
 
 A harness that runs a command to get its API key can get it from passess, and the key

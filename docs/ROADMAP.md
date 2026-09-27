@@ -71,8 +71,12 @@ Done:
 - hooks mask tool output with the agent's values, refuse the ways around the agent,
   and `passess helper` serves Claude Code's `apiKeyHelper`.
 
-**Slice 7 (in progress).** Done: `scan --scrub`, the backed-up, explicitly applied
-transcript clean-up. Next: the host-bound egress proxy, `fnox://`, `passess trust`,
+**Slice 7 (in progress).** Done:
+- `scan --scrub`, the backed-up, explicitly applied transcript clean-up;
+- `passess http`, requests that take a secret only to the hosts it names, with no child
+  process holding the value.
+
+Next: a transparent proxy for programs other than curl, `fnox://`, `passess trust`,
 Linux and Windows polish, signed releases.
 
 **Before v0.4.0.** The canary matrix: each harness, run for real with a canary secret,

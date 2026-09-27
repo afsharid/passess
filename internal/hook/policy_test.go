@@ -84,7 +84,7 @@ func TestShellCommands(t *testing.T) {
 		}
 	}
 	v := Decide(Event{Kind: Shell, Command: "echo $GITHUB_TOKEN"}, env)
-	if !strings.Contains(v.Reason, "passess exec -s GITHUB_TOKEN --") || !strings.Contains(v.Reason, "--expand-header") {
+	if !strings.Contains(v.Reason, "passess exec -s GITHUB_TOKEN --") || !strings.Contains(v.Reason, "passess http -s GITHUB_TOKEN -H") {
 		t.Fatalf("reason does not say what to run instead: %s", v.Reason)
 	}
 }
