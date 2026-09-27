@@ -176,9 +176,28 @@ func agentStart(st *Streams) int {
 	if err != nil {
 		return failf(st, ExitConfig, "%v", err)
 	}
+	cfg, err := config.UserPath(st.Getenv)
+	if err != nil {
+		return failf(st, ExitConfig, "%v", err)
+	}
 	if f, err := ask(path, agent.Status); err == nil && f.Info != nil {
-		fmt.Fprintf(st.Stdout, "passess agent: already running, pid %d\n", f.Info.PID)
-		return ExitOK
+		if sameBuild(f.Info.Build, buildinfo.String()) {
+			fmt.Fprintf(st.Stdout, "passess agent: already running, pid %d\n", f.Info.PID)
+			return ExitOK
+		}
+		// An agent of another build refuses this passess's clients, so start
+		// replaces it, typically after an upgrade. Nothing is skipped: the new
+		// agent must serve the config the old one did, and what the old one
+		// cached or had approved is forgotten, not carried over.
+		if canonical(cfg) != f.Info.Config {
+			return failf(st, ExitConfig, "the running agent is passess %s serving %s; this passess would serve %s, so it is left running. "+
+				"Start with the settings the agent has, or stop it from a terminal: passess agent stop", f.Info.Build, f.Info.Config, cfg)
+		}
+		if _, err := ask(path, agent.Stop); err != nil {
+			return failf(st, ExitUnavailable, "the running agent is passess %s and could not be stopped: %v", f.Info.Build, err)
+		}
+		fmt.Fprintf(st.Stdout, "passess agent: replaced passess %s (pid %d), which this passess %s cannot use\n",
+			f.Info.Build, f.Info.PID, buildinfo.String())
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -193,10 +212,6 @@ func agentStart(st *Streams) int {
 		return failf(st, ExitSoftware, "%v", err)
 	}
 	defer logf.Close()
-	cfg, err := config.UserPath(st.Getenv)
-	if err != nil {
-		return failf(st, ExitConfig, "%v", err)
-	}
 	cmd := exec.Command(self, "agent", "serve")
 	cmd.Stdout, cmd.Stderr = logf, logf
 	// The agent runs from / so it pins no directory; relative paths in its
@@ -606,7 +621,7 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 // this agent's config, and parses it. Refusals go to st.Stderr.
 func (s *agentServer) load(st *Streams, req agent.Request) (*config.User, []byte, int) {
 	if req.V != agent.Version || !sameBuild(req.Build, buildinfo.String()) {
-		return nil, nil, failf(st, ExitUnavailable, "the running agent is passess %s and this is passess %s; restart it: passess agent stop && passess agent start",
+		return nil, nil, failf(st, ExitUnavailable, "the running agent is passess %s and this is passess %s; run passess agent start, which replaces it",
 			buildinfo.String(), req.Build)
 	}
 	if len(req.Argv) == 0 || len(req.Secrets) == 0 || !filepath.IsAbs(req.Dir) {
