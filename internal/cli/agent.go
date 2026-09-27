@@ -193,6 +193,8 @@ func agentStart(st *Streams) int {
 			return failf(st, ExitConfig, "the running agent is passess %s serving %s; this passess would serve %s, so it is left running. "+
 				"Start with the settings the agent has, or stop it from a terminal: passess agent stop", f.Info.Build, f.Info.Config, cfg)
 		}
+		// The old agent gives up its socket and lock before it answers, so this
+		// one can take them at once.
 		if _, err := ask(path, agent.Stop); err != nil {
 			return failf(st, ExitUnavailable, "the running agent is passess %s and could not be stopped: %v", f.Info.Build, err)
 		}
@@ -634,7 +636,7 @@ func (s *agentServer) load(st *Streams, req agent.Request) (*config.User, []byte
 		cfg = filepath.Join(req.Dir, cfg)
 	}
 	if canonical(cfg) != s.configPath {
-		return nil, nil, failf(st, ExitConfig, "the agent serves %s, but this command would read %s; set PASSESS_CONFIG and XDG_CONFIG_HOME as the agent has them, or restart the agent from here: passess agent stop && passess agent start",
+		return nil, nil, failf(st, ExitConfig, "the agent serves %s, but this command would read %s; set PASSESS_CONFIG and XDG_CONFIG_HOME as the agent has them, or restart the agent from a terminal: passess agent stop && passess agent start",
 			s.configPath, req.Config)
 	}
 	data, err := os.ReadFile(s.configPath)
