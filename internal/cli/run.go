@@ -82,9 +82,12 @@ func runRun(st *Streams, args []string) int {
 	}
 	env := profileEnv(st.Getenv, prof, inject)
 
-	// A human at a terminal gets the program itself: TUIs keep working. Anything
-	// else — an agent, a log file, launchd — gets redacted output.
-	if isTerminal(st.Stdout) && detect.Harness(st.Getenv) == "" {
+	// Output passes through the redactor. A profile that opts in with tty =
+	// true (a TUI) gets the terminal itself instead, when passess runs at one
+	// and no agent is detected. Neither of those two proves a person is there
+	// (an agent can open a pseudo-terminal and clear its markers), so it is
+	// the user's choice, per profile, in a config agents may not edit.
+	if prof.TTY && isTerminal(st.Stdout) && detect.Harness(st.Getenv) == "" {
 		argv0 := argv[0]
 		if err := prog.Unchanged(); err != nil {
 			return failf(st, ExitNotExec, "%v", err)

@@ -40,6 +40,10 @@ passess mcp-exec github
 passess run web -- npm run dev
 ```
 
+`run` redacts the program's output, at a terminal too. A profile for a full-screen
+program that needs the terminal itself sets `tty = true`; it then gets the terminal,
+unredacted, when you run it at one with no agent detected.
+
 The same references and policy work across Claude Code, Codex, OpenCode, Kiro,
 Antigravity, Gemini CLI, Cursor, VS Code / Copilot, Windsurf, Zed and Claude Desktop.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for what lands when.
