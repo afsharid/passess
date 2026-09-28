@@ -101,8 +101,8 @@ func mcpInline(in Input) ([]Finding, error) {
 			}
 			out = append(out, Finding{
 				Area: a.Label(), Check: "mcp-inline", Path: a.ConfigPath(),
-				Detail: fmt.Sprintf("MCP server %q holds %s in clear; agents can read this file", e.Name, strings.Join(e.Leaks, ", ")),
-				Fix:    fmt.Sprintf("passess migrate mcp %s %s", a.ID(), e.Name),
+				Detail: fmt.Sprintf("MCP server %q holds %s in clear; agents can read this file", e.Name, names(e.Leaks)),
+				Fix:    fmt.Sprintf("passess migrate mcp %s %s", a.ID(), shellQuote(clean(e.Name))),
 			})
 		}
 	}
@@ -149,8 +149,8 @@ func kiroAgents(in Input) ([]Finding, error) {
 			if len(clearKeys) > 0 {
 				out = append(out, Finding{
 					Area: "Kiro", Check: "mcp-inline", Path: p,
-					Detail: fmt.Sprintf("agent %s's MCP server %q holds %s in clear; agents can read this file", name, server, strings.Join(clearKeys, ", ")),
-					Fix:    "store the value with `passess add NAME --keychain`, define the server under [mcp] in the passess config, and point the agent's entry at `passess mcp-exec " + server + "`",
+					Detail: fmt.Sprintf("agent %s's MCP server %q holds %s in clear; agents can read this file", display(name), server, names(clearKeys)),
+					Fix:    "store the value with `passess add NAME --keychain`, define the server under [mcp] in the passess config, and point the agent's entry at `passess mcp-exec " + shellQuote(clean(server)) + "`",
 				})
 			}
 		}
@@ -197,8 +197,8 @@ func claudeSettingsEnv(in Input) ([]Finding, error) {
 			if v, ok := doc.Env[k].(string); ok && secretInClear(k, v) {
 				out = append(out, Finding{
 					Area: "Claude Code", Check: "claude-settings-env", Path: p,
-					Detail: fmt.Sprintf("env.%s gives a credential in clear to every session, every command it runs and every MCP server", k),
-					Fix:    fmt.Sprintf("remove env.%s from this file; give it to the one program that needs it: passess exec -s %s -- PROGRAM", k, k),
+					Detail: fmt.Sprintf("env.%s gives a credential in clear to every session, every command it runs and every MCP server", display(k)),
+					Fix:    removeFix("env.", k, "from this file"),
 				})
 			}
 		}
@@ -279,8 +279,8 @@ func codexShellEnv(in Input) ([]Finding, error) {
 		if v, ok := p.Set[k].(string); ok && secretInClear(k, v) {
 			out = append(out, Finding{
 				Area: "Codex", Check: "codex-shell-env-set", Path: path,
-				Detail: fmt.Sprintf("shell_environment_policy.set.%s puts a credential in clear into every command the agent runs", k),
-				Fix:    fmt.Sprintf("remove set.%s; give it to the one program that needs it: passess exec -s %s -- PROGRAM", k, k),
+				Detail: fmt.Sprintf("shell_environment_policy.set.%s puts a credential in clear into every command the agent runs", display(k)),
+				Fix:    removeFix("set.", k, ""),
 			})
 		}
 	}
@@ -333,10 +333,14 @@ func dotfileCredentials(in Input) ([]Finding, error) {
 			if !secretInClear(e.Key, e.Value) {
 				continue
 			}
+			fix := fmt.Sprintf("delete line %d", e.Line)
+			if identifier.MatchString(e.Key) {
+				fix = fmt.Sprintf("passess add %s --keychain   # you type the value\nthen delete line %d; programs that need it: passess exec -s %s -- PROGRAM", e.Key, e.Line, e.Key)
+			}
 			out = append(out, Finding{
 				Area: "shell", Check: "dotfile-credential", Path: p, Line: e.Line,
-				Detail: fmt.Sprintf("%s is set in clear in a file every agent can read, and every program started from the shell may inherit it", e.Key),
-				Fix:    fmt.Sprintf("passess add %s --keychain   # you type the value\nthen delete line %d; programs that need it: passess exec -s %s -- PROGRAM", e.Key, e.Line, e.Key),
+				Detail: fmt.Sprintf("%s is set in clear in a file every agent can read, and every program started from the shell may inherit it", display(e.Key)),
+				Fix:    fix,
 			})
 		}
 	}
@@ -463,6 +467,52 @@ func definesServersOrEnv(path string) bool {
 		}
 	}
 	return false
+}
+
+var (
+	identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)   // fit for a command line
+	plainName  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`) // env.X, header.X-Y
+)
+
+// display is a name read from a file, fit to print: as it is when it is a
+// plain name, Go-quoted otherwise so that no control character (a newline, a
+// terminal escape) reaches the report.
+func display(s string) string {
+	if plainName.MatchString(s) {
+		return s
+	}
+	return fmt.Sprintf("%q", s)
+}
+
+func names(ss []string) string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = display(s)
+	}
+	return strings.Join(out, ", ")
+}
+
+// clean drops control characters from s.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// removeFix says to remove prefix+k, and offers the passess command only for
+// a name that can be one: the fix line is meant to be copied into a shell.
+func removeFix(prefix, k, where string) string {
+	fix := "remove " + prefix + display(k)
+	if where != "" {
+		fix += " " + where
+	}
+	if identifier.MatchString(k) {
+		fix += "; give it to the one program that needs it: passess exec -s " + k + " -- PROGRAM"
+	}
+	return fix
 }
 
 func shellQuote(s string) string {
