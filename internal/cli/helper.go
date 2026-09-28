@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"slices"
+
+	"github.com/afsharid/passess/internal/policy"
 )
 
 func init() {
@@ -13,7 +15,7 @@ func init() {
 
 // HelperFamily is the name a secret's allow list must hold before passess
 // helper prints it.
-const HelperFamily = "passess-helper"
+const HelperFamily = policy.ReservedFamily
 
 // runHelper prints one secret's value, for a harness that runs a command to
 // get its own API key (Claude Code's apiKeyHelper). The value leaves passess

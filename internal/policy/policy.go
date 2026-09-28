@@ -292,6 +292,9 @@ func CheckConfigured(secret string, p Program, allow []string) Decision {
 		return Decision{Allowed: true}
 	}
 	for _, a := range allow {
+		if reserved(a) {
+			continue
+		}
 		for _, f := range p.Families {
 			if Family(a) == f {
 				return Decision{Allowed: true}
@@ -301,6 +304,14 @@ func CheckConfigured(secret string, p Program, allow []string) Decision {
 	return Decision{Family: Family(p.Name), Reason: fmt.Sprintf(
 		"%s is not in the allow list of %s (%s)", p.Name, secret, strings.Join(allow, ", "))}
 }
+
+// ReservedFamily is not a program: in an allow list it lets `passess helper`
+// print the secret for a harness's key-helper setting. It never authorizes a
+// program, whatever that program is called, or naming a binary
+// "passess-helper" would turn the opt-in into an exec target.
+const ReservedFamily = "passess-helper"
+
+func reserved(a string) bool { return a == ReservedFamily || Family(a) == ReservedFamily }
 
 // Decision is the outcome of Check.
 type Decision struct {
@@ -313,7 +324,9 @@ type Decision struct {
 func Check(secret string, p Program, allow []string) Decision {
 	allowed := map[string]bool{}
 	for _, a := range allow {
-		allowed[Family(a)] = true
+		if !reserved(a) {
+			allowed[Family(a)] = true
+		}
 	}
 	for _, f := range p.Families {
 		if !Denied(f) || allowed[f] {
