@@ -171,6 +171,10 @@ type Profile struct {
 	Allow    []string
 	Inherit  []string          // extra variables passed through from the caller
 	Env      map[string]string // plain, non-secret values
+	// TTY lets the program have the terminal itself, unredacted, when passess
+	// runs at one with no agent detected: for TUIs. Off, its output always
+	// passes through the redactor.
+	TTY bool
 }
 
 // Project is a parsed project file.
@@ -224,6 +228,7 @@ type rawUser struct {
 		Allow    []string          `toml:"allow"`
 		Inherit  []string          `toml:"inherit"`
 		Env      map[string]string `toml:"env"`
+		TTY      bool              `toml:"tty"`
 	} `toml:"profiles"`
 	MCP map[string]struct {
 		Command   []string          `toml:"command"`
@@ -406,7 +411,7 @@ func ParseUser(path string, data []byte) (*User, error) {
 				return nil, fmt.Errorf("%s: profiles.%s.env.%s looks like a credential; define it under [secrets] and list it in the profile", path, name, k)
 			}
 		}
-		u.Profiles[name] = Profile{Name: name, Secrets: p.Secrets, Required: p.Required, Allow: allow, Inherit: p.Inherit, Env: p.Env}
+		u.Profiles[name] = Profile{Name: name, Secrets: p.Secrets, Required: p.Required, Allow: allow, Inherit: p.Inherit, Env: p.Env, TTY: p.TTY}
 	}
 
 	u.MCP = map[string]MCPServer{}

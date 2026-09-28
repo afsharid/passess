@@ -15,6 +15,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/scan"
@@ -227,6 +228,10 @@ func checkShell(cmd, cwd string, env Env) string {
 	}
 	var reason string
 	others := false // a program other than passess runs
+	// cur is the directory relative paths resolve against: where the harness
+	// ran the command, then wherever a literal cd or pushd earlier in the same
+	// command line moved it. "" once that is unknown.
+	cur, stack := cwd, []string(nil)
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if reason != "" {
 			return false
@@ -241,10 +246,10 @@ func checkShell(cmd, cwd string, env Env) string {
 			switch {
 			case !ok:
 			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
-				if why := deniedPath(p, cwd, env); why != "" {
+				if why := deniedPath(p, cur, env); why != "" {
 					reason = readReason(p, why)
 				}
-			case inConfig(abs(p, cwd, env.Home), env): // > >> &> into the config
+			case inConfig(abs(p, cur, env.Home), env): // > >> &> into the config
 				reason = configReason(p)
 			}
 		case *syntax.CallExpr:
@@ -266,8 +271,9 @@ func checkShell(cmd, cwd string, env Env) string {
 				}
 			}
 			if reason == "" {
-				reason = checkCall(args, cwd, env)
+				reason = checkCall(args, cur, env)
 			}
+			cur, stack = afterCd(args, cur, stack, env.Home)
 		case *syntax.DeclClause: // export, declare, typeset, local, readonly
 			reason = checkDecl(n, env)
 		}
@@ -289,12 +295,58 @@ var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOC
 // for a passess command, they point it elsewhere just the same.
 var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
 
+// afterCd returns the working directory after a cd, pushd or popd with args,
+// and the pushd stack; other commands leave both as they are. A directory it
+// cannot tell (cd "$X", cd -) becomes "".
+func afterCd(args []string, cur string, stack []string, home string) (string, []string) {
+	if len(args) == 0 {
+		return cur, stack
+	}
+	switch filepath.Base(args[0]) {
+	case "cd", "pushd":
+		ops := args[1:]
+		for len(ops) > 0 && strings.HasPrefix(ops[0], "-") && ops[0] != "-" {
+			ops = ops[1:] // -L, -P, -e, -@
+		}
+		next := home
+		switch {
+		case len(ops) == 0 && filepath.Base(args[0]) == "pushd":
+			return "", stack // swaps with the top of a stack not known here
+		case len(ops) == 0:
+		case ops[0] == "" || ops[0] == "-":
+			next = ""
+		default:
+			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) {
+				next = "" // relative to a directory not known here
+			}
+		}
+		if filepath.Base(args[0]) == "pushd" {
+			stack = append(stack, cur)
+		}
+		return next, stack
+	case "popd":
+		if len(stack) > 0 {
+			return stack[len(stack)-1], stack[:len(stack)-1]
+		}
+		return "", stack
+	}
+	return cur, stack
+}
+
 func checkAssign(name, program string) string {
+	if detect.IsMarker(name) {
+		return markerReason(name)
+	}
 	if passessSettings[name] || (pathSettings[name] && filepath.Base(program) == "passess") {
 		return fmt.Sprintf("passess: setting %s in a command points passess at another config or agent than the user's, "+
 			"around the policy and the approvals the user set up. Run passess without it; its settings are the user's to change.", name)
 	}
 	return ""
+}
+
+func markerReason(name string) string {
+	return "passess: " + name + " tells passess it runs under an agent; clearing or overriding it hides that from the " +
+		"checks meant for agents. Run the command as it is."
 }
 
 const socketReason = "passess: that command talks to the passess agent's socket directly. Commands that need a secret go " +
@@ -429,6 +481,12 @@ func checkCall(args []string, cwd string, env Env) string {
 		rest := args[1:]
 		var set []string
 		for len(rest) > 0 && (strings.HasPrefix(rest[0], "-") || strings.Contains(rest[0], "=")) {
+			if (rest[0] == "-u" || rest[0] == "--unset") && len(rest) > 1 && detect.IsMarker(rest[1]) {
+				return markerReason(rest[1])
+			}
+			if k, ok := strings.CutPrefix(rest[0], "--unset="); ok && detect.IsMarker(k) {
+				return markerReason(k)
+			}
 			if rest[0] == "-u" || rest[0] == "--unset" || rest[0] == "-C" || rest[0] == "--chdir" || rest[0] == "-S" {
 				rest = rest[min(2, len(rest)):]
 				continue
@@ -458,6 +516,21 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "helper":
 			return "passess: `passess helper` prints a secret value; it is for a harness's apiKeyHelper setting, not for commands. " +
 				useInstead
+		case sub(1) == "add":
+			return "passess: `passess add` decides which programs may receive which secrets; it is the user's to run. " +
+				"Tell the user the name and reference you need."
+		case sub(1) == "migrate" && slices.Contains(args, "--apply"):
+			return "passess: `passess migrate --apply` moves values out of the user's files; it is the user's to run. " +
+				"Show them the dry run and let them apply it."
+		case sub(1) == "uninstall" && slices.Contains(args, "--apply"),
+			sub(1) == "install" && slices.Contains(args, "--apply") && slices.Contains(args, "--no-hooks"):
+			return "passess: that removes the hooks that guard this session; it is the user's to run."
+		}
+	case "unset":
+		for _, a := range args[1:] {
+			if detect.IsMarker(a) {
+				return markerReason(a)
+			}
 		}
 	case "printenv":
 		if len(args) == 1 {

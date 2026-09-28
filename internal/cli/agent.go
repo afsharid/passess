@@ -285,9 +285,13 @@ type agentServer struct {
 	// environment: backend credentials come from there.
 	resolvers func(*config.User) (*resolve.Resolver, func())
 	handlers  sync.WaitGroup
-	running   atomic.Int32 // commands running
-	served    atomic.Int32 // exec requests received
-	stopOnce  sync.Once
+	// conns bounds the connections held at once and long those held for a
+	// command's or an approval's whole life, so that the agent never runs out
+	// of file descriptors: past either, a connection is turned away at once.
+	conns, long chan struct{}
+	running     atomic.Int32 // commands running
+	served      atomic.Int32 // exec requests received
+	stopOnce    sync.Once
 
 	log *auditLog
 
@@ -301,8 +305,22 @@ type agentServer struct {
 	asks      uint64 // questions asked, for their IDs
 }
 
+// connLimits sizes conns and long from the open-file limit: each command
+// holds its connection, up to three passed descriptors and the child's pipes.
+func connLimits() (conns, long int) {
+	limit := uint64(1024)
+	var r syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &r); err == nil && r.Cur > 0 {
+		limit = r.Cur
+	}
+	limit = min(limit, 1<<16)
+	return int(max(limit/4, 4)), int(max(limit/16, 2))
+}
+
 func newAgentServer(l *agent.Listener, configPath string, resolvers func(*config.User) (*resolve.Resolver, func())) *agentServer {
+	nConns, nLong := connLimits()
 	return &agentServer{l: l, configPath: configPath, started: time.Now(), resolvers: resolvers,
+		conns: make(chan struct{}, nConns), long: make(chan struct{}, nLong),
 		live: map[*generation]bool{}, approvers: map[*agent.Conn]bool{}, pending: map[string]*pendingAsk{},
 		approved: map[approvalKey]approval{}}
 }
@@ -317,9 +335,16 @@ func (s *agentServer) serve() {
 			time.Sleep(10 * time.Millisecond) // EMFILE and the like
 			continue
 		}
+		select {
+		case s.conns <- struct{}{}:
+		default:
+			_ = c.Close() // at the limit: turn it away rather than run out of descriptors
+			continue
+		}
 		s.handlers.Add(1)
 		go func() {
 			defer s.handlers.Done()
+			defer func() { <-s.conns }()
 			s.handle(c)
 		}()
 	}
@@ -334,13 +359,29 @@ func (s *agentServer) isStopping() bool {
 
 func (s *agentServer) handle(c *agent.Conn) {
 	defer c.Close()
-	req, files, err := c.Receive(10 * time.Second)
+	// Clients send their request as soon as they connect; one that does not
+	// holds a slot only briefly.
+	req, files, err := c.Receive(3 * time.Second)
 	if err != nil {
 		return
 	}
 	if req.Kind != agent.Exec {
 		for _, f := range files {
 			_ = f.Close()
+		}
+	}
+	switch req.Kind {
+	case agent.Exec, agent.Ask, agent.Approver: // held for as long as they last
+		select {
+		case s.long <- struct{}{}:
+			defer func() { <-s.long }()
+		default:
+			for _, f := range files {
+				_ = f.Close()
+			}
+			busy := ExitUnavailable
+			_ = c.Write(agent.Frame{Status: &busy, Error: "the agent is running as many commands and questions as it takes at once; try again shortly"})
+			return
 		}
 	}
 	switch req.Kind {

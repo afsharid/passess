@@ -95,6 +95,7 @@ ref = "vault://secret/app#token"
 }
 
 func TestAddCreatesAndAppends(t *testing.T) {
+	noHarness(t) // add refuses under an agent; see TestAddUnderAHarness
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "sub", "config.toml")
 	t.Setenv("PASSESS_CONFIG", cfg)

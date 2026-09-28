@@ -110,7 +110,11 @@ func TestVaultTokenSources(t *testing.T) {
 	if err := os.WriteFile(home+"/.vault-token", []byte(vaultToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": home, "VAULT_ADDR": ts.URL}
+	orig := accountHome
+	accountHome = func() string { return home }
+	t.Cleanup(func() { accountHome = orig })
+	// The caller's $HOME points elsewhere; the account's file is the one read.
+	env := map[string]string{"HOME": t.TempDir(), "VAULT_ADDR": ts.URL}
 	v := &Vault{Getenv: func(k string) string { return env[k] }}
 	if _, err := v.Resolve(context.Background(), mustRef(t, "vault://kv/app#token")); err != nil {
 		t.Fatalf("~/.vault-token: %v", err)
@@ -193,5 +197,58 @@ func TestBitwarden(t *testing.T) {
 	locked := Bitwarden{Runner: run, Getenv: func(string) string { return "" }}
 	if err := locked.Available(context.Background()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("no session: %v", err)
+	}
+}
+
+// A token passess holds itself goes only to the address in its own config;
+// the caller's VAULT_ADDR cannot aim it elsewhere. Every address must be
+// https, or plain http to this machine.
+func TestVaultAddressRules(t *testing.T) {
+	token := func(context.Context) (secret.Value, error) { return secret.FromString(vaultToken), nil }
+	ctx := context.Background()
+	env := func(addr string) func(string) string {
+		return func(k string) string {
+			if k == "VAULT_ADDR" {
+				return addr
+			}
+			return ""
+		}
+	}
+	if err := (&Vault{Token: token, Getenv: env("https://vault.example")}).Available(ctx); !errors.Is(err, ErrUnavailable) ||
+		!strings.Contains(err.Error(), "backends.vault.address") {
+		t.Fatalf("config token sent to VAULT_ADDR: %v", err)
+	}
+	for addr, ok := range map[string]bool{
+		"https://vault.example": true,
+		"http://127.0.0.1:8200": true,
+		"http://localhost:8200": true,
+		"http://vault.example":  false,
+		"ftp://vault.example":   false,
+		"vault.example":         false,
+	} {
+		_, err := (&Vault{Address: addr, Token: token}).address()
+		if (err == nil) != ok {
+			t.Errorf("address %q: err=%v, want ok=%v", addr, err, ok)
+		}
+	}
+}
+
+// A redirect to another server is refused: Go would carry X-Vault-Token along.
+func TestVaultRefusesCrossHostRedirect(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Vault-Token") != "" {
+			t.Error("the token reached the redirect target")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(other.Close)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(origin.Close)
+	token := func(context.Context) (secret.Value, error) { return secret.FromString(vaultToken), nil }
+	_, err := (&Vault{Address: origin.URL, Token: token}).Resolve(context.Background(), mustRef(t, "vault://kv/app#token"))
+	if err == nil || !strings.Contains(err.Error(), "another server") {
+		t.Fatalf("Resolve = %v, want the redirect refused", err)
 	}
 }

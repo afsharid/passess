@@ -78,6 +78,9 @@ func TestHTTPRefusals(t *testing.T) {
 		{[]string{"-s", "X", "http://example.com/"}, ExitNoPerm, "only https"},
 		{[]string{"-s", "X", "-H", "Authorization: {{Z}}", srv.URL + "/"}, ExitUsage, "{{Z}} names a secret not given"},
 		{[]string{"-s", "ALIAS=X", srv.URL + "/"}, ExitUsage, "names secrets by NAME"},
+		// A placeholder in the host is checked as "x" and sent as the value.
+		{[]string{"-s", "X", "https://{{X}}." + strings.TrimPrefix(srv.URL, "https://") + "/"}, ExitUsage, "scheme or host"},
+		{[]string{"-s", "X", "https://u:{{X}}@" + strings.TrimPrefix(srv.URL, "https://") + "/"}, ExitUsage, "scheme or host"},
 	} {
 		_, errOut, code := run(t, append([]string{"http"}, c.args...)...)
 		if code != c.code || !strings.Contains(errOut, c.want) {
@@ -86,6 +89,9 @@ func TestHTTPRefusals(t *testing.T) {
 	}
 	if contacted.Load() != 0 {
 		t.Fatalf("a refused request reached the server %d times", contacted.Load())
+	}
+	if _, errOut, code := run(t, "http", "-s", "X", srv.URL+"/q?t={{X}}"); code != 0 {
+		t.Fatalf("a placeholder in the query: exit %d, %q", code, errOut)
 	}
 	if _, errOut, code := run(t, "http", "-s", "X", srv.URL+"/missing"); code != ExitHTTPError || !strings.Contains(errOut, "404") {
 		t.Fatalf("a 404: exit %d, %q", code, errOut)

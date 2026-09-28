@@ -156,7 +156,7 @@ func resolveExec(st *Streams, u *config.User, prog policy.Program, environ, argv
 	for _, w := range warnings {
 		fmt.Fprintf(st.Stderr, "passess: warning: %s\n", w)
 	}
-	return launch.Spec{Path: prog.Path, Argv: argv, Env: childEnv(environ, u, inject), Redactor: rd}, 0
+	return launch.Spec{Path: prog.Path, Argv: argv, Env: childEnv(environ, u, inject), Redactor: rd, Verify: prog.Unchanged}, 0
 }
 
 // execStatus reports a child that did not start or whose output was lost,

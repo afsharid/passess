@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -87,6 +88,8 @@ type Program struct {
 	Name     string   // basename of Path
 	Families []string // Name's family plus any it counts as
 	Why      map[string]string
+
+	stamp fileStamp // the file Inspect judged; see Unchanged
 }
 
 // ErrNotFound means argv[0] could not be found or is not executable.
@@ -105,7 +108,12 @@ func Inspect(argv0 string, lookPath func(string) (string, error)) (Program, erro
 	if abs, err := filepath.Abs(resolved); err == nil {
 		resolved = abs
 	}
-	p := Program{Typed: argv0, Path: resolved, Name: filepath.Base(resolved), Why: map[string]string{}}
+	// Stamp first: a change while the content below is read shows up later.
+	stamp, err := stampOf(resolved)
+	if err != nil {
+		return Program{}, fmt.Errorf("%w: %s", ErrNotFound, argv0)
+	}
+	p := Program{Typed: argv0, Path: resolved, Name: filepath.Base(resolved), Why: map[string]string{}, stamp: stamp}
 	add := func(f, why string) {
 		for _, have := range p.Families {
 			if have == f {
@@ -162,8 +170,38 @@ func shebang(path string) []string {
 	return []string{interp}
 }
 
+// referenceDirs are searched for the real interpreters whatever PATH says.
+// The caller chooses PATH, and a PATH that finds no sh would otherwise leave
+// nothing to compare a renamed copy of sh against.
+var referenceDirs = []string{"/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/sbin", "/usr/sbin",
+	"/home/linuxbrew/.linuxbrew/bin"}
+
+// references lists where name is installed: on the caller's PATH and in
+// referenceDirs, each resolved through symlinks, without repeats.
+func references(name string, lookPath func(string) (string, error)) []string {
+	var out []string
+	add := func(p string) {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	if p, err := lookPath(name); err == nil {
+		add(p)
+	}
+	for _, d := range referenceDirs {
+		p := filepath.Join(d, name)
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+			add(p)
+		}
+	}
+	return out
+}
+
 // copyOf reports whether path is the same file as, or byte-identical to, a
-// denied interpreter found on PATH.
+// denied interpreter found on PATH or in referenceDirs.
 func copyOf(path string, lookPath func(string) (string, error)) (family, original string) {
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
@@ -171,29 +209,24 @@ func copyOf(path string, lookPath func(string) (string, error)) (family, origina
 	}
 	var sum []byte
 	for _, name := range lookups {
-		orig, err := lookPath(name)
-		if err != nil {
-			continue
-		}
 		f := Family(name)
-		if resolved, err := filepath.EvalSymlinks(orig); err == nil {
-			orig = resolved
-		}
-		if orig == path {
-			continue // it is the interpreter itself; its name already says so
-		}
-		ost, err := os.Stat(orig)
-		if err != nil || ost.Size() != st.Size() {
-			continue
-		}
-		if os.SameFile(st, ost) {
-			return f, orig
-		}
-		if sum == nil {
-			sum = hashFile(path)
-		}
-		if sum != nil && bytes.Equal(sum, hashFile(orig)) {
-			return f, orig
+		for _, orig := range references(name, lookPath) {
+			if orig == path {
+				continue // it is the interpreter itself; its name already says so
+			}
+			ost, err := os.Stat(orig)
+			if err != nil || ost.Size() != st.Size() {
+				continue
+			}
+			if os.SameFile(st, ost) {
+				return f, orig
+			}
+			if sum == nil {
+				sum = hashFile(path)
+			}
+			if sum != nil && bytes.Equal(sum, hashFile(orig)) {
+				return f, orig
+			}
 		}
 	}
 	return "", ""
@@ -259,6 +292,9 @@ func CheckConfigured(secret string, p Program, allow []string) Decision {
 		return Decision{Allowed: true}
 	}
 	for _, a := range allow {
+		if reserved(a) {
+			continue
+		}
 		for _, f := range p.Families {
 			if Family(a) == f {
 				return Decision{Allowed: true}
@@ -268,6 +304,14 @@ func CheckConfigured(secret string, p Program, allow []string) Decision {
 	return Decision{Family: Family(p.Name), Reason: fmt.Sprintf(
 		"%s is not in the allow list of %s (%s)", p.Name, secret, strings.Join(allow, ", "))}
 }
+
+// ReservedFamily is not a program: in an allow list it lets `passess helper`
+// print the secret for a harness's key-helper setting. It never authorizes a
+// program, whatever that program is called, or naming a binary
+// "passess-helper" would turn the opt-in into an exec target.
+const ReservedFamily = "passess-helper"
+
+func reserved(a string) bool { return a == ReservedFamily || Family(a) == ReservedFamily }
 
 // Decision is the outcome of Check.
 type Decision struct {
@@ -280,7 +324,9 @@ type Decision struct {
 func Check(secret string, p Program, allow []string) Decision {
 	allowed := map[string]bool{}
 	for _, a := range allow {
-		allowed[Family(a)] = true
+		if !reserved(a) {
+			allowed[Family(a)] = true
+		}
 	}
 	for _, f := range p.Families {
 		if !Denied(f) || allowed[f] {

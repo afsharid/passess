@@ -1,4 +1,13 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
+# VERSION goes into shell commands below; refuse anything but a plain version
+# before any of them runs. Pure make: no shell sees the value here.
+version_rest := $(VERSION)
+$(foreach c,0 1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z . + - _,$(eval version_rest := $(subst $(c),,$(version_rest))))
+ifneq ($(strip $(version_rest))$(words $(VERSION)),1)
+$(error VERSION may hold only letters, digits and . + - _)
+endif
+
 LDFLAGS := -s -w -X github.com/afsharid/passess/internal/buildinfo.Version=$(VERSION)
 
 # The macOS menu bar app, Passess.app, with the CLI bundled inside it.

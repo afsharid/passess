@@ -86,21 +86,34 @@ func printAudit(st *Streams, out auditOutput) {
 			if where != "" {
 				where += ": "
 			}
-			fmt.Fprintf(st.Stdout, "  %s%s\n", where, f.Detail)
+			fmt.Fprintf(st.Stdout, "  %s%s\n", printable(where), printable(f.Detail))
 			lines := strings.Split(f.Fix, "\n")
-			fmt.Fprintf(st.Stdout, "    fix: %s\n", lines[0])
+			fmt.Fprintf(st.Stdout, "    fix: %s\n", printable(lines[0]))
 			for _, l := range lines[1:] {
-				fmt.Fprintf(st.Stdout, "         %s\n", l)
+				fmt.Fprintf(st.Stdout, "         %s\n", printable(l))
 			}
 		}
 		fmt.Fprintln(st.Stdout)
 	}
 	for _, e := range out.Errors {
-		fmt.Fprintf(st.Stdout, "could not check: %s\n", e)
+		fmt.Fprintf(st.Stdout, "could not check: %s\n", printable(e))
 	}
 	if len(out.Findings) == 0 {
 		fmt.Fprintln(st.Stdout, "Nothing found: no harness setting or file checked here hands credentials to agents.")
 		return
 	}
 	fmt.Fprintf(st.Stdout, "%d finding(s). passess changed nothing; each fix is yours to run. `passess scan` finds values in clear line by line.\n", len(out.Findings))
+}
+
+// printable drops control characters but tab from one line of the report.
+// Findings quote names they read from files already; this keeps any that
+// slip through from moving the cursor, retitling the terminal or starting a
+// line of their own.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }

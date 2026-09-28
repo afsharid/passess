@@ -105,6 +105,11 @@ func runHTTP(st *Streams, args []string) int {
 	if err != nil || target.Host == "" {
 		return failf(st, ExitUsage, "%q is not an absolute URL", pos[0])
 	}
+	// The host is checked with "x" in place of each placeholder; a value
+	// expanded into the scheme or host would then go somewhere unchecked.
+	if placeholder.MatchString(urlOrigin(pos[0])) {
+		return failf(st, ExitUsage, "a {{NAME}} placeholder cannot be part of the URL's scheme or host; put it in the path, the query, a header or the body")
+	}
 	for _, n := range names {
 		s, ok := u.Secrets[n]
 		if !ok {
@@ -155,6 +160,9 @@ func runHTTP(st *Streams, args []string) int {
 	req, err := http.NewRequestWithContext(ctx, verb, expand(pos[0]), strings.NewReader(expand(body)))
 	if err != nil {
 		return failf(st, ExitUsage, "%s", rd.Redact([]byte(err.Error())))
+	}
+	if req.URL.Scheme != target.Scheme || req.URL.Host != target.Host {
+		return failf(st, ExitUsage, "the URL's host changed once the secrets were put in; refusing to send")
 	}
 	for _, h := range headers {
 		k, v, _ := strings.Cut(h, ":")
@@ -222,6 +230,20 @@ func runHTTP(st *Streams, args []string) int {
 // hostAllowed says why s may not go to u, or "". https only, except to this
 // machine; the host must match an entry of s.Hosts, where *.example.com
 // matches its subdomains and an entry without a port only the scheme's own.
+// urlOrigin is raw's scheme and authority, "scheme://user@host:port": all of
+// it up to the first /, ? or # after "://", or all of raw without "://".
+func urlOrigin(raw string) string {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return raw
+	}
+	rest := raw[i+3:]
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	return raw[:i+3] + rest
+}
+
 func hostAllowed(u *url.URL, s config.Secret) string {
 	if len(s.Hosts) == 0 {
 		return fmt.Sprintf("it names no hosts; add hosts = [\"%s\"] to secrets.%s in the config if it belongs there", u.Hostname(), s.Name)

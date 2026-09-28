@@ -132,13 +132,16 @@ func runMCPExec(st *Streams, args []string) int {
 	}
 	env := mcpEnv(st.Getenv, srv, inject)
 	if !srv.Redact {
+		if err := prog.Unchanged(); err != nil {
+			return failf(st, ExitNotExec, "mcp.%s: %v", name, err)
+		}
 		err := syscall.Exec(prog.Path, srv.Command, env)
 		return failf(st, ExitNotExec, "mcp.%s: %v", name, err)
 	}
 	status, err := launch.Run(launch.Spec{
 		Path: prog.Path, Argv: srv.Command, Env: env,
 		Stdin: st.Stdin, Stdout: st.Stdout, Stderr: st.Stderr,
-		Redactor: rd, ForwardInterrupt: true,
+		Redactor: rd, ForwardInterrupt: true, Verify: prog.Unchanged,
 	})
 	if err != nil && status >= launch.NotExecutable {
 		return failf(st, status, "mcp.%s: %v", name, err)

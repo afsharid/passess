@@ -44,6 +44,15 @@ func TestShellCommands(t *testing.T) {
 		"cat /home/u/.claude.json", "cat < .env", "while read l; do echo $l; done < .env", "cp .env /tmp/leak",
 		"cat ~/.local/state/passess/backups/x/00-.env", "cat /proc/self/environ",
 		"bash -c 'cat .env'", "sh -c \"printenv\"", "eval printenv", "bash -lc 'cat .env'", "sh -ec env", "cat .envrc",
+		// Commands that change what protects the user, and hiding the harness.
+		"passess add EVIL --ref keychain://passess/X --allow curl", "passess migrate env .env --apply --yes",
+		"passess uninstall --apply", "passess install --no-hooks --apply",
+		// A literal cd earlier in the line moves where relative paths point.
+		`cd ~/.config/passess && echo 'allow = ["sh"]' >> config.toml`, "cd ~/.local/state/passess/backups && cat x",
+		"pushd ~/.config/passess && echo x > config.toml", "cd ~ && cd .config/passess && echo x >> config.toml",
+		"cd -P ~/.config/passess; echo x >> config.toml",
+		"env -u CLAUDECODE passess exec -s X -- gh", "env --unset=CLAUDECODE gh", "unset CLAUDECODE",
+		"CLAUDECODE= passess migrate env .env --apply", "export CODEX_THREAD_ID=",
 		"op read op://Dev/x/credential", "op inject -i tpl", "op item get x --reveal", "bws secret get 0000",
 		"bws secret list", "bw get password github", "vault kv get secret/app", "bao read secret/x",
 		"security find-generic-password -s x -w", "secret-tool lookup service x", "gh auth token",
@@ -67,6 +76,8 @@ func TestShellCommands(t *testing.T) {
 		`echo "unterminated`, "", "cat ~/.config/passess/config.toml", "sed -n 1p ~/.config/passess/config.toml",
 		"echo hi > /tmp/out.txt",
 		"passess agent status", "passess agent start", "passess agent lock", "passess list", "HOME=/tmp ls",
+		"passess migrate env .env", "passess install --apply", "passess uninstall", "env -u FOO gh",
+		"cd /tmp && ls", "cd /tmp && cat README.md", "pushd /tmp && popd && ls",
 		"FOO=1 passess exec -s API_KEY -- gh api user",
 	}
 	for _, c := range deny {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/provider"
 )
@@ -166,6 +167,13 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 	names, err := parseAnywhere(fs, args)
 	if err != nil {
 		return ExitUsage
+	}
+	// Taking the hooks away is the user's call: they guard the very session
+	// an agent would run this from. Installing them is not gated.
+	if *apply && (verb == "uninstall" || *noHooks) {
+		if h := detect.Harness(st.Getenv); h != "" {
+			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, h)
+		}
 	}
 	augmentPath(st.Getenv)
 	targets, err := selectAdapters(st, names)
@@ -420,7 +428,10 @@ func applyActions(a harness.Adapter, actions []harness.Action) error {
 			continue
 		}
 		for _, cmd := range action.Commands {
-			res, err := (provider.ExecRunner{}).Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
+			// A harness's own CLI (claude, codex, agy) carries no vault
+			// credential, so it is found the ordinary way, on PATH.
+			run := provider.ExecRunner{Look: exec.LookPath}
+			res, err := run.Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
 			if err == nil && res.Exit != 0 {
 				err = errors.New(provider.CLIMessage(res.Stderr))
 			}

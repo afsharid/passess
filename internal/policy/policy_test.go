@@ -171,3 +171,38 @@ func TestEffective(t *testing.T) {
 		t.Fatalf("disjoint lists must allow nothing, got %v", got)
 	}
 }
+
+// A caller that restricts PATH to the disguise's own directory must not hide
+// the real interpreter from the copy check: the check also looks in fixed
+// system directories.
+func TestCopyCheckDoesNotDependOnCallerPATH(t *testing.T) {
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	shPath, _ = filepath.EvalSymlinks(shPath)
+	data, err := os.ReadFile(shPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	copied := filepath.Join(dir, "gh")
+	if err := os.WriteFile(copied, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	onlyDisguise := func(name string) (string, error) {
+		if name == "gh" {
+			return copied, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	p, err := Inspect("gh", onlyDisguise)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, allow := range [][]string{nil, {"gh"}} {
+		if d := Check("TOKEN", p, allow); d.Allowed {
+			t.Fatalf("allow=%v: a renamed copy of sh got the secret (families %v)", allow, p.Families)
+		}
+	}
+}
