@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/afsharid/passess/internal/launch"
 	"github.com/afsharid/passess/internal/mcpbridge"
 	"github.com/afsharid/passess/internal/policy"
+	"github.com/afsharid/passess/internal/provider"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/secret"
 )
@@ -70,8 +70,12 @@ func runMCPExec(st *Streams, args []string) int {
 
 	var prog policy.Program
 	if len(srv.Command) > 0 {
-		if prog, err = policy.Inspect(srv.Command[0], exec.LookPath); err != nil {
-			return failf(st, ExitNotFound, "mcp.%s: %v", name, err)
+		if prog, err = policy.Inspect(srv.Command[0], mcpLookPath); err != nil {
+			hint := ""
+			if !filepath.IsAbs(srv.Command[0]) {
+				hint = "; passess looks only in the standard install locations, so give its absolute path in mcp." + name + ".command"
+			}
+			return failf(st, ExitNotFound, "mcp.%s: %v%s", name, err, hint)
 		}
 		for _, s := range srv.Secrets() {
 			if d := policy.CheckConfigured(s, prog, u.Secrets[s].Allow); !d.Allowed {
@@ -130,7 +134,7 @@ func runMCPExec(st *Streams, args []string) int {
 	for envName, s := range srv.Env {
 		inject[envName] = values[s]
 	}
-	env := mcpEnv(st.Getenv, srv, inject)
+	env := mcpEnv(st.Getenv, srv, inject, filepath.Dir(prog.Path))
 	if !srv.Redact {
 		if err := prog.Unchanged(); err != nil {
 			return failf(st, ExitNotExec, "mcp.%s: %v", name, err)
@@ -151,7 +155,28 @@ func runMCPExec(st *Streams, args []string) int {
 
 // mcpEnv is a server's environment: the safe caller variables, those it
 // inherits, its plain vars and its secrets — nothing else from the harness.
-func mcpEnv(getenv func(string) string, srv config.MCPServer, inject map[string]secret.Value) []string {
+// mcpLookPath finds a configured server's command. An absolute path in the
+// config is used as written; a bare name is looked up only in install
+// locations, not on the caller's PATH, which would otherwise choose the
+// program that receives the server's secrets.
+func mcpLookPath(name string) (string, error) {
+	if filepath.IsAbs(name) {
+		return name, nil
+	}
+	if strings.ContainsRune(name, filepath.Separator) {
+		return "", fmt.Errorf("%s: give the command as a bare name or an absolute path", name)
+	}
+	p, err := provider.LookTrusted(name)
+	if err != nil {
+		return "", fmt.Errorf("%s is not in a standard install location; give its absolute path in the config", name)
+	}
+	return p, nil
+}
+
+// mcpEnv is the server's environment. Its PATH is the command's own
+// directory, then the install locations: what the server starts in turn
+// (node for npx, say) comes from there, not from the caller's PATH.
+func mcpEnv(getenv func(string) string, srv config.MCPServer, inject map[string]secret.Value, progDir string) []string {
 	vars := map[string]string{}
 	for _, k := range append(append([]string{}, safeEnv...), srv.Inherit...) {
 		if v := getenv(k); v != "" {
@@ -163,7 +188,10 @@ func mcpEnv(getenv func(string) string, srv config.MCPServer, inject map[string]
 			vars[k] = v
 		}
 	}
-	vars["PATH"] = os.Getenv("PATH") // augmented
+	vars["PATH"] = provider.TrustedPath()
+	if progDir != "" && progDir != "." {
+		vars["PATH"] = progDir + string(filepath.ListSeparator) + vars["PATH"]
+	}
 	for k, v := range srv.Vars {
 		vars[k] = v
 	}
