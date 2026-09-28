@@ -25,7 +25,7 @@ func stampOf(path string) (fileStamp, error) {
 	if !ok {
 		return fileStamp{}, errors.New("no file identity on this system")
 	}
-	return fileStamp{dev: uint64(st.Dev), ino: st.Ino, size: fi.Size(), mtime: fi.ModTime().UnixNano(), ctime: ctimeOf(st)}, nil //nolint:unconvert // Dev is int32 on darwin
+	return fileStamp{dev: uint64(st.Dev), ino: st.Ino, size: fi.Size(), mtime: fi.ModTime().UnixNano(), ctime: ctimeOf(st)}, nil //nolint:unconvert,gosec // Dev is int32 on darwin; it is only compared with itself
 }
 
 // ErrChanged means the program's file changed after it was judged.
