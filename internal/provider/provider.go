@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -65,15 +67,22 @@ type Result struct {
 	Exit   int
 }
 
-// ExecRunner runs commands with os/exec.
-type ExecRunner struct{}
+// ExecRunner runs commands with os/exec. Look finds the program; nil means
+// LookTrusted, which never consults PATH.
+type ExecRunner struct {
+	Look func(name string) (string, error)
+}
 
 // Run executes c. A non-zero exit is reported in Result.Exit, not as an error;
 // the error is for failures to start the command at all.
-func (ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
-	path, err := exec.LookPath(c.Name)
+func (r ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
+	look := r.Look
+	if look == nil {
+		look = LookTrusted
+	}
+	path, err := look(c.Name)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %s is not installed or not on PATH", ErrUnavailable, c.Name)
+		return Result{}, fmt.Errorf("%w: %s is not installed in a standard location", ErrUnavailable, c.Name)
 	}
 	cmd := exec.CommandContext(ctx, path, c.Args...)
 	cmd.Env = c.Env
@@ -95,11 +104,56 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	return res, nil
 }
 
+// trustedDirs are the only places a backend CLI is taken from. The caller's
+// PATH is not one of them: passess runs in its caller's environment, so a
+// directory an agent put first on PATH would be handed a vault's master
+// token. These are install locations; planting a binary in one of them is an
+// attack on the installation itself, not a choice made per command. The home
+// directory comes from the account database, not from $HOME, which the caller
+// sets too.
+func trustedDirs() []string {
+	dirs := []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+		"/home/linuxbrew/.linuxbrew/bin", "/snap/bin"}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		for _, d := range []string{".local/bin", ".cargo/bin", "go/bin", ".npm-global/bin"} {
+			dirs = append(dirs, filepath.Join(u.HomeDir, d))
+		}
+	}
+	return dirs
+}
+
+// LookTrusted finds a backend CLI by name in trustedDirs only.
+func LookTrusted(name string) (string, error) {
+	if name == "" || strings.ContainsRune(name, filepath.Separator) {
+		return "", fmt.Errorf("%q is not a program name", name)
+	}
+	for _, d := range trustedDirs() {
+		p := filepath.Join(d, name)
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+			return p, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+// TrustedPath is the PATH a backend CLI runs with, so that what it starts in
+// turn (node for bw, say) comes from the same places.
+func TrustedPath() string {
+	return strings.Join(trustedDirs(), string(filepath.ListSeparator))
+}
+
 // BaseEnv is the environment backend CLIs run with: enough to find their
-// config and locale, nothing that could carry another secret.
+// config and locale, nothing that could carry another secret. PATH is
+// TrustedPath, never the caller's, and HOME is the account's: it decides
+// where the CLI reads its own config, a server URL among it.
 func BaseEnv(getenv func(string) string) []string {
-	var env []string
-	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"} {
+	env := []string{"PATH=" + TrustedPath()}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		env = append(env, "HOME="+u.HomeDir)
+	} else if v := getenv("HOME"); v != "" {
+		env = append(env, "HOME="+v)
+	}
+	for _, k := range []string{"USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR"} {
 		if v := getenv(k); v != "" {
 			env = append(env, k+"="+v)
 		}

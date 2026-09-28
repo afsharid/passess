@@ -420,7 +420,10 @@ func applyActions(a harness.Adapter, actions []harness.Action) error {
 			continue
 		}
 		for _, cmd := range action.Commands {
-			res, err := (provider.ExecRunner{}).Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
+			// A harness's own CLI (claude, codex, agy) carries no vault
+			// credential, so it is found the ordinary way, on PATH.
+			run := provider.ExecRunner{Look: exec.LookPath}
+			res, err := run.Run(context.Background(), provider.Cmd{Name: cmd[0], Args: cmd[1:], Env: os.Environ()})
 			if err == nil && res.Exit != 0 {
 				err = errors.New(provider.CLIMessage(res.Stderr))
 			}
