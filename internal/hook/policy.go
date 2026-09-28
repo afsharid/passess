@@ -15,6 +15,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/scan"
@@ -290,11 +291,19 @@ var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOC
 var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
 
 func checkAssign(name, program string) string {
+	if detect.IsMarker(name) {
+		return markerReason(name)
+	}
 	if passessSettings[name] || (pathSettings[name] && filepath.Base(program) == "passess") {
 		return fmt.Sprintf("passess: setting %s in a command points passess at another config or agent than the user's, "+
 			"around the policy and the approvals the user set up. Run passess without it; its settings are the user's to change.", name)
 	}
 	return ""
+}
+
+func markerReason(name string) string {
+	return "passess: " + name + " tells passess it runs under an agent; clearing or overriding it hides that from the " +
+		"checks meant for agents. Run the command as it is."
 }
 
 const socketReason = "passess: that command talks to the passess agent's socket directly. Commands that need a secret go " +
@@ -429,6 +438,12 @@ func checkCall(args []string, cwd string, env Env) string {
 		rest := args[1:]
 		var set []string
 		for len(rest) > 0 && (strings.HasPrefix(rest[0], "-") || strings.Contains(rest[0], "=")) {
+			if (rest[0] == "-u" || rest[0] == "--unset") && len(rest) > 1 && detect.IsMarker(rest[1]) {
+				return markerReason(rest[1])
+			}
+			if k, ok := strings.CutPrefix(rest[0], "--unset="); ok && detect.IsMarker(k) {
+				return markerReason(k)
+			}
 			if rest[0] == "-u" || rest[0] == "--unset" || rest[0] == "-C" || rest[0] == "--chdir" || rest[0] == "-S" {
 				rest = rest[min(2, len(rest)):]
 				continue
@@ -458,6 +473,21 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "helper":
 			return "passess: `passess helper` prints a secret value; it is for a harness's apiKeyHelper setting, not for commands. " +
 				useInstead
+		case sub(1) == "add":
+			return "passess: `passess add` decides which programs may receive which secrets; it is the user's to run. " +
+				"Tell the user the name and reference you need."
+		case sub(1) == "migrate" && slices.Contains(args, "--apply"):
+			return "passess: `passess migrate --apply` moves values out of the user's files; it is the user's to run. " +
+				"Show them the dry run and let them apply it."
+		case sub(1) == "uninstall" && slices.Contains(args, "--apply"),
+			sub(1) == "install" && slices.Contains(args, "--apply") && slices.Contains(args, "--no-hooks"):
+			return "passess: that removes the hooks that guard this session; it is the user's to run."
+		}
+	case "unset":
+		for _, a := range args[1:] {
+			if detect.IsMarker(a) {
+				return markerReason(a)
+			}
 		}
 	case "printenv":
 		if len(args) == 1 {

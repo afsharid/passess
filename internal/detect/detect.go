@@ -30,6 +30,19 @@ func Harness(getenv func(string) string) string {
 	return ""
 }
 
+// IsMarker reports whether name is one of the variables Harness reads. A
+// command that clears or overrides one hides the harness from passess.
+func IsMarker(name string) bool {
+	for _, m := range markers {
+		for _, v := range m.vars {
+			if v == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // programs maps the process names of harness executables, as the kernel
 // keeps them, to harness names. Editors whose terminals people also type in
 // (Zed, VS Code) are left out: their process says nothing about who typed.

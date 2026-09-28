@@ -72,6 +72,9 @@ func runAdd(st *Streams, args []string) int {
 	if strings.ContainsAny(*note, "\n\r\x00") {
 		return failf(st, ExitUsage, "--note must be one line")
 	}
+	if h := detect.Harness(st.Getenv); h != "" {
+		return failf(st, ExitNoPerm, "passess add decides which programs may receive which secrets; run it yourself in a terminal, not from %s. Tell the user the name and reference you need.", h)
+	}
 
 	path, err := config.UserPath(st.Getenv)
 	if err != nil {
@@ -90,6 +93,11 @@ func runAdd(st *Streams, args []string) int {
 		}
 		if _, ok := u.Secrets[name]; ok {
 			return failf(st, ExitConfig, "%s is already defined; edit it in %s", name, path)
+		}
+		// A second name for a reference another secret already has would
+		// start with an allow list and approval setting of its own choosing.
+		if other, r := sameReference(u, refs); other != "" {
+			return failf(st, ExitConfig, "%s is already the reference of secrets.%s; to give it to another program, change that secret's allow list in %s", r, other, path)
 		}
 	}
 
@@ -220,4 +228,24 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// sameReference returns a secret that already uses one of refs, and that
+// reference, or "".
+func sameReference(u *config.User, refs []string) (secret, reference string) {
+	for _, raw := range refs {
+		r, err := ref.Parse(raw)
+		if err != nil {
+			continue
+		}
+		want := r.String()
+		for name, s := range u.Secrets {
+			for _, have := range s.Refs {
+				if have.String() == want {
+					return name, want
+				}
+			}
+		}
+	}
+	return "", ""
 }

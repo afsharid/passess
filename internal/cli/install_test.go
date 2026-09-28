@@ -15,6 +15,7 @@ import (
 // configs, plus claude and codex executables that only record their argv.
 func fakeHarnesses(t *testing.T) (home, calls string) {
 	t.Helper()
+	noHarness(t) // uninstall --apply refuses under an agent
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", "")
