@@ -228,6 +228,10 @@ func checkShell(cmd, cwd string, env Env) string {
 	}
 	var reason string
 	others := false // a program other than passess runs
+	// cur is the directory relative paths resolve against: where the harness
+	// ran the command, then wherever a literal cd or pushd earlier in the same
+	// command line moved it. "" once that is unknown.
+	cur, stack := cwd, []string(nil)
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if reason != "" {
 			return false
@@ -242,10 +246,10 @@ func checkShell(cmd, cwd string, env Env) string {
 			switch {
 			case !ok:
 			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
-				if why := deniedPath(p, cwd, env); why != "" {
+				if why := deniedPath(p, cur, env); why != "" {
 					reason = readReason(p, why)
 				}
-			case inConfig(abs(p, cwd, env.Home), env): // > >> &> into the config
+			case inConfig(abs(p, cur, env.Home), env): // > >> &> into the config
 				reason = configReason(p)
 			}
 		case *syntax.CallExpr:
@@ -267,8 +271,9 @@ func checkShell(cmd, cwd string, env Env) string {
 				}
 			}
 			if reason == "" {
-				reason = checkCall(args, cwd, env)
+				reason = checkCall(args, cur, env)
 			}
+			cur, stack = afterCd(args, cur, stack, env.Home)
 		case *syntax.DeclClause: // export, declare, typeset, local, readonly
 			reason = checkDecl(n, env)
 		}
@@ -289,6 +294,44 @@ var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOC
 // pathSettings move passess's config and socket with everything else; set
 // for a passess command, they point it elsewhere just the same.
 var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
+
+// afterCd returns the working directory after a cd, pushd or popd with args,
+// and the pushd stack; other commands leave both as they are. A directory it
+// cannot tell (cd "$X", cd -) becomes "".
+func afterCd(args []string, cur string, stack []string, home string) (string, []string) {
+	if len(args) == 0 {
+		return cur, stack
+	}
+	switch filepath.Base(args[0]) {
+	case "cd", "pushd":
+		ops := args[1:]
+		for len(ops) > 0 && strings.HasPrefix(ops[0], "-") && ops[0] != "-" {
+			ops = ops[1:] // -L, -P, -e, -@
+		}
+		next := home
+		switch {
+		case len(ops) == 0 && filepath.Base(args[0]) == "pushd":
+			return "", stack // swaps with the top of a stack not known here
+		case len(ops) == 0:
+		case ops[0] == "" || ops[0] == "-":
+			next = ""
+		default:
+			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) {
+				next = "" // relative to a directory not known here
+			}
+		}
+		if filepath.Base(args[0]) == "pushd" {
+			stack = append(stack, cur)
+		}
+		return next, stack
+	case "popd":
+		if len(stack) > 0 {
+			return stack[len(stack)-1], stack[:len(stack)-1]
+		}
+		return "", stack
+	}
+	return cur, stack
+}
 
 func checkAssign(name, program string) string {
 	if detect.IsMarker(name) {
