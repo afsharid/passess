@@ -114,12 +114,22 @@ func (r ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 func trustedDirs() []string {
 	dirs := []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
 		"/home/linuxbrew/.linuxbrew/bin", "/snap/bin"}
-	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+	if home := accountHome(); home != "" {
 		for _, d := range []string{".local/bin", ".cargo/bin", "go/bin", ".npm-global/bin"} {
-			dirs = append(dirs, filepath.Join(u.HomeDir, d))
+			dirs = append(dirs, filepath.Join(home, d))
 		}
 	}
 	return dirs
+}
+
+// accountHome is the home directory in the account database, "" when the
+// lookup fails. A variable so that tests can point it at a directory of
+// their own.
+var accountHome = func() string {
+	if u, err := user.Current(); err == nil {
+		return u.HomeDir
+	}
+	return ""
 }
 
 // LookTrusted finds a backend CLI by name in trustedDirs only.
@@ -148,8 +158,8 @@ func TrustedPath() string {
 // where the CLI reads its own config, a server URL among it.
 func BaseEnv(getenv func(string) string) []string {
 	env := []string{"PATH=" + TrustedPath()}
-	if u, err := user.Current(); err == nil && u.HomeDir != "" {
-		env = append(env, "HOME="+u.HomeDir)
+	if home := accountHome(); home != "" {
+		env = append(env, "HOME="+home)
 	} else if v := getenv("HOME"); v != "" {
 		env = append(env, "HOME="+v)
 	}

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -42,13 +44,42 @@ func (v *Vault) getenv(k string) string {
 	return os.Getenv(k)
 }
 
-func (v *Vault) address() string {
-	for _, a := range []string{v.Address, v.getenv("VAULT_ADDR"), v.getenv("BAO_ADDR")} {
-		if a != "" {
-			return strings.TrimRight(a, "/")
-		}
+// address returns where the token may be sent. A token passess holds itself
+// (backends.vault.token) goes only to backends.vault.address: passess runs in
+// its caller's environment, and the caller's VAULT_ADDR must not aim a
+// credential passess keeps at a server of the caller's choosing. A token the
+// caller supplies (VAULT_TOKEN, BAO_TOKEN, ~/.vault-token) may go where the
+// caller says, as it does for the vault CLI.
+func (v *Vault) address() (string, error) {
+	var a string
+	switch {
+	case v.Address != "":
+		a = v.Address
+	case v.Token != nil:
+		return "", fmt.Errorf("%w: backends.vault.token needs backends.vault.address; passess does not send its own token to VAULT_ADDR", ErrUnavailable)
+	default:
+		a = cmp.Or(v.getenv("VAULT_ADDR"), v.getenv("BAO_ADDR"))
 	}
-	return ""
+	if a == "" {
+		return "", fmt.Errorf("%w: no vault address; set backends.vault.address or VAULT_ADDR", ErrUnavailable)
+	}
+	a = strings.TrimRight(a, "/")
+	u, err := url.Parse(a)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("%w: the vault address is not a URL", ErrUnavailable)
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || !isLoopback(u.Hostname())) {
+		return "", fmt.Errorf("%w: the vault address must use https (plain http only to this machine): the token would travel in clear", ErrUnavailable)
+	}
+	return a, nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (v *Vault) accessToken(ctx context.Context) (secret.Value, error) {
@@ -67,7 +98,8 @@ func (v *Vault) accessToken(ctx context.Context) (secret.Value, error) {
 	case v.getenv("BAO_TOKEN") != "":
 		v.token = secret.FromString(v.getenv("BAO_TOKEN"))
 	default:
-		data, err := os.ReadFile(filepath.Join(v.getenv("HOME"), ".vault-token"))
+		// The account's own file, not one the caller's $HOME points at.
+		data, err := os.ReadFile(filepath.Join(cmp.Or(accountHome(), v.getenv("HOME")), ".vault-token"))
 		if err != nil {
 			return secret.Value{}, fmt.Errorf("%w: no vault token; set backends.vault.token, VAULT_TOKEN, or run `vault login`", ErrUnavailable)
 		}
@@ -93,22 +125,35 @@ func (v *Vault) client() (*http.Client, error) {
 		}
 		tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	}
-	v.Client = &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	v.Client = &http.Client{Transport: tr, Timeout: 15 * time.Second, CheckRedirect: sameHostRedirect}
 	return v.Client, nil
 }
 
+// sameHostRedirect refuses a redirect to another host or scheme: Go keeps
+// X-Vault-Token on every hop, so following one would hand the token to
+// whichever server the redirect names.
+func sameHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("too many redirects")
+	}
+	if first := via[0].URL; req.URL.Host != first.Host || req.URL.Scheme != first.Scheme {
+		return fmt.Errorf("vault redirected to another server; set backends.vault.address to it directly")
+	}
+	return nil
+}
+
 func (v *Vault) Available(ctx context.Context) error {
-	if v.address() == "" {
-		return fmt.Errorf("%w: no vault address; set backends.vault.address or VAULT_ADDR", ErrUnavailable)
+	if _, err := v.address(); err != nil {
+		return err
 	}
 	_, err := v.accessToken(ctx)
 	return err
 }
 
 func (v *Vault) Resolve(ctx context.Context, r ref.Ref) (secret.Value, error) {
-	addr := v.address()
-	if addr == "" {
-		return secret.Value{}, &Error{r, fmt.Errorf("%w: no vault address; set backends.vault.address or VAULT_ADDR", ErrUnavailable)}
+	addr, err := v.address()
+	if err != nil {
+		return secret.Value{}, &Error{r, err}
 	}
 	mount, path := r.Path[0], strings.Join(r.Path[1:], "/")
 	// KV v2 keeps data under <mount>/data/<path> and nests it one level deeper.
