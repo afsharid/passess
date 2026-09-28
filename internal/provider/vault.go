@@ -178,6 +178,14 @@ func (v *Vault) Resolve(ctx context.Context, r ref.Ref) (secret.Value, error) {
 	return secret.FromString(s), nil
 }
 
+// Zero clears the access token Vault keeps between requests, whichever
+// source it came from; the agent calls it on lock, stop, expiry and a config
+// change, with every other value it holds.
+func (v *Vault) Zero() {
+	v.token.Zero()
+	v.token = secret.Value{}
+}
+
 func escape(p string) string {
 	parts := strings.Split(p, "/")
 	for i, s := range parts {

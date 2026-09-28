@@ -104,7 +104,7 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 	bw.Session = from("backends.bw.session", u.Backends.BW.Session)
 
 	r := resolve.New(env, keychain, bws, op, vault, bw)
-	return r, func() { r.Zero(); boot.Zero(); bws.Zero() }
+	return r, func() { r.Zero(); boot.Zero(); bws.Zero(); vault.Zero() }
 }
 
 // resolveExitCode maps a resolution failure to an exit code.
