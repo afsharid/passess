@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -162,8 +163,38 @@ func shebang(path string) []string {
 	return []string{interp}
 }
 
+// referenceDirs are searched for the real interpreters whatever PATH says.
+// The caller chooses PATH, and a PATH that finds no sh would otherwise leave
+// nothing to compare a renamed copy of sh against.
+var referenceDirs = []string{"/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/sbin", "/usr/sbin",
+	"/home/linuxbrew/.linuxbrew/bin"}
+
+// references lists where name is installed: on the caller's PATH and in
+// referenceDirs, each resolved through symlinks, without repeats.
+func references(name string, lookPath func(string) (string, error)) []string {
+	var out []string
+	add := func(p string) {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	if p, err := lookPath(name); err == nil {
+		add(p)
+	}
+	for _, d := range referenceDirs {
+		p := filepath.Join(d, name)
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+			add(p)
+		}
+	}
+	return out
+}
+
 // copyOf reports whether path is the same file as, or byte-identical to, a
-// denied interpreter found on PATH.
+// denied interpreter found on PATH or in referenceDirs.
 func copyOf(path string, lookPath func(string) (string, error)) (family, original string) {
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
@@ -171,29 +202,24 @@ func copyOf(path string, lookPath func(string) (string, error)) (family, origina
 	}
 	var sum []byte
 	for _, name := range lookups {
-		orig, err := lookPath(name)
-		if err != nil {
-			continue
-		}
 		f := Family(name)
-		if resolved, err := filepath.EvalSymlinks(orig); err == nil {
-			orig = resolved
-		}
-		if orig == path {
-			continue // it is the interpreter itself; its name already says so
-		}
-		ost, err := os.Stat(orig)
-		if err != nil || ost.Size() != st.Size() {
-			continue
-		}
-		if os.SameFile(st, ost) {
-			return f, orig
-		}
-		if sum == nil {
-			sum = hashFile(path)
-		}
-		if sum != nil && bytes.Equal(sum, hashFile(orig)) {
-			return f, orig
+		for _, orig := range references(name, lookPath) {
+			if orig == path {
+				continue // it is the interpreter itself; its name already says so
+			}
+			ost, err := os.Stat(orig)
+			if err != nil || ost.Size() != st.Size() {
+				continue
+			}
+			if os.SameFile(st, ost) {
+				return f, orig
+			}
+			if sum == nil {
+				sum = hashFile(path)
+			}
+			if sum != nil && bytes.Equal(sum, hashFile(orig)) {
+				return f, orig
+			}
 		}
 	}
 	return "", ""
