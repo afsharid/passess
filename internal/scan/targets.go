@@ -176,6 +176,9 @@ func Discover(w Where) []Target {
 					}
 					return nil
 				}
+				if !d.Type().IsRegular() {
+					return nil // a symlink could lead out of the transcript directory, and --scrub rewrites what it reaches
+				}
 				for _, ext := range root.ext {
 					if strings.HasSuffix(d.Name(), ext) {
 						out = append(out, Target{Path: p, Category: "transcript"})
@@ -202,6 +205,9 @@ func envFiles(dir string, depth int) []Target {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil // a symlink could lead out of the directory being scanned
 		}
 		if envFile.MatchString(d.Name()) && !envTemplate.MatchString(d.Name()) {
 			out = append(out, Target{Path: p, Category: "env"})
