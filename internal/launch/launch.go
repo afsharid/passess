@@ -31,6 +31,11 @@ type Spec struct {
 	// NewGroup starts the child in a process group of its own, out of reach
 	// of signals sent to the caller's group.
 	NewGroup bool
+
+	// Verify, when set, runs immediately before the child starts; an error
+	// refuses to start it. It re-checks that Path is still the program the
+	// policy judged.
+	Verify func() error
 }
 
 // Status codes for failures to start, matching the shell's.
@@ -55,6 +60,11 @@ func Start(s Spec) (*Child, int, error) {
 	cmd.Stdin = s.Stdin
 	if s.NewGroup {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if s.Verify != nil {
+		if err := s.Verify(); err != nil {
+			return nil, NotExecutable, err
+		}
 	}
 	c := &Child{cmd: cmd, stdout: s.Redactor.NewWriter(s.Stdout), stderr: s.Redactor.NewWriter(s.Stderr)}
 	cmd.Stdout, cmd.Stderr = c.stdout, c.stderr

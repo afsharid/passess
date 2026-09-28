@@ -88,6 +88,8 @@ type Program struct {
 	Name     string   // basename of Path
 	Families []string // Name's family plus any it counts as
 	Why      map[string]string
+
+	stamp fileStamp // the file Inspect judged; see Unchanged
 }
 
 // ErrNotFound means argv[0] could not be found or is not executable.
@@ -106,7 +108,12 @@ func Inspect(argv0 string, lookPath func(string) (string, error)) (Program, erro
 	if abs, err := filepath.Abs(resolved); err == nil {
 		resolved = abs
 	}
-	p := Program{Typed: argv0, Path: resolved, Name: filepath.Base(resolved), Why: map[string]string{}}
+	// Stamp first: a change while the content below is read shows up later.
+	stamp, err := stampOf(resolved)
+	if err != nil {
+		return Program{}, fmt.Errorf("%w: %s", ErrNotFound, argv0)
+	}
+	p := Program{Typed: argv0, Path: resolved, Name: filepath.Base(resolved), Why: map[string]string{}, stamp: stamp}
 	add := func(f, why string) {
 		for _, have := range p.Families {
 			if have == f {
