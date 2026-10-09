@@ -8,6 +8,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  artifact-metadata: write # attest-build-provenance v4 records the artifact
 
 jobs:
   cli:
@@ -27,13 +28,13 @@ jobs:
           notes=$(git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}")
           [ -n "$notes" ] || notes=$(git tag -l --format='%(contents:subject)' "${GITHUB_REF_NAME}")
           printf '%s\n' "$notes" > "${RUNNER_TEMP}/notes.md"
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*.tar.gz"
 
@@ -59,7 +60,7 @@ jobs:
       - run: make macos-check
       - run: make macos-app VERSION="$GITHUB_REF_NAME"
       - run: ditto -c -k --keepParent bin/Passess.app "Passess-${GITHUB_REF_NAME}-macos-arm64.zip"
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "Passess-*.zip"
       - run: gh release upload "$GITHUB_REF_NAME" "Passess-${GITHUB_REF_NAME}-macos-arm64.zip"
