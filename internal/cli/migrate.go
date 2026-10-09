@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
-	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/dotenv"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/policy"
@@ -75,8 +74,8 @@ type migration struct {
 
 // guard refuses to move values unless a person is running this.
 func (m *migration) guard() int {
-	if h := detect.Harness(m.st.Getenv); h != "" {
-		return failf(m.st, ExitNoPerm, "migrate --apply moves values out of your files; run it yourself in a terminal, not from %s", h)
+	if agents := callerAgents(m.st.Getenv, selfChain()); len(agents) > 0 {
+		return failf(m.st, ExitNoPerm, "migrate --apply moves values out of your files; run it yourself in a terminal, not from %s", agents[0])
 	}
 	if !m.yes && !isTerminal(m.st.Stdin) {
 		return failf(m.st, ExitUsage, "migrate --apply asks about each value; run it in a terminal or add --yes")

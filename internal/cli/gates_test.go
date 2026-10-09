@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/afsharid/passess/internal/agent"
 )
 
 // Under a harness, passess add and passess uninstall --apply are the user's
@@ -43,4 +48,58 @@ func TestAddUnderAHarness(t *testing.T) {
 	if strings.Contains(string(data), "EVIL") || strings.Contains(string(data), "THIRD") {
 		t.Fatalf("a refused add changed the config:\n%s", data)
 	}
+}
+
+// The commands that move values or take the hooks away see an agent the way
+// the commands that hand secrets out do: Kiro sets no marker, and a command
+// cleared of markers still has its ancestors.
+func TestSetupCommandsRefuseAnAgentAmongAncestors(t *testing.T) {
+	home, calls := fakeHarnesses(t)
+	stored := fakeKeychain(t)
+	if err := os.MkdirAll(filepath.Join(home, "app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "app", ".env"), []byte("API_KEY=passess-fake-apikey-0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := readTree(t, home)
+	underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "zsh"}, agent.Proc{Name: "kiro-cli-chat"})
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"migrate", "env", "app/.env", "--apply", "--yes"}, "not from kiro"},
+		{[]string{"migrate", "mcp", "claude", "legacy", "--apply", "--yes"}, "not from kiro"},
+		{[]string{"uninstall", "--apply"}, "guard kiro sessions"},
+		{[]string{"install", "--apply", "--no-hooks"}, "guard kiro sessions"},
+		{[]string{"agent", "approve"}, "inside kiro"},
+	} {
+		if _, errOut, code := run(t, c.args...); code != ExitNoPerm || !strings.Contains(errOut, c.want) {
+			t.Fatalf("%q from Kiro: exit %d, %q", c.args, code, errOut)
+		}
+	}
+	if after := readTree(t, home); !maps.Equal(after, before) {
+		t.Fatalf("Kiro changed files:\nbefore %v\nafter  %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
+	}
+	if log := readCalls(t, calls); log != "" || len(stored) != 0 {
+		t.Fatalf("Kiro ran a harness CLI or stored a value: %q, %v", log, slices.Sorted(maps.Keys(stored)))
+	}
+}
+
+// readTree returns the contents of every file under dir, by path.
+func readTree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		files[path] = string(data)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }

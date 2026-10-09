@@ -432,8 +432,8 @@ func clientFrames(c *agent.Conn, quit <-chan struct{}) <-chan agent.Frame {
 
 // agentApprove answers the agent's questions on this terminal.
 func agentApprove(st *Streams) int {
-	if h := detect.Harness(st.Getenv); h != "" {
-		return failf(st, ExitNoPerm, "refusing to approve from inside %s: an agent must not approve its own requests", h)
+	if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+		return failf(st, ExitNoPerm, "refusing to approve from inside %s: an agent must not approve its own requests", agents[0])
 	}
 	if !isTerminal(st.Stdin) || !isTerminal(st.Stdout) {
 		return failf(st, ExitUsage, "passess agent approve answers on a terminal; run it in one of your own")

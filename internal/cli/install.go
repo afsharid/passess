@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
-	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/provider"
 )
@@ -171,8 +170,8 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 	// Taking the hooks away is the user's call: they guard the very session
 	// an agent would run this from. Installing them is not gated.
 	if *apply && (verb == "uninstall" || *noHooks) {
-		if h := detect.Harness(st.Getenv); h != "" {
-			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, h)
+		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, agents[0])
 		}
 	}
 	augmentPath(st.Getenv)

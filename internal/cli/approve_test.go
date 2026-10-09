@@ -254,11 +254,7 @@ func TestApprovalForInProcessRun(t *testing.T) {
 
 func TestApproveRefusesInsideAHarnessAndWithoutATerminal(t *testing.T) {
 	setup(t)
-	for _, k := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID", "CODEX_SANDBOX",
-		"CODEX_CI", "CURSOR_TRACE_ID", "CURSOR_AGENT", "CURSOR_CLI", "GEMINI_CLI", "GEMINI_PROJECT_DIR", "OPENCODE",
-		"OPENCODE_PID", "OPENCODE_CLIENT", "OPENCODE_TERMINAL", "ANTIGRAVITY_CLI_ALIAS", "ZED_SESSION_ID"} {
-		t.Setenv(k, "")
-	}
+	noHarness(t)
 	if _, errOut, code := run(t, "agent", "approve"); code != ExitUsage || !strings.Contains(errOut, "on a terminal") {
 		t.Fatalf("no terminal: exit %d, %q", code, errOut)
 	}
