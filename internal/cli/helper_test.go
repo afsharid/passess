@@ -61,6 +61,14 @@ clients = ["codex"]
 ref     = "env://PASSESS_TEST_X_TOKEN"
 allow   = ["passess-helper"]
 clients = ["codex"]
+[secrets.NARROW]
+ref     = "env://PASSESS_TEST_X_TOKEN"
+allow   = ["gh"]
+clients = ["dsh"]
+[secrets.NARROWOPTED]
+ref     = "env://PASSESS_TEST_X_TOKEN"
+allow   = ["gh", "passess-helper"]
+clients = ["dsh"]
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -78,6 +86,14 @@ clients = ["codex"]
 	}
 	if out, errOut, code := run(t, "helper", "OPTED"); code != ExitNoPerm || out != "" || !strings.Contains(errOut, "not connected to DeepSeek Harness") {
 		t.Fatalf("opted in but connected elsewhere: exit %d, %q, %q", code, out, errOut)
+	}
+	// Any program can take the app's name: a secret narrowed to some programs
+	// does not reach it unless it opts in to passess helper itself.
+	if out, errOut, code := run(t, "helper", "NARROW"); code != ExitNoPerm || out != "" || !strings.Contains(errOut, "process name any program can take") {
+		t.Fatalf("narrowed by allow: exit %d, %q, %q", code, out, errOut)
+	}
+	if out, errOut, code := run(t, "helper", "NARROWOPTED"); code != 0 || out != execValue+"\n" {
+		t.Fatalf("narrowed, opted in, connected by name: exit %d, %q", code, errOut)
 	}
 
 	underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "bash"}, dsh)

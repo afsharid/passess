@@ -54,6 +54,14 @@ func runHelper(st *Streams, args []string) int {
 			return failf(st, ExitNoPerm, "%s is not connected to %s by name. The user connects it in Passess.app, or runs `passess set %s --clients …` with %s in the list; a secret with no list is not one the user chose for an app.",
 				name, detect.Label(app), name, app)
 		}
+		// The app is known by its process name, which any program can take.
+		// A secret any program may receive (no allow list) loses nothing to
+		// that: `passess exec` hands it to such a program anyway. One the user
+		// narrowed to some programs must opt in to passess helper itself.
+		if len(s.Allow) > 0 {
+			return failf(st, ExitNoPerm, "%s goes only to %v, and %s is known by a process name any program can take. To let it read the key anyway, add %q to secrets.%s.allow in %s.",
+				name, s.Allow, detect.Label(app), HelperFamily, name, u.Path)
+		}
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -88,7 +96,8 @@ func askingApp(chain []agent.Proc) string {
 }
 
 // namesApp reports whether the secret's clients list names the app. No list
-// means every agent may ask, which is not the user choosing this app.
+// means every agent may ask, which is not the user choosing this app: unlike
+// config.Secret.ConnectedTo, which counts no list as every agent, on purpose.
 func namesApp(s config.Secret, app string) bool {
 	return s.Clients != nil && slices.Contains(s.Clients, app)
 }

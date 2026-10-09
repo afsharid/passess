@@ -28,6 +28,13 @@ tick in the Connect window does not mean.
   names that app. No list (every agent) does not count: the user has to choose the app.
 - Only the app's own process counts. With a shell between them it is the app's agent
   running a command, and the rule of ADR 8 applies unchanged.
+- Only a secret with no allow list, one any program may receive, reaches an app this
+  way. Unlike ADR 10, where a detected agent only ever adds a refusal, here the
+  process name grants, and any program can take that name (the kernel keeps 16
+  bytes; DSH's own signed binary also runs arbitrary JavaScript as node). Neither a
+  path nor a signature check would close that. Limited to secrets `passess exec`
+  already hands to any program, the rule widens nothing; a secret narrowed to some
+  programs needs `passess-helper` in its allow list, as in ADR 8.
 - Everything else `helper` does stays: no value on a terminal, `clients` checked for
   every agent seen in the call, approval asked for a secret marked `approve`.
 - The app side ships inside the passess binary (`internal/apps/dsh`). `passess install
@@ -50,6 +57,10 @@ tick in the Connect window does not mean.
   its tools run as the same user, and `exec passess helper NAME` from its shell
   replaces the shell, so passess sees DSH as the parent. The launcher already put the
   key in DSH's environment, which the agent's tools inherit; this is no weaker.
+- A program that names itself after the app gets the keys connected to the app, as
+  it could have through `passess exec`; a coding agent doing so is still refused
+  unless the key is connected to that agent too. A key the user wants kept from such
+  programs is marked `approve`: each new caller then waits for Touch ID.
 - Another app joins by its process name in `detect`, `IsApp`, and a plugin or helper
   setting on its side.
 - This is not the roadmap's launch-profile design, where connecting a secret adds it
