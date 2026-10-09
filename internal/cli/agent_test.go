@@ -546,6 +546,36 @@ func TestHookMasksWithTheAgent(t *testing.T) {
 	}
 }
 
+// A tool output past the 64 KB of an ordinary frame, up to MaxRedact, comes
+// back masked: an answer cut off there would leave the hook with only its
+// patterns, which do not know the values the agent holds.
+func TestAgentMasksALargeOutput(t *testing.T) {
+	setup(t)
+	var calls atomic.Int32
+	s := cacheServer(&calls)
+	sock := agentSocket(t)
+	l, err := agent.Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.l = l
+	go s.serve()
+	t.Cleanup(s.stop)
+	u, sum := cacheConfig(t, "1h")
+	value, err := resolveVia(t, s, u, sum, nil, "K")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Repeat("log line without anything to hide\n", 6000) + "token " + value + "\n"
+	if len(text) < 128<<10 {
+		t.Fatalf("the output is too short to cross a frame: %d bytes", len(text))
+	}
+	masked, ok := agentMask(sock, text)
+	if !ok || strings.Contains(masked, value) || !strings.HasSuffix(masked, "token [REDACTED:K]\n") {
+		t.Fatalf("a %d-byte output was not masked (ok %v)", len(text), ok)
+	}
+}
+
 // The agent masks what it holds and nothing else; after lock it holds nothing.
 func TestAgentMasksWhatItHolds(t *testing.T) {
 	var calls atomic.Int32

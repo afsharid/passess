@@ -120,7 +120,7 @@ func agentMask(sock, text string) (string, bool) {
 	if c.Send(agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Redact, Text: agent.Blob(text)}, nil) != nil {
 		return "", false
 	}
-	f, err := c.ReadFrame()
+	f, err := c.ReadMasked()
 	if err != nil || f.Error != "" {
 		return "", false
 	}

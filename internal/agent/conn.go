@@ -184,6 +184,15 @@ func (c *Conn) ReadFrame() (Frame, error) {
 	return f, err
 }
 
+// ReadMasked reads the answer to a Redact request. It carries the text back,
+// up to MaxRedact before escaping, so it gets the request's bound: one cut at
+// maxFrame would leave the hook with only its patterns.
+func (c *Conn) ReadMasked() (Frame, error) {
+	var f Frame
+	err := c.read(&f, maxRequest)
+	return f, err
+}
+
 func (c *Conn) read(v any, limit int) error {
 	var line []byte
 	for {
