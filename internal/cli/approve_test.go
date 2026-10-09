@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,11 +53,7 @@ type fakeApprover struct {
 
 func connectApprover(t *testing.T, decide func(agent.AskFor) bool) *fakeApprover {
 	t.Helper()
-	c, err := agent.Dial(os.Getenv("PASSESS_AGENT_SOCK"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
+	c := dialApprover(t)
 	if err := c.Send(agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Approver}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +89,64 @@ func (a *fakeApprover) count() int {
 }
 
 func allowAll(agent.AskFor) bool { return true }
+
+// dialApprover connects to the agent the way Passess.app does, from a
+// process whose parent is launchd: a relay, this test binary started by a
+// shell that exits at once. A connection of the test's own has the test's
+// ancestors, and when they include a coding agent (the tests run from one),
+// the agent refuses it as an approver.
+func dialApprover(t *testing.T) *agent.Conn {
+	t.Helper()
+	sock := os.Getenv("PASSESS_AGENT_SOCK")
+	dir, err := os.MkdirTemp(filepath.Dir(sock), "r") // beside the agent's: a socket path must stay short
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listen := filepath.Join(dir, "s")
+	sh := exec.Command("/bin/sh", "-c", `"$0" &`, self)
+	sh.Env = append(os.Environ(), "PASSESS_TEST_RELAY="+listen, "PASSESS_TEST_RELAY_TO="+sock)
+	if err := sh.Run(); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		c, err := agent.Dial(listen)
+		if err == nil {
+			t.Cleanup(func() { _ = c.Close() })
+			return c
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the relay never listened: %v", err)
+		}
+	}
+}
+
+// relay is the process dialApprover starts. It connects to the agent at to
+// only once the test has connected on listen, which the test does after the
+// shell is gone: by then launchd (init on Linux) is the relay's parent. It
+// copies bytes both ways until either side closes.
+func relay(listen, to string) int {
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: listen, Net: "unix"})
+	if err != nil {
+		return 1
+	}
+	_ = l.SetDeadline(time.Now().Add(time.Minute)) // a test that never connects leaves no relay behind
+	down, err := l.Accept()
+	_ = l.Close()
+	if err != nil {
+		return 1
+	}
+	up, err := net.Dial("unix", to)
+	if err != nil {
+		return 1
+	}
+	go func() { _, _ = io.Copy(up, down); _ = up.Close() }()
+	_, _ = io.Copy(down, up)
+	return 0
+}
 
 func TestApprovalWithNoApproverIsNo(t *testing.T) {
 	setupApprovals(t)
@@ -269,6 +324,11 @@ func TestApproverGate(t *testing.T) {
 	if err := approverGate([]agent.Proc{p("passess", 3), p("zsh", 2), p("claude", 1)}); err == nil {
 		t.Error("an approver started by Claude Code was let in")
 	}
+	// script forks, so it is the anchor; the harness above it still counts.
+	if err := approverGate([]agent.Proc{p("python3", 4), p("script", 3), p("zsh", 2), p("claude", 1)}); err == nil ||
+		!strings.Contains(err.Error(), "started by claude (pid 1)") {
+		t.Errorf("an approver behind script in Claude Code: %v", err)
+	}
 	if err := approverGate([]agent.Proc{p("passess", 3), p("-zsh", 2), p("login", 1)}); err != nil {
 		t.Errorf("a terminal's approver: %v", err)
 	}
@@ -281,11 +341,7 @@ func TestApproverGate(t *testing.T) {
 func TestApproveLoop(t *testing.T) {
 	setupApprovals(t)
 	startAgent(t)
-	c, err := agent.Dial(os.Getenv("PASSESS_AGENT_SOCK"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
+	c := dialApprover(t)
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	go func() { _ = approveLoop(&Streams{Stderr: io.Discard}, c, inR, outW) }()
