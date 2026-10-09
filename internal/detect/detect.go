@@ -30,6 +30,54 @@ func Harness(getenv func(string) string) string {
 	return ""
 }
 
+// Harnesses returns every harness whose marker is present: an agent started
+// inside another leaves both.
+func Harnesses(getenv func(string) string) []string {
+	var out []string
+	for _, m := range markers {
+		for _, v := range m.vars {
+			if getenv(v) != "" {
+				out = append(out, m.harness)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// Agent is a coding agent a secret can be connected to.
+type Agent struct {
+	ID    string `json:"id"`    // the harness name Harness and Program return
+	Label string `json:"label"` // the name people know it by
+}
+
+// Agents are the coding agents passess recognizes, in the order the menu bar
+// app lists them.
+var Agents = []Agent{
+	{"claude-code", "Claude Code"}, {"codex", "Codex"}, {"opencode", "OpenCode"}, {"kiro", "Kiro"},
+	{"antigravity", "Antigravity"}, {"cursor", "Cursor"}, {"gemini-cli", "Gemini CLI"}, {"zed", "Zed"},
+}
+
+// IsAgent reports whether id is one of Agents.
+func IsAgent(id string) bool {
+	for _, a := range Agents {
+		if a.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Label returns the name people know the agent by, or id.
+func Label(id string) string {
+	for _, a := range Agents {
+		if a.ID == id {
+			return a.Label
+		}
+	}
+	return id
+}
+
 // IsMarker reports whether name is one of the variables Harness reads. A
 // command that clears or overrides one hides the harness from passess.
 func IsMarker(name string) bool {

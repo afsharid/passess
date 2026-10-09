@@ -22,6 +22,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/ref"
 )
@@ -161,6 +162,16 @@ type Secret struct {
 	// Hosts are where `passess http` may send it: host names, or
 	// *.example.com for its subdomains. Empty: nowhere.
 	Hosts []string
+	// Clients are the coding agents it is connected to (detect.Agents IDs).
+	// nil means every agent; an empty list means none. A command an agent
+	// left out of the list asked for is refused (ADR 10).
+	Clients []string
+}
+
+// ConnectedTo reports whether the secret may go to commands the coding agent
+// with this ID asks for.
+func (s Secret) ConnectedTo(agent string) bool {
+	return s.Clients == nil || slices.Contains(s.Clients, agent)
 }
 
 // Profile is a named bundle for `passess run`.
@@ -216,11 +227,12 @@ type rawUser struct {
 		} `toml:"bw"`
 	} `toml:"backends"`
 	Secrets map[string]struct {
-		Ref     any      `toml:"ref"`
-		Allow   []string `toml:"allow"`
-		Note    string   `toml:"note"`
-		Approve bool     `toml:"approve"`
-		Hosts   []string `toml:"hosts"`
+		Ref     any       `toml:"ref"`
+		Allow   []string  `toml:"allow"`
+		Note    string    `toml:"note"`
+		Approve bool      `toml:"approve"`
+		Hosts   []string  `toml:"hosts"`
+		Clients *[]string `toml:"clients"`
 	} `toml:"secrets"`
 	Profiles map[string]struct {
 		Secrets  []string          `toml:"secrets"`
@@ -372,7 +384,19 @@ func ParseUser(path string, data []byte) (*User, error) {
 				return nil, fmt.Errorf("%s: secrets.%s.hosts: %q is not a host name such as \"api.github.com\" or \"*.example.com\"", path, name, h)
 			}
 		}
-		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note, Approve: s.Approve, Hosts: s.Hosts}
+		var clients []string
+		if s.Clients != nil {
+			clients = []string{}
+			for _, c := range *s.Clients {
+				if !detect.IsAgent(c) {
+					return nil, fmt.Errorf("%s: secrets.%s.clients: %q is not a coding agent passess knows (%s)", path, name, c, agentIDs())
+				}
+				if !slices.Contains(clients, c) {
+					clients = append(clients, c)
+				}
+			}
+		}
+		u.Secrets[name] = Secret{Name: name, Refs: refs, Allow: allow, Note: s.Note, Approve: s.Approve, Hosts: s.Hosts, Clients: clients}
 	}
 
 	for name, p := range raw.Profiles {
@@ -648,6 +672,15 @@ func programs(list []string) ([]string, error) {
 		}
 	}
 	return list, nil
+}
+
+// agentIDs lists the IDs a clients list may hold, for error messages.
+func agentIDs() string {
+	ids := make([]string, len(detect.Agents))
+	for i, a := range detect.Agents {
+		ids[i] = a.ID
+	}
+	return strings.Join(ids, ", ")
 }
 
 func contains(list []string, s string) bool {
