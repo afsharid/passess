@@ -111,7 +111,7 @@ func printAudit(st *Streams, out auditOutput) {
 // line of their own.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
+		if (r < 0x20 && r != '\t') || (r >= 0x7f && r <= 0x9f) { // C0, DEL and C1 (0x9b starts a sequence too)
 			return -1
 		}
 		return r

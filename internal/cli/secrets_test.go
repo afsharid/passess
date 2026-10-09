@@ -436,3 +436,20 @@ ref = "env://PASSESS_TEST_LOOSE"
 		t.Fatalf("text:\n%s", text)
 	}
 }
+
+// A name from the vault reaches the terminal as text: whoever writes to the
+// vault must not move the cursor or redraw discover's table.
+func TestVaultNamesArePrintable(t *testing.T) {
+	for in, want := range map[string]string{
+		"OPENAI_API_KEY":   "OPENAI_API_KEY",
+		"x\x1b[2K\x1b[1Ay": "x[2K[1Ay",
+		"a\tb":             "a b",
+		"p\u009b31mq":      "p31mq",
+		"line\nbreak\r":    "linebreak",
+		"projeçt":          "projeçt",
+	} {
+		if got := vaultName(in); got != want {
+			t.Errorf("vaultName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

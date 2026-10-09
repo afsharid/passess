@@ -66,6 +66,11 @@ func TestShellCommands(t *testing.T) {
 		"passess helper ANTHROPIC_API_KEY", "PASSESS_CONFIG=/tmp/x.toml passess exec -s API_KEY -- gh api user",
 		"env PASSESS_AGENT_SOCK=/tmp/a.sock passess exec -s API_KEY -- gh api user", "export PASSESS_CONFIG=/tmp/x.toml",
 		"export FOO=1 PASSESS_CONFIG=/tmp/x.toml", "HOME=/tmp passess exec -s API_KEY -- gh api user", "XDG_CONFIG_HOME=/tmp passess list",
+		// The subcommand built at run time, and HOME set apart from the call.
+		"V=add; passess $V EVIL --ref keychain://passess/X", "passess $(echo set) GITHUB_TOKEN --clients all",
+		"passess $'\\x61dd' EVIL --ref keychain://passess/X", `passess "$CMD" --json`,
+		"export HOME=/tmp; passess exec -s API_KEY -- gh api user", "HOME=/tmp\npassess list",
+		"HOME=/tmp sh -c 'passess list'", "export XDG_CONFIG_HOME=/tmp/x; passess list",
 		"nc -U ~/.local/state/passess/agent.sock", "socat - UNIX-CONNECT:$HOME/.local/state/passess/agent.sock",
 		`python3 -c "import socket; s = socket.socket(socket.AF_UNIX); s.connect('/home/u/.local/state/passess/agent.sock')"`,
 	}
@@ -80,6 +85,7 @@ func TestShellCommands(t *testing.T) {
 		"passess migrate env .env", "passess install --apply", "passess uninstall", "env -u FOO gh",
 		"cd /tmp && ls", "cd /tmp && cat README.md", "pushd /tmp && popd && ls",
 		"FOO=1 passess exec -s API_KEY -- gh api user",
+		"export HOME=/tmp; npm test", "HOME=/tmp sh -c 'make'", "passess exec -s X -- echo $'a\\tb'",
 	}
 	for _, c := range deny {
 		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)

@@ -5,15 +5,19 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/afsharid/passess/internal/ref"
@@ -123,11 +127,36 @@ func trustedDirs() []string {
 }
 
 // accountHome is the home directory in the account database, "" when the
-// lookup fails. A variable so that tests can point it at a directory of
-// their own.
+// lookup fails. On macOS os/user asks the system (getpwuid_r) even without
+// cgo. Elsewhere, without cgo, user.Current and user.LookupId fall back to
+// $HOME and $USER when the uid has no /etc/passwd entry (LDAP and SSSD
+// accounts, containers run as an arbitrary uid), and those are the caller's
+// to set; so /etc/passwd is read here and nothing else. A variable so that
+// tests can point it at a directory of their own.
 var accountHome = func() string {
-	if u, err := user.Current(); err == nil {
-		return u.HomeDir
+	if runtime.GOOS == "darwin" {
+		if u, err := user.Current(); err == nil {
+			return u.HomeDir
+		}
+		return ""
+	}
+	f, err := os.Open("/etc/passwd")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	return passwdHome(f, strconv.Itoa(os.Getuid()))
+}
+
+// passwdHome is the home directory of uid in an /etc/passwd-style file, ""
+// when no line names it.
+func passwdHome(r io.Reader, uid string) string {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Split(sc.Text(), ":")
+		if len(f) >= 7 && f[2] == uid && filepath.IsAbs(f[5]) {
+			return f[5]
+		}
 	}
 	return ""
 }
@@ -154,14 +183,14 @@ func TrustedPath() string {
 
 // BaseEnv is the environment backend CLIs run with: enough to find their
 // config and locale, nothing that could carry another secret. PATH is
-// TrustedPath, never the caller's, and HOME is the account's: it decides
-// where the CLI reads its own config, a server URL among it.
+// TrustedPath, never the caller's, and HOME is the account's or absent: it
+// decides where the CLI reads its own config, a server URL among it.
 func BaseEnv(getenv func(string) string) []string {
 	env := []string{"PATH=" + TrustedPath()}
+	// Without an account home there is no HOME the caller did not choose, so
+	// the CLI gets none rather than one that points it at another config.
 	if home := accountHome(); home != "" {
 		env = append(env, "HOME="+home)
-	} else if v := getenv("HOME"); v != "" {
-		env = append(env, "HOME="+v)
 	}
 	for _, k := range []string{"USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR"} {
 		if v := getenv(k); v != "" {

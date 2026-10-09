@@ -17,6 +17,10 @@ final class ApproverController {
     private var showing: AgentAsk? // main thread
     private var panel: AskPanel? // main thread
     private var settled: Set<String> = [] // main thread: answered elsewhere
+    /// Counts connections (main thread). A Touch ID prompt that finishes after
+    /// the connection it was opened on is gone answers nothing: the agent may
+    /// have been replaced, and its questions are not the ones on screen.
+    private var session = 0
 
     func start() {
         reader.async { self.loop() }
@@ -50,11 +54,13 @@ final class ApproverController {
     private func attach(_ c: AgentConnection) {
         connection = c
         connected = true
+        session += 1
         onChange?()
     }
 
     private func detach() {
         guard connected else { return }
+        session += 1
         connection = nil
         connected = false
         // The agent sends every open question again to the next approver.
@@ -94,8 +100,9 @@ final class ApproverController {
     /// Touch ID, or the password. A cancelled prompt leaves the question on
     /// screen, to allow again or deny.
     private func authenticate(_ ask: AgentAsk) {
+        let opened = session
         Authenticator.confirm(t("allow %@ for %@", ask.secrets.joined(separator: ", "), ask.program)) { ok in
-            if ok { self.answer(ask, allow: true) }
+            if ok, self.session == opened { self.answer(ask, allow: true) }
         }
     }
 

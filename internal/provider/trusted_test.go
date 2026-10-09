@@ -63,3 +63,14 @@ func TestBaseEnvIgnoresCallerPATHAndHOME(t *testing.T) {
 		t.Fatalf("BaseEnv has no PATH: %v", env)
 	}
 }
+
+// The account's home comes from the passwd line for the uid, never from the
+// environment: no line, no home.
+func TestPasswdHome(t *testing.T) {
+	passwd := "root:x:0:0:root:/root:/bin/sh\n# comment\nu:x:1000:1000::/home/u:/bin/bash\nodd:x:1001:1001::relative:/bin/sh\n"
+	for uid, want := range map[string]string{"0": "/root", "1000": "/home/u", "1001": "", "4242": ""} {
+		if got := passwdHome(strings.NewReader(passwd), uid); got != want {
+			t.Errorf("passwdHome(%s) = %q, want %q", uid, got, want)
+		}
+	}
+}
