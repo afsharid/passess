@@ -147,7 +147,7 @@ func (s *agentServer) pendingFor(keys []approvalKey, ask agent.AskFor, ttl, time
 		}
 	}
 	s.asks++
-	ask.ID = strconv.FormatUint(s.asks, 10)
+	ask.ID = s.epoch + "-" + strconv.FormatUint(s.asks, 10)
 	p = &pendingAsk{ask: ask, keys: keys, ttl: ttl, done: make(chan struct{})}
 	p.timer = time.AfterFunc(timeout, func() { s.settle(p, false, "no answer within "+timeout.String(), "timeout") })
 	s.pending[ask.ID] = p

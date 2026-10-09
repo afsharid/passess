@@ -456,3 +456,20 @@ func TestAgentAuditLog(t *testing.T) {
 		t.Fatalf("mode %v, %v", fi.Mode().Perm(), err)
 	}
 }
+
+// A replaced agent numbers its questions afresh; an approver's late answer to
+// the old agent's question must not fit the new one's (a Touch ID prompt left
+// open across a restart).
+func TestAskIDsDifferAcrossAgents(t *testing.T) {
+	first := func() string {
+		s := cacheServer(nil)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		p, _ := s.pendingFor(nil, agent.AskFor{Secrets: []string{"X"}, Program: "gh"}, time.Hour, time.Hour)
+		p.timer.Stop()
+		return p.ask.ID
+	}
+	if a, b := first(), first(); a == b {
+		t.Fatalf("two agents gave their first question the same ID %q", a)
+	}
+}

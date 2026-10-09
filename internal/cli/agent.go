@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -303,6 +306,7 @@ type agentServer struct {
 	pending   map[string]*pendingAsk
 	approved  map[approvalKey]approval
 	asks      uint64 // questions asked, for their IDs
+	epoch     string // random per daemon, so a question's ID never repeats across restarts
 }
 
 // connLimits sizes conns and long from the open-file limit: each command
@@ -322,7 +326,18 @@ func newAgentServer(l *agent.Listener, configPath string, resolvers func(*config
 	return &agentServer{l: l, configPath: configPath, started: time.Now(), resolvers: resolvers,
 		conns: make(chan struct{}, nConns), long: make(chan struct{}, nLong),
 		live: map[*generation]bool{}, approvers: map[*agent.Conn]bool{}, pending: map[string]*pendingAsk{},
-		approved: map[approvalKey]approval{}}
+		approved: map[approvalKey]approval{}, epoch: newEpoch()}
+}
+
+// newEpoch names one daemon's lifetime. Ask IDs carry it: an approver's late
+// answer (a Touch ID prompt still open when the daemon was replaced) must not
+// match a question the new daemon numbered the same way.
+func newEpoch() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b)
 }
 
 func (s *agentServer) serve() {
