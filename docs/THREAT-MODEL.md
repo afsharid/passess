@@ -95,10 +95,10 @@ where the protection stops. Read the last section before relying on it.
 - **Approvals stop an agent that uses passess, not one that attacks it.** Any process
   running as the user can connect to the agent as an approver, and so could approve its
   own requests. The agent refuses approvers anchored at a harness executable, and
-  `passess agent approve` refuses inside a harness. A process that detaches from its
-  harness first gets through, which makes it T6. An Allow follows the anchor process
-  (ADR 9): in an editor's integrated terminal, the user's commands and the editor's
-  agent share it.
+  `passess agent approve` refuses when it sees a harness, by a marker or among its
+  ancestors. A process that detaches from its harness first gets through, which makes
+  it T6. An Allow follows the anchor process (ADR 9): in an editor's integrated
+  terminal, the user's commands and the editor's agent share it.
 - **Moving a value does not unleak it.** A token that sat in a file an agent could read,
   or in a transcript, may already have reached a model provider. `migrate` says to
   rotate; `scan --transcripts` shows where a known value went; `scan --scrub` takes it

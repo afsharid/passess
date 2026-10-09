@@ -11,7 +11,6 @@ import (
 	"syscall"
 
 	"github.com/afsharid/passess/internal/config"
-	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/launch"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/redact"
@@ -84,10 +83,11 @@ func runRun(st *Streams, args []string) int {
 
 	// Output passes through the redactor. A profile that opts in with tty =
 	// true (a TUI) gets the terminal itself instead, when passess runs at one
-	// and no agent is detected. Neither of those two proves a person is there
-	// (an agent can open a pseudo-terminal and clear its markers), so it is
-	// the user's choice, per profile, in a config agents may not edit.
-	if prof.TTY && isTerminal(st.Stdout) && detect.Harness(st.Getenv) == "" {
+	// and no agent is seen, by a marker or among its ancestors. Neither of
+	// those proves a person is there (an agent can open a pseudo-terminal,
+	// clear its markers and detach), so it is the user's choice, per profile,
+	// in a config agents may not edit.
+	if prof.TTY && isTerminal(st.Stdout) && len(callerAgents(st.Getenv, selfChain())) == 0 {
 		argv0 := argv[0]
 		if err := prog.Unchanged(); err != nil {
 			return failf(st, ExitNotExec, "%v", err)
