@@ -79,6 +79,18 @@ Done:
 Next: a transparent proxy for programs other than curl, `fnox://`, `passess trust`,
 Linux and Windows polish, signed releases.
 
+**Slice 8 (in progress): secrets without a terminal.** Done
+([ADR 10](adr/0010-secrets-name-the-agents-they-are-connected-to.md)):
+- `clients`: a secret names the coding agents that may ask for it;
+- `discover` lists the bws secrets passess does not use yet; `set` and `remove` change
+  and forget one; `add --clients --approve`;
+- in Passess.app, the Secrets window and the Connect window, with Touch ID; the app in
+  English and Turkish.
+
+Next, in order: apps as targets (Hermes, OpenClaw, DeepSeek Harness: connecting a secret
+adds it to the app's launch profile), then a client's own API connection through a
+local proxy with a per-client key, so the real key never sits in the client's settings.
+
 **Before the first release without `-alpha`.** The canary matrix: each harness, run for
 real with a canary secret, must never show it in its output, transcripts or files.
 Claude Code, Kiro and Antigravity pass; Codex and OpenCode wait for a working model
