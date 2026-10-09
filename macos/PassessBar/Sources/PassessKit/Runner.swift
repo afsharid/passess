@@ -38,9 +38,8 @@ public struct Passess {
 
     /// Prefers the copy bundled inside the app, then the search path.
     public static func locate(bundle: Bundle = .main, fileManager: FileManager = .default) -> Passess? {
-        if let bundled = bundle.url(forResource: "passess", withExtension: nil),
-           fileManager.isExecutableFile(atPath: bundled.path) {
-            return Passess(executable: bundled)
+        if let bundled = bundled(bundle: bundle, fileManager: fileManager) {
+            return bundled
         }
         for dir in searchPath() {
             let candidate = URL(fileURLWithPath: dir).appendingPathComponent("passess")
@@ -49,6 +48,16 @@ public struct Passess {
             }
         }
         return nil
+    }
+
+    /// Only the copy inside the app, for what hands passess a credential (the
+    /// vault's machine token): the search path holds directories any program
+    /// of the user's can write, ~/.local/bin and ~/go/bin among them, and a
+    /// passess planted there would receive the token right after Touch ID.
+    public static func bundled(bundle: Bundle = .main, fileManager: FileManager = .default) -> Passess? {
+        guard let url = bundle.url(forResource: "passess", withExtension: nil),
+              fileManager.isExecutableFile(atPath: url.path) else { return nil }
+        return Passess(executable: url)
     }
 
     /// Runs passess and returns its stdout. doctor and check exit 1 when

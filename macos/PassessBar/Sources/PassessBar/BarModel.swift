@@ -111,7 +111,7 @@ final class BarModel: ObservableObject {
     /// The window that takes the bws machine token.
     func openVault() {
         vaultPanel?.close()
-        let model = VaultModel(cli: Passess.locateForAgent())
+        let model = VaultModel(cli: Passess.bundled()) // never one from the search path: it gets the token
         let panel = VaultPanel(model: model) { [weak self] in self?.vaultPanel = nil }
         model.onDone = { [weak self, weak panel] in
             panel?.close()

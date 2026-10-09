@@ -86,6 +86,10 @@ if let ask = frame.ask {
     expect(false, "agent-ask.json holds a question")
 }
 
+// the vault token goes only to the copy inside the app, never one found on the search path
+let noCopy = Bundle(path: NSTemporaryDirectory())!
+expect(Passess.bundled(bundle: noCopy) == nil, "an app without its own passess hands the token to none")
+
 // coding agents
 let status = load(HarnessStatus.self, "status.json")
 let agents = codingAgents(status)
