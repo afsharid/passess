@@ -24,7 +24,9 @@ final class ConnectModel: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var error: String?
 
-    init(mode: Mode, list: SecretList?, cli: Passess?) {
+    /// tick is an agent ticked from the start: the app whose row asked to
+    /// connect this key. Saving still takes the user's Touch ID.
+    init(mode: Mode, list: SecretList?, cli: Passess?, tick: String? = nil) {
         self.mode = mode
         agents = list?.agents ?? []
         taken = list?.secrets.map(\.name) ?? []
@@ -41,6 +43,7 @@ final class ConnectModel: ObservableObject {
             picked = pickedAgents(secret.clients, agents: agents)
             approve = secret.approve ?? false
         }
+        if let tick = tick { picked.insert(tick) }
     }
 
     var adding: Bool {

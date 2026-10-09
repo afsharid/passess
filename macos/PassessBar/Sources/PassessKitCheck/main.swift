@@ -71,6 +71,9 @@ let stopped = load(AgentStatus.self, "agent-status-stopped.json")
 expect(!stopped.running && stopped.pid == nil, "a stopped agent decodes as not running")
 expect(agentCard(stopped, approving: false)?.status.hasPrefix("Off") == true, "stopped agent status")
 expect(agentCard(nil, approving: false) == nil, "an agent the CLI cannot report has no card")
+expect(card?.outdated == false, "an agent of the same build")
+let outdated = agentCard(load(AgentStatus.self, "agent-status-outdated.json"), approving: true)
+expect(outdated?.outdated == true && outdated?.status.hasPrefix("Another passess build") == true, "an agent of another build: \(outdated?.status ?? "")")
 
 let frame = load(AgentFrame.self, "agent-ask.json")
 if let ask = frame.ask {
@@ -86,16 +89,30 @@ if let ask = frame.ask {
 // coding agents
 let status = load(HarnessStatus.self, "status.json")
 let agents = codingAgents(status)
-expect(agents.map(\.id) == ["codex", "claude", "claude-desktop"], "agents that need setup come first: \(agents.map(\.id))")
+expect(agents.map(\.id) == ["codex", "dsh", "claude", "claude-desktop"], "agents that need setup come first: \(agents.map(\.id))")
 expect(agents[0].tone == .warning && agents[0].fix == "passess install codex --apply", "an agent missing hooks offers the install command")
 expect(agents[0].detail == "no hooks · instructions · 1 MCP server", "agent detail: \(agents[0].detail)")
-expect(agents[1].tone == .ok && agents[1].monogram == "CC" && agents[1].fix == nil, "a guarded agent")
-expect(agents[2].tone == .neutral && agents[2].detail == "Nothing set up", "an agent with nothing to set up")
+expect(agents[2].tone == .ok && agents[2].monogram == "CC" && agents[2].fix == nil, "a guarded agent")
+expect(agents[3].tone == .neutral && agents[3].detail == "Nothing set up", "an agent with nothing to set up")
+// an app: its plugin set up and loaded, one of its two keys connected to it by name
+let app = agents[1]
+expect(app.tone == .warning && app.install == nil && app.detail == "plugin loaded · 1 of 2 keys reach it", "an app: \(app.detail)")
+expect(app.keys.map(\.name) == ["EVREN_LLM_API_KEY"] && app.keys[0].note == "connected to every agent, not to this app by name",
+       "an app lists the keys that do not reach it")
+let noApps = HarnessStatus(harnesses: status.harnesses, apps: nil)
+expect(codingAgents(noApps).count == 3, "a passess older than apps")
+let waiting = HarnessStatus(harnesses: [], apps: [HarnessStatus.App(id: "dsh", label: "DeepSeek Harness", plugin: "ok",
+                                                                   active: nil, keys: [], errors: nil)])
+expect(codingAgents(waiting, running: { _ in true })[0].detail == "restart it to load the plugin", "an open app without the plugin loaded")
+expect(codingAgents(waiting)[0].tone == .ok && codingAgents(waiting)[0].detail == "plugin ready", "a closed app with the plugin ready")
+let unset = HarnessStatus(harnesses: [], apps: [HarnessStatus.App(id: "dsh", label: "DeepSeek Harness", plugin: "missing",
+                                                                   active: nil, keys: nil, errors: nil)])
+expect(codingAgents(unset)[0].install == "dsh" && codingAgents(unset)[0].fix == "passess install dsh --apply", "an app to set up")
 
 // secrets screen
 let list = load(SecretList.self, "list.json")
 let known = list.agents ?? []
-expect(known.first == SecretList.Agent(id: "claude-code", label: "Claude Code") && known.count == 8, "agents a secret can be connected to")
+expect(known.first == SecretList.Agent(id: "claude-code", label: "Claude Code") && known.count == 9, "agents a secret can be connected to")
 let rows = secretRows(list, check: nil)
 expect(rows.map(\.id) == ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY", "SUDO_PASSWORD"], "one row per secret: \(rows.map(\.id))")
 expect(rows[0].agents == "Every agent" && !rows[0].asks && rows[0].tone == .neutral, "no clients list: every agent")
@@ -105,9 +122,14 @@ expect(rows[3].agents == "No agent", "an empty clients list: no agent")
 let checked = secretRows(list, check: load(Check.self, "check.json"))
 expect(checked.allSatisfy { $0.tone == .neutral }, "a check of other secrets marks none of these")
 expect(clientsArgument(["opencode", "claude-code"], agents: known) == "claude-code,opencode", "ticked agents in their order")
-expect(clientsArgument(Set(known.map(\.id)), agents: known) == "all", "every agent ticked is all")
+let coding = known.filter { !$0.isApp }
+expect(known.filter(\.isApp).map(\.id) == ["dsh"], "DeepSeek Harness is an app")
+expect(clientsArgument(Set(coding.map(\.id)), agents: known) == "all", "every coding agent ticked is all")
+expect(clientsArgument(Set(known.map(\.id)), agents: known) == known.map(\.id).joined(separator: ","),
+       "an app ticked is named, since every agent does not reach it")
 expect(clientsArgument([], agents: known) == "none", "no agent ticked is none")
-expect(pickedAgents(nil, agents: known).count == known.count && pickedAgents([], agents: known).isEmpty, "what opens ticked")
+expect(pickedAgents(nil, agents: known) == Set(coding.map(\.id)) && pickedAgents([], agents: known).isEmpty,
+       "what opens ticked: every agent is not an app")
 expect(nameProblem("2FA", taken: []) != nil && nameProblem("HASS_TOKEN", taken: list.secrets.map(\.name)) != nil
        && nameProblem("NEW_ONE", taken: list.secrets.map(\.name)) == nil, "names a secret can take")
 expect(sourceText("bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/HASS_TOKEN") == "bws · HASS_TOKEN"

@@ -15,7 +15,7 @@ BAR := macos/PassessBar
 APP := bin/Passess.app
 APP_VERSION := $(shell echo '$(VERSION)' | sed -E 's/^v//; s/[^0-9.].*//; s/^$$/0.0.0/')
 
-.PHONY: build test vet lint check hooks clean macos-app macos-check macos-previews macos-icon
+.PHONY: build test vet lint check hooks clean macos-app macos-check macos-previews macos-icon dsh-check
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/passess ./cmd/passess
@@ -31,7 +31,11 @@ lint:
 	golangci-lint run
 	GOOS=linux golangci-lint run
 
-check: vet test lint
+check: vet test lint dsh-check
+
+# The DeepSeek Harness plugin (internal/apps/dsh) against a stand-in passess.
+dsh-check:
+	node internal/apps/dsh/test/plugin.test.mjs
 
 hooks:
 	git config core.hooksPath .githooks

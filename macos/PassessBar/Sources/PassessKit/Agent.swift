@@ -18,6 +18,9 @@ public struct AgentStatus: Decodable, Equatable {
     }
 
     public let running: Bool
+    /// Another build than the passess that asked, whose commands it refuses;
+    /// `passess agent start` replaces it.
+    public let outdated: Bool?
     public let pid: Int?
     public let build: String?
     public let cacheTTL: String?
@@ -30,7 +33,7 @@ public struct AgentStatus: Decodable, Equatable {
     public let approvals: [Approval]?
 
     enum CodingKeys: String, CodingKey {
-        case running, pid, build, cached, expires, jobs, served, approvers, pending, approvals
+        case running, outdated, pid, build, cached, expires, jobs, served, approvers, pending, approvals
         case cacheTTL = "cache_ttl"
     }
 }

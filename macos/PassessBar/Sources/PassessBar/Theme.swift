@@ -43,9 +43,9 @@ extension Tone {
     }
 }
 
-/// How a coding agent looks: a color (not a logo) and two letters. Both ID
-/// spaces are known: passess status says "claude", a clients list says
-/// "claude-code".
+/// How a coding agent looks: its app's own icon when that app is installed,
+/// otherwise a color and two letters. Both ID spaces are known: passess status
+/// says "claude", a clients list says "claude-code".
 struct AgentStyle {
     let color: NSColor
     let monogram: String
@@ -61,23 +61,62 @@ struct AgentStyle {
         case "cursor": return AgentStyle(color: rgb(0xBE185D), monogram: "Cu")
         case "gemini", "gemini-cli": return AgentStyle(color: rgb(0x4F46E5), monogram: "G")
         case "zed": return AgentStyle(color: rgb(0x0E7490), monogram: "Z")
+        case "dsh": return AgentStyle(color: rgb(0x4D6BFE), monogram: "DS")
         case "vscode": return AgentStyle(color: rgb(0x0B5CAD), monogram: "VS")
         case "windsurf": return AgentStyle(color: rgb(0x0F766E), monogram: "W")
         default: return AgentStyle(color: rgb(0x5F6672), monogram: String(label.prefix(2)))
         }
     }
+
+    /// The apps whose icons stand for each agent, by bundle ID; the first one
+    /// installed wins. A CLI agent borrows its maker's app. The icon is read
+    /// from the app on this Mac, so passess ships no one's logo.
+    static let apps: [String: [String]] = [
+        "claude": ["com.anthropic.claudefordesktop"], "claude-code": ["com.anthropic.claudefordesktop"],
+        "claude-desktop": ["com.anthropic.claudefordesktop"], "codex": ["com.openai.codex"],
+        "opencode": ["ai.opencode.desktop"], "kiro": ["dev.kiro.desktop", "com.amazon.codewhisperer"],
+        "antigravity": ["com.google.antigravity", "com.google.antigravity-ide"],
+        "cursor": ["com.todesktop.230313mzl4w4u92"], "gemini": ["com.google.GeminiMacOS"],
+        "gemini-cli": ["com.google.GeminiMacOS"], "zed": ["dev.zed.Zed"], "dsh": ["com.deepseek.dsh"],
+        "vscode": ["com.microsoft.VSCode"], "windsurf": ["com.exafunction.windsurf"],
+    ]
+
+    /// Icons looked up so far, nil for an agent with no app installed: the
+    /// panel redraws often, and Launch Services is not free.
+    @MainActor private static var icons: [String: NSImage?] = [:]
+
+    /// The icon of the agent's app, or nil when none of its apps is installed.
+    @MainActor static func icon(_ id: String) -> NSImage? {
+        if let known = icons[id] { return known }
+        let url = (apps[id] ?? []).lazy.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }.first
+        let image = url.map { NSWorkspace.shared.icon(forFile: $0.path) }
+        icons[id] = image
+        return image
+    }
 }
 
-/// A coding agent's mark: its two letters on its color.
+/// A coding agent's mark: its app's icon, or its two letters on its color.
 struct AgentAvatar: View {
     let id: String
     let label: String
     var size: CGFloat = 26
 
     var body: some View {
+        if let icon = AgentStyle.icon(id) {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: size, height: size)
+                .accessibilityLabel(label)
+        } else {
+            monogram
+        }
+    }
+
+    private var monogram: some View {
         let style = AgentStyle.of(id, label: label)
         let base = Color(nsColor: style.color)
-        Text(style.monogram)
+        return Text(style.monogram)
             .font(.system(size: size * 0.4, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
             .frame(width: size, height: size)

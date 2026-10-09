@@ -96,7 +96,7 @@ A reference can point at any of these; give several and the first that resolves 
 | Reference | Backend | passess reaches it with |
 |---|---|---|
 | `op://vault/item/field` | 1Password | the `op` CLI: desktop app sign-in, or `OP_SERVICE_ACCOUNT_TOKEN` |
-| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token kept in the keychain via `backends.bws.access_token` |
+| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token in the keychain: Connect your vault in Passess.app, or `passess backend bws` (another place with `backends.bws.access_token`) |
 | `bw://item/field` | Bitwarden Password Manager | the `bw` CLI with an unlocked session (`BW_SESSION` or `backends.bw.session`) |
 | `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` |
 | `keychain://service/account` | macOS Keychain, Linux Secret Service | `security` / `secret-tool` |
@@ -118,7 +118,7 @@ terminal is not an agent and keeps what `allow` says.
 ```toml
 [secrets.OPENROUTER_API_KEY]
 ref     = "bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/OPENROUTER_API_KEY"
-clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antigravity, cursor, gemini-cli, zed
+clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antigravity, cursor, gemini-cli, zed, dsh
 ```
 
 ```sh
@@ -281,6 +281,15 @@ allow = ["passess-helper"]
 `passess helper` prints nothing on a terminal, asks the agent first for a secret marked
 `approve`, and the hooks refuse it in agent shells. This keeps the key off disk. It
 does not keep it from the harness's own agent, which can run what the harness runs.
+
+A desktop app passess knows, DeepSeek Harness (`dsh`) for now, needs no allow entry
+for a secret without an allow list: connecting the secret to it by name in
+Passess.app is the opt-in, and only the app's own process, not a shell under it, gets
+the value. A secret connected to every agent does not count, and one narrowed to some
+programs still needs `passess-helper`, since the app is known by a process name any
+program can take. The app side is a plugin passess carries: Set up in Passess.app, or
+`passess install dsh --apply`, puts it in the app's profile, and `passess status dsh`
+shows each key the app asks for and whether it reaches the app (ADR 11).
 
 ## Secrets already in clear
 

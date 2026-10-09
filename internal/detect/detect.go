@@ -56,7 +56,17 @@ type Agent struct {
 var Agents = []Agent{
 	{"claude-code", "Claude Code"}, {"codex", "Codex"}, {"opencode", "OpenCode"}, {"kiro", "Kiro"},
 	{"antigravity", "Antigravity"}, {"cursor", "Cursor"}, {"gemini-cli", "Gemini CLI"}, {"zed", "Zed"},
+	{"dsh", "DeepSeek Harness"},
 }
+
+// apps are the agents that are desktop apps reading their own API keys:
+// started from the Dock, they have no launcher to hand them one, so they ask
+// passess helper for each key a secret connects them to (ADR 11).
+var apps = map[string]bool{"dsh": true}
+
+// IsApp reports whether the agent with this ID is a desktop app that asks
+// passess helper for its own keys.
+func IsApp(id string) bool { return apps[id] }
 
 // IsAgent reports whether id is one of Agents.
 func IsAgent(id string) bool {
@@ -94,9 +104,13 @@ func IsMarker(name string) bool {
 // programs maps the process names of harness executables, as the kernel
 // keeps them, to harness names. Editors whose terminals people also type in
 // (Zed, VS Code) are left out: their process says nothing about who typed.
+// DeepSeek Harness runs its window, its helpers ("DeepSeek Harness Helper"
+// cut to 16 bytes) and its headless CLI (the same executable as node) under
+// one name, and sets no marker.
 var programs = map[string]string{
 	"claude": "claude-code", "codex": "codex", "opencode": "opencode", "opencode.exe": "opencode",
 	"kiro-cli": "kiro", "kiro-cli-chat": "kiro", "agy": "antigravity", "cursor-agent": "cursor", "gemini": "gemini-cli",
+	"DeepSeek Harness": "dsh",
 }
 
 // Program returns the harness whose executable has this process name, or "".

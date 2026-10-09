@@ -25,9 +25,7 @@ struct PanelView: View {
                 .padding(.bottom, 12)
                 content(d)
             } else if model.doctor != nil {
-                GetStarted(item: Item(id: "start", symbol: "sparkles", tone: .neutral, title: t("Add a first secret in a terminal"),
-                                      detail: "passess add NAME --ref <reference>", action: .copy("passess add NAME --ref <reference>")),
-                           model: model)
+                VaultCard(model: model)
             } else if model.failure == Passess.Failure.notFound.description {
                 GetStarted(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral, title: t("Install it in a terminal"),
                                       detail: Passess.installCommand, action: .copy(Passess.installCommand)),
@@ -45,6 +43,9 @@ struct PanelView: View {
 
     @ViewBuilder
     private func content(_ d: Doctor) -> some View {
+        if model.needsVault {
+            VaultCard(model: model)
+        }
         let issues = problems(d)
         if !issues.isEmpty {
             Card(t("Needs attention")) {
@@ -57,8 +58,8 @@ struct PanelView: View {
         if model.secretList?.agents != nil {
             SecretsEntry(model: model)
         }
-        if let status = model.harnesses, !status.harnesses.isEmpty {
-            let rows = codingAgents(status)
+        if let status = model.harnesses, !status.harnesses.isEmpty || !(status.apps ?? []).isEmpty {
+            let rows = codingAgents(status, running: model.isRunning)
             let guarded = rows.filter { $0.tone == .ok }.count
             Card(t("Coding agents"), trailing: {
                 Text(t("%ld of %ld guarded", guarded, rows.count))
@@ -339,7 +340,13 @@ struct AgentTile: View {
     @ObservedObject var model: BarModel
 
     var body: some View {
-        if let card = agentCard(model.agent, approving: model.approving) {
+        if let card = agentCard(model.agent, approving: model.approving), card.outdated {
+            Tile(symbol: "arrow.triangle.2.circlepath", title: t("Agent"),
+                 detail: model.agentBusy ? "…" : t("Update"), lit: true, enabled: !model.agentBusy) {
+                model.agentCommand("start") // start replaces an agent of another build
+            }
+            .help(card.status)
+        } else if let card = agentCard(model.agent, approving: model.approving) {
             Tile(symbol: card.running ? "bolt.fill" : "bolt", title: t("Agent"),
                  detail: model.agentBusy ? "…" : card.running ? (card.holds.isEmpty ? t("On") : t("On · holds %ld", card.holds.count)) : t("Off"),
                  lit: card.running, enabled: !model.agentBusy) {
@@ -420,30 +427,63 @@ struct AgentRowView: View {
     @ObservedObject var model: BarModel
 
     var body: some View {
-        HStack(spacing: 10) {
-            AgentAvatar(id: row.id, label: row.title, size: 28)
-                .opacity(row.tone == .neutral ? 0.45 : 1) // nothing set up: shown, not stressed
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.title)
-                    .font(.system(size: 13, weight: .medium))
-                Text(row.detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                AgentAvatar(id: row.id, label: row.title, size: 28)
+                    .opacity(row.tone == .neutral ? 0.45 : 1) // nothing set up: shown, not stressed
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.title)
+                        .font(.system(size: 13, weight: .medium))
+                    Text(model.installFailure[row.id] ?? row.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(model.installFailure[row.id] == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tone.error.color))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(row.tone.spoken)
+                Spacer(minLength: 4)
+                if let id = row.install {
+                    Button { model.install(id) } label: {
+                        Text(model.installing == id ? t("Setting up…") : t("Set up"))
+                    }
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
+                    .disabled(model.installing != nil)
+                    .help(t("Runs %@", row.fix ?? ""))
+                }
+                Image(systemName: row.symbol)
+                    .font(.system(size: 13))
+                    .foregroundStyle(row.tone.color)
+                    .accessibilityHidden(true)
             }
-            Spacer(minLength: 4)
-            if let fix = row.fix {
-                CopyButton(copied: model.copied == row.id) { model.copy(fix, from: row.id) }
+            ForEach(row.keys) { key in
+                HStack(spacing: 8) {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tone.warning.color)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(key.name)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(key.note)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Button { model.connectKey(key.name, to: row.id) } label: {
+                        Label(t("Connect"), systemImage: "link")
+                    }
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
+                    .help(t("Connect %@ to %@", key.name, row.title))
+                }
+                .padding(.leading, 38)
+                .accessibilityElement(children: .combine)
             }
-            Image(systemName: row.symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(row.tone.color)
-                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(row.tone.spoken)
     }
 }
 
@@ -484,6 +524,31 @@ struct BackendsView: View {
             Text(t("No secret uses a vault yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The first step on a new machine: the vault's token, in a window of its own.
+struct VaultCard: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        Card(t("Get started"), highlighted: true) {
+            HStack(spacing: 10) {
+                Badge(symbol: "lock.shield.fill", size: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(t("Connect your vault"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(t("Bitwarden Secrets Manager access token"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button { model.openVault() } label: {
+                    Label(t("Connect"), systemImage: "link")
+                }
+                .buttonStyle(PrimaryButtonStyle(compact: true))
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"slices"
@@ -76,7 +77,9 @@ func runDiscover(st *Streams, args []string) int {
 		cancel()
 		if err != nil {
 			out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, Error: err.Error()})
-			code = resolveExitCode(err)
+			if !errors.Is(err, errNoBWSToken) { // not set up is a state, not a failure
+				code = resolveExitCode(err)
+			}
 		} else {
 			out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, OK: true})
 			out.Secrets = unreferenced(u.Secrets, items)

@@ -1,0 +1,30 @@
+{
+  "running": true,
+  "outdated": true,
+  "pid": 4242,
+  "build": "v0.0.0-test",
+  "protocol": 1,
+  "started": "2026-09-26T19:30:00.123456789Z",
+  "socket": "/Users/you/.local/state/passess/agent.sock",
+  "config": "/Users/you/.config/passess/config.toml",
+  "cache_ttl": "10m0s",
+  "cached": [
+    "GITHUB_TOKEN"
+  ],
+  "expires": "2026-09-26T19:40:00.123456789Z",
+  "jobs": 0,
+  "served": 3,
+  "approvers": 1,
+  "approvals": [
+    {
+      "secret": "GITHUB_TOKEN",
+      "program": "gh",
+      "anchor": {
+        "pid": 4141,
+        "name": "claude"
+      },
+      "until": "2026-09-27T03:30:00.123456789Z"
+    }
+  ],
+  "pending": 0
+}

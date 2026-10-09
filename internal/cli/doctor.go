@@ -151,7 +151,7 @@ func diagnose(st *Streams) doctorOutput {
 		} else {
 			b.OK = true
 			if scheme == ref.BWS {
-				b.Detail = "machine token " + tokenSource(u)
+				b.Detail = "machine token " + tokenSource(u, st.Getenv)
 			}
 		}
 		out.Backends = append(out.Backends, b)
@@ -197,7 +197,7 @@ func fixFor(scheme string, u *config.User) string {
 	switch scheme {
 	case ref.BWS:
 		if u.Backends.BWS.AccessToken == nil {
-			return "store the machine token with `security add-generic-password -U -s passess -a bws -w` and set backends.bws.access_token = \"keychain://passess/bws\""
+			return "store the machine token in Passess.app, or with `passess backend bws` in a terminal"
 		}
 		return "check that " + u.Backends.BWS.AccessToken.String() + " holds a valid machine-account token"
 	case ref.Keychain:
@@ -212,11 +212,14 @@ func fixFor(scheme string, u *config.User) string {
 	return scheme + ":// is not supported"
 }
 
-func tokenSource(u *config.User) string {
+func tokenSource(u *config.User, getenv func(string) string) string {
 	if u.Backends.BWS.AccessToken != nil {
 		return "from " + u.Backends.BWS.AccessToken.String()
 	}
-	return "from BWS_ACCESS_TOKEN"
+	if getenv("BWS_ACCESS_TOKEN") != "" {
+		return "from BWS_ACCESS_TOKEN"
+	}
+	return "from " + defaultBWSToken.String()
 }
 
 func printDoctor(st *Streams, out doctorOutput) {

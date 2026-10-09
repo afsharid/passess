@@ -102,7 +102,7 @@ func agentStatus(st *Streams, asJSON bool) int {
 		return failf(st, ExitUnavailable, "cannot reach the agent at %s: %v", path, err)
 	}
 	if asJSON {
-		fmt.Fprintln(st.Stdout, string(statusJSON(running, f.Info)))
+		fmt.Fprintln(st.Stdout, string(statusJSON(running, f.Info, running && !sameBuild(f.Info.Build, buildinfo.String()))))
 	} else if running {
 		printInfo(st.Stdout, f.Info)
 	} else {
@@ -115,13 +115,16 @@ func agentStatus(st *Streams, asJSON bool) int {
 }
 
 // statusJSON is `passess agent status --json`: the agent's Info under a
-// running field, which alone is present when no agent runs. The menu bar app
-// reads it (macos/PassessBar/Sources/PassessKit/Agent.swift).
-func statusJSON(running bool, info *agent.Info) []byte {
+// running field, which alone is present when no agent runs. Outdated says the
+// agent is another build than the passess asking, whose clients it refuses:
+// `passess agent start` replaces it. The menu bar app reads it
+// (macos/PassessBar/Sources/PassessKit/Agent.swift).
+func statusJSON(running bool, info *agent.Info, outdated bool) []byte {
 	b, _ := json.MarshalIndent(struct {
-		Running bool `json:"running"`
+		Running  bool `json:"running"`
+		Outdated bool `json:"outdated,omitempty"`
 		*agent.Info
-	}{running, info}, "", "  ")
+	}{running, outdated, info}, "", "  ")
 	return b
 }
 

@@ -7,11 +7,17 @@ public struct SecretList: Decodable, Equatable {
     public struct Agent: Decodable, Equatable, Identifiable {
         public let id: String
         public let label: String
+        /// A desktop app reading its own keys: only a list that names it lets
+        /// a secret reach it, never "every agent" (ADR 11).
+        public let app: Bool?
 
-        public init(id: String, label: String) {
+        public init(id: String, label: String, app: Bool? = nil) {
             self.id = id
             self.label = label
+            self.app = app
         }
+
+        public var isApp: Bool { app ?? false }
     }
 
     public struct Secret: Decodable, Equatable, Identifiable {
@@ -122,13 +128,17 @@ public func foundRows(_ d: Discovery, now: Date = Date()) -> [FoundRow] {
 /// The agents ticked when the Connect window opens: a secret every agent may
 /// use has them all ticked.
 public func pickedAgents(_ clients: [String]?, agents: [SecretList.Agent]) -> Set<String> {
-    Set(clients ?? agents.map(\.id))
+    Set(clients ?? agents.filter { !$0.isApp }.map(\.id)) // every agent does not reach an app
 }
 
-/// The --clients value for the ticked agents: all of them is "all", which
-/// takes in agents passess learns later; none is "none".
+/// The --clients value for the ticked agents: every coding agent and no app
+/// is "all", which takes in agents passess learns later; an app ticked is
+/// named, since only a list naming it reaches it; none is "none".
 public func clientsArgument(_ picked: Set<String>, agents: [SecretList.Agent]) -> String {
-    if !agents.isEmpty && agents.allSatisfy({ picked.contains($0.id) }) { return "all" }
+    let coding = agents.filter { !$0.isApp }
+    if !coding.isEmpty && coding.allSatisfy({ picked.contains($0.id) }) && !agents.contains(where: { $0.isApp && picked.contains($0.id) }) {
+        return "all"
+    }
     let ids = agents.map(\.id).filter(picked.contains)
     return ids.isEmpty ? "none" : ids.joined(separator: ",")
 }

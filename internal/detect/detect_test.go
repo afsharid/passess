@@ -30,6 +30,14 @@ func TestAgentsCoverEveryDetectedHarness(t *testing.T) {
 	}
 }
 
+func TestEveryAppIsAnAgent(t *testing.T) {
+	for id := range apps {
+		if !IsAgent(id) {
+			t.Errorf("%s is an app but not an agent", id)
+		}
+	}
+}
+
 func TestHarnessesNamesEveryMarker(t *testing.T) {
 	env := map[string]string{"CLAUDECODE": "1", "CODEX_THREAD_ID": "t"}
 	got := Harnesses(func(k string) string { return env[k] })

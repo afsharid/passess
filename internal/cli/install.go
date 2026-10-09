@@ -44,6 +44,7 @@ type harnessReport struct {
 type harnessOutput struct {
 	Applied   bool            `json:"applied"`
 	Harnesses []harnessReport `json:"harnesses"`
+	Apps      []appReport     `json:"apps"`
 }
 
 func adapters(st *Streams) []harness.Adapter {
@@ -160,7 +161,7 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		noHooks = fs.Bool("no-hooks", false, "do not register passess's hook handler")
 	}
 	fs.Usage = func() {
-		fmt.Fprintf(st.Stderr, "Usage: passess %s [flags] [HARNESS...]   (%s)\n", verb, knownHarnesses(st))
+		fmt.Fprintf(st.Stderr, "Usage: passess %s [flags] [HARNESS...]   (%s; apps: %s)\n", verb, knownHarnesses(st), strings.Join(appIDs, ", "))
 		fs.PrintDefaults()
 	}
 	names, err := parseAnywhere(fs, args)
@@ -175,9 +176,12 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 	}
 	augmentPath(st.Getenv)
-	targets, err := selectAdapters(st, names)
-	if err != nil {
-		return failf(st, ExitUsage, "%v", err)
+	appNames, names := splitApps(names)
+	var targets []harness.Adapter
+	if len(names) > 0 || len(appNames) == 0 {
+		if targets, err = selectAdapters(st, names); err != nil {
+			return failf(st, ExitUsage, "%v", err)
+		}
 	}
 
 	var user *config.User
@@ -202,7 +206,7 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 	}
 
-	out := harnessOutput{Applied: *apply, Harnesses: []harnessReport{}}
+	out := harnessOutput{Applied: *apply, Harnesses: []harnessReport{}, Apps: []appReport{}}
 	healthy := true
 	for _, a := range targets {
 		var desired []harness.Desired
@@ -230,6 +234,8 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 		out.Harnesses = append(out.Harnesses, r)
 	}
+	apps, ok := appReports(st, verb, appNames, len(appNames) == 0 && len(names) == 0, user, *apply)
+	out.Apps, healthy = apps, healthy && ok
 
 	if *asJSON {
 		if code := writeJSON(st, out); code != ExitOK {
@@ -540,11 +546,11 @@ func describeAction(a harness.Action, config string) string {
 }
 
 func printHarnesses(st *Streams, verb string, out harnessOutput) {
-	if len(out.Harnesses) == 0 {
+	if len(out.Harnesses) == 0 && len(out.Apps) == 0 {
 		fmt.Fprintf(st.Stdout, "No supported harness found (%s).\n", knownHarnesses(st))
 		return
 	}
-	pending := false
+	pending := printApps(st, verb, out.Applied, out.Apps)
 	for _, r := range out.Harnesses {
 		fmt.Fprintf(st.Stdout, "%s  (%s)\n", r.Label, r.Config)
 		for _, s := range r.Servers {

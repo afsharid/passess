@@ -106,7 +106,8 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         harness("kiro", "Kiro", hooks: "unavailable", instructions: "ok"),
         harness("antigravity", "Antigravity", hooks: "ok", instructions: "ok"),
         harness("claude-desktop", "Claude Desktop", hooks: "none", instructions: "none"),
-    ].joined(separator: ",") + "]}")
+    ].joined(separator: ",") + "], \"apps\": [{\"id\": \"dsh\", \"label\": \"DeepSeek Harness\", \"plugin\": \"ok\", "
+        + "\"active\": \"2026-10-09T20:00:00.000Z\", \"keys\": [{\"name\": \"EVREN_LLM_API_KEY\", \"state\": \"every-agent\"}], \"errors\": []}]}")
     let agentsNeedSetup = decode(HarnessStatus.self, "{\"applied\": false, \"harnesses\": [" + [
         harness("claude", "Claude Code", hooks: "ok", instructions: "ok"),
         harness("codex", "Codex", hooks: "missing", instructions: "ok", actions: 1),
@@ -123,7 +124,8 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "agents": [{"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
                 {"id": "opencode", "label": "OpenCode"}, {"id": "kiro", "label": "Kiro"},
                 {"id": "antigravity", "label": "Antigravity"}, {"id": "cursor", "label": "Cursor"},
-                {"id": "gemini-cli", "label": "Gemini CLI"}, {"id": "zed", "label": "Zed"}],
+                {"id": "gemini-cli", "label": "Gemini CLI"}, {"id": "zed", "label": "Zed"},
+                {"id": "dsh", "label": "DeepSeek Harness", "app": true}],
      "secrets": [
       {"name": "HASS_TOKEN", "backends": ["bws"], "refs": ["bws://\(project)/HASS_TOKEN"], "allow": [],
        "clients": ["claude-code"], "approve": true, "profiles": [], "mcp": []},
