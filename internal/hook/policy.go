@@ -228,6 +228,7 @@ func checkShell(cmd, cwd string, env Env) string {
 	}
 	var reason string
 	others := false // a program other than passess runs
+	steered := ""   // a path setting assigned other than inline on a passess call
 	// cur is the directory relative paths resolve against: where the harness
 	// ran the command, then wherever a literal cd or pushd earlier in the same
 	// command line moved it. "" once that is unknown.
@@ -268,6 +269,9 @@ func checkShell(cmd, cwd string, env Env) string {
 			for _, a := range n.Assigns {
 				if reason == "" && a.Name != nil {
 					reason = checkAssign(a.Name.Value, program)
+					if pathSettings[a.Name.Value] && filepath.Base(program) != "passess" {
+						steered = a.Name.Value
+					}
 				}
 			}
 			if reason == "" {
@@ -276,9 +280,19 @@ func checkShell(cmd, cwd string, env Env) string {
 			cur, stack = afterCd(args, cur, stack, env.Home)
 		case *syntax.DeclClause: // export, declare, typeset, local, readonly
 			reason = checkDecl(n, env)
+			for _, a := range n.Args {
+				if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
+					steered = a.Name.Value
+				}
+			}
 		}
 		return true
 	})
+	// HOME and the like set apart from the passess call, by export or for a
+	// shell that runs it, still reach it: the whole text is searched.
+	if reason == "" && steered != "" && strings.Contains(cmd, "passess") {
+		reason = checkAssign(steered, "passess")
+	}
 	// A path in quotes, a variable or a script can name the socket too, so
 	// the text is searched whole: $HOME/.local/state/passess/agent.sock.
 	if reason == "" && others && mentionsAgent(cmd, env) {
@@ -408,6 +422,9 @@ func literal(w *syntax.Word) (string, bool) {
 		case *syntax.Lit:
 			b.WriteString(p.Value)
 		case *syntax.SglQuoted:
+			if p.Dollar { // $'…' holds escapes the shell decodes, not the text itself
+				return "", false
+			}
 			b.WriteString(p.Value)
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
@@ -507,6 +524,11 @@ func checkCall(args []string, cwd string, env Env) string {
 		return checkCall(rest, cwd, env)
 	case "passess":
 		switch {
+		case len(args) > 1 && args[1] == "":
+			// $V, $(…) or $'…' as the subcommand: what runs cannot be told
+			// from the text, and every subcommand an agent may run is plain.
+			return "passess: write the passess subcommand out as plain text; one built from a variable or a substitution " +
+				"cannot be checked, so it is refused."
 		case sub(1) == "agent" && (sub(2) == "stop" || sub(2) == "serve"):
 			return "passess: `passess agent " + sub(2) + "` is the user's to run: the agent asks the user before a secret " +
 				"marked approve goes anywhere, and replacing or stopping it would skip that. Tell the user if the agent needs it."
