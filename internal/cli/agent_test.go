@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -573,6 +575,43 @@ func TestAgentMasksALargeOutput(t *testing.T) {
 	masked, ok := agentMask(sock, text)
 	if !ok || strings.Contains(masked, value) || !strings.HasSuffix(masked, "token [REDACTED:K]\n") {
 		t.Fatalf("a %d-byte output was not masked (ok %v)", len(text), ok)
+	}
+}
+
+// Masking may lengthen a text: a short value seen often turns into longer
+// markers. Past what a hook reads back the agent refuses rather than send the
+// text, and the hook withholds the output instead of passing it on unmasked.
+func TestMaskThatGrowsTooLongIsWithheld(t *testing.T) {
+	short := agent.Blob("x")
+	if f := maskAnswer(short, agent.Blob(strings.Repeat("y", agent.MaxMaskGrowth+2))); f.Error != agent.MaskTooLong || f.Text != "" {
+		t.Fatalf("an answer past the growth bound was sent: %q", f.Error)
+	}
+	if f := maskAnswer(short, "[REDACTED:K]"); f.Error != "" || f.Text != "[REDACTED:K]" {
+		t.Fatalf("a short masked answer was refused: %+v", f)
+	}
+	for name, answer := range map[string]string{
+		"too long": `{"error":"` + agent.MaskTooLong + `"}`,
+		"garbled":  `{"text":`,
+	} {
+		sock := agentSocket(t)
+		l, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			_, _ = bufio.NewReader(c).ReadString('\n')
+			_, _ = io.WriteString(c, answer+"\n")
+		}()
+		got, ok := agentMask(sock, "token held-value\n")
+		_ = l.Close()
+		if !ok || got != maskWithheld {
+			t.Errorf("%s: the hook passed the output on (%q, %v)", name, got, ok)
+		}
 	}
 }
 
