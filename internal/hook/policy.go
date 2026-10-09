@@ -516,9 +516,12 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "helper":
 			return "passess: `passess helper` prints a secret value; it is for a harness's apiKeyHelper setting, not for commands. " +
 				useInstead
-		case sub(1) == "add":
-			return "passess: `passess add` decides which programs may receive which secrets; it is the user's to run. " +
+		case sub(1) == "add", sub(1) == "set", sub(1) == "remove":
+			return "passess: `passess " + sub(1) + "` decides who may use which secret; it is the user's to run, or to do in Passess.app. " +
 				"Tell the user the name and reference you need."
+		case sub(1) == "discover":
+			return "passess: `passess discover` lists what the user's vault holds; that inventory is the user's to see, " +
+				"in Passess.app or a terminal of their own. Ask the user for the secret you need."
 		case sub(1) == "migrate" && slices.Contains(args, "--apply"):
 			return "passess: `passess migrate --apply` moves values out of the user's files; it is the user's to run. " +
 				"Show them the dry run and let them apply it."

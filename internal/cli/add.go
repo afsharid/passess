@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/afsharid/passess/internal/config"
-	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/ref"
 )
 
@@ -39,8 +38,10 @@ func runAdd(st *Streams, args []string) int {
 	fs.Var(&allow, "allow", "programs that may receive it, comma-separated")
 	note := fs.String("note", "", "free-text note")
 	keychain := fs.Bool("keychain", false, "prompt for the value in this terminal and store it in the OS keychain")
+	clients := fs.String("clients", "all", "coding agents it is connected to: IDs comma-separated (claude-code,codex), all, or none")
+	approve := fs.Bool("approve", false, "every new program and caller waits for your Allow")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--note TEXT]")
+		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--clients claude-code,codex] [--approve] [--note TEXT]")
 		fmt.Fprintln(st.Stderr, "       passess add NAME --keychain [--allow …]   (you type the value; it never passes through passess)")
 		fs.PrintDefaults()
 	}
@@ -72,33 +73,45 @@ func runAdd(st *Streams, args []string) int {
 	if strings.ContainsAny(*note, "\n\r\x00") {
 		return failf(st, ExitUsage, "--note must be one line")
 	}
-	if h := detect.Harness(st.Getenv); h != "" {
-		return failf(st, ExitNoPerm, "passess add decides which programs may receive which secrets; run it yourself in a terminal, not from %s. Tell the user the name and reference you need.", h)
+	clientsLit, err := clientsLiteral(*clients)
+	if err != nil {
+		return failf(st, ExitUsage, "%v", err)
+	}
+	if code := refuseUnderAgent(st, "add", whoUses); code != 0 {
+		return code
 	}
 
 	path, err := config.UserPath(st.Getenv)
 	if err != nil {
 		return failf(st, ExitConfig, "%v", err)
 	}
-	before, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		before = nil
-	case err != nil:
-		return failf(st, ExitConfig, "%v", err)
-	default:
-		u, err := config.LoadUser(path)
+	// read returns the config as it is, refusing a name or reference already
+	// taken. It runs before the keychain prompt, to fail fast, and again under
+	// the lock, since the file may have changed while the user typed.
+	read := func() ([]byte, int) {
+		before, err := os.ReadFile(path)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return nil, 0
+		case err != nil:
+			return nil, failf(st, ExitConfig, "%v", err)
+		}
+		u, err := config.ParseUser(path, before)
 		if err != nil {
-			return failf(st, ExitConfig, "%v", err)
+			return nil, failf(st, ExitConfig, "%v", err)
 		}
 		if _, ok := u.Secrets[name]; ok {
-			return failf(st, ExitConfig, "%s is already defined; edit it in %s", name, path)
+			return nil, failf(st, ExitConfig, "%s is already defined; edit it in %s", name, path)
 		}
 		// A second name for a reference another secret already has would
 		// start with an allow list and approval setting of its own choosing.
 		if other, r := sameReference(u, refs); other != "" {
-			return failf(st, ExitConfig, "%s is already the reference of secrets.%s; to give it to another program, change that secret's allow list in %s", r, other, path)
+			return nil, failf(st, ExitConfig, "%s is already the reference of secrets.%s; to give it to another program, change that secret's allow list in %s", r, other, path)
 		}
+		return before, 0
+	}
+	if _, code := read(); code != 0 {
+		return code
 	}
 
 	if *keychain {
@@ -109,7 +122,23 @@ func runAdd(st *Streams, args []string) int {
 		refs = listFlag{r}
 	}
 
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return failf(st, ExitConfig, "locking %s: %v", path, err)
+	}
+	defer unlock()
+	before, code := read()
+	if code != 0 {
+		return code
+	}
+
 	block := secretBlock(name, refs, allow, *note)
+	if clientsLit != nil {
+		block = append(block, "clients = "+*clientsLit+"\n"...)
+	}
+	if *approve {
+		block = append(block, "approve = true\n"...)
+	}
 	after := before
 	if len(after) == 0 {
 		after = []byte("version = 1\n")
@@ -119,9 +148,6 @@ func runAdd(st *Streams, args []string) int {
 	}
 	after = append(after, block...)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return failf(st, ExitConfig, "%v", err)
-	}
 	if err := writeFileAtomic(path, after, 0o600); err != nil {
 		return failf(st, ExitConfig, "%v", err)
 	}
@@ -193,7 +219,7 @@ func shellLine(argv []string) string {
 // storeInKeychain lets the user type the value straight into the OS keychain
 // tool; passess never sees it.
 func storeInKeychain(st *Streams, name string) (string, int) {
-	if detect.Harness(st.Getenv) != "" || !isTerminal(st.Stdin) {
+	if len(callerAgents(st.Getenv, selfChain())) > 0 || !isTerminal(st.Stdin) {
 		return "", failf(st, ExitNoPerm, "--keychain needs you at a terminal: values should not pass through an agent. Run `passess add %s --keychain` yourself.", name)
 	}
 	argv := keychainPrompt(name)

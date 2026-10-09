@@ -17,7 +17,7 @@ where the protection stops. Read the last section before relying on it.
 | T1 | A value reaches the model's context by accident: the agent reads `.env`, dumps the environment, prints a header while debugging, a tool echoes a DSN in an error | Primary: near zero | Values never enter the agent's environment or files; `exec`, `run` and `mcp-exec` redact child output; hooks refuse known-bad commands early |
 | T2 | Plaintext at rest: harness configs and their backups, dotfiles, `.env`, transcripts | Primary: find, move, eliminate | `scan`, `audit`, `migrate`; MCP configs reference `passess mcp-exec <name>` instead of holding tokens |
 | T3 | The agent writes a key into code or a commit | Catch | Scanning and hooks; the agent never learns the value in the first place |
-| T4 | Over-broad access: every process inherits every secret | Least privilege | Secrets are declared per consumer (command, MCP server, profile) |
+| T4 | Over-broad access: every process inherits every secret | Least privilege | Secrets are declared per consumer (command, MCP server, profile) and connected to the coding agents that may ask for them (`clients`, ADR 10) |
 | T5 | Prompt-injection exfiltration: the agent *uses* a secret it cannot see and sends it elsewhere | Make harder | Per-secret command allow lists; shells, interpreters and encoders refused by default; later approvals and a host-bound egress proxy |
 | T6 | A deliberately malicious agent with an unsandboxed shell running as the same OS user | Out of scope | Such a process can read anything the user can, including the keychain. A hard boundary needs the harness sandbox with passess outside it |
 | T7 | A malicious repository: a cloned project's passess file asks for the user's secrets | Prevent | Project files may only name the secrets they need; references and policy widening live in user config alone |
@@ -79,6 +79,12 @@ where the protection stops. Read the last section before relying on it.
   a newer agent that way, which forgets the cache and the approvals, as `agent lock`
   does. That is part of T5, not a hard line: what the hooks cannot parse (a script, an
   interpreter one-liner that builds the path) still gets through.
+- **A clients list holds the agents passess recognizes.** An agent is seen by a marker
+  in its commands' environment or by its executable among their ancestors. A command
+  that clears the markers and detaches from the agent (a daemonized child whose parent
+  is now launchd) is seen as no agent and keeps only the secret's allow list. So is an
+  agent passess does not know. Like the allow lists, `clients` narrows an agent that
+  uses passess; one that attacks it is T6.
 - **The agent answers whether a text holds one of its values.** Hooks send tool output
   to it for masking, and so could any same-user process, with a guess. For a short,
   guessable value, a password, that is an oracle. Reaching the socket at all is T6.

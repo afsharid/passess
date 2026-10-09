@@ -123,7 +123,7 @@ func runHTTP(st *Streams, args []string) int {
 	if err != nil {
 		self = "passess"
 	}
-	if code := askApproval(st, u, names, []string{self, "http", target.Host}); code != 0 {
+	if code := admit(st, u, names, []string{self, "http", target.Host}); code != 0 {
 		return code
 	}
 

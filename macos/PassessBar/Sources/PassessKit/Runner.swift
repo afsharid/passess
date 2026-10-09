@@ -16,12 +16,15 @@ public struct Passess {
         case notFound
         case timedOut
         case unreadable(String)
+        /// passess refused a change and said why.
+        case refused(String)
 
         public var description: String {
             switch self {
             case .notFound: return "The passess command line tool is not installed."
             case .timedOut: return "passess did not answer in time"
             case let .unreadable(why): return "could not read passess output: \(why)"
+            case let .refused(why): return why
             }
         }
     }
@@ -52,6 +55,12 @@ public struct Passess {
     /// something needs attention and still print a full report, so the exit
     /// status is not an error here.
     public func run(_ arguments: [String], timeout: TimeInterval = 30) throws -> Data {
+        try execute(arguments, timeout: timeout).stdout
+    }
+
+    /// Runs passess and keeps everything it said, for the commands that change
+    /// the config: their refusals are on stderr.
+    func execute(_ arguments: [String], timeout: TimeInterval) throws -> (status: Int32, stdout: Data, stderr: Data) {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -61,27 +70,64 @@ public struct Passess {
             "PATH": Passess.searchPath().joined(separator: ":"),
             "LANG": "en_US.UTF-8",
         ]
-        let stdout = Pipe()
+        let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderr
         process.standardInput = FileHandle.nullDevice
 
         let done = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in done.signal() }
         try process.run()
-        var data = Data()
-        let reader = DispatchQueue(label: "passess.stdout")
-        let readDone = DispatchSemaphore(value: 0)
-        reader.async {
-            data = stdout.fileHandleForReading.readDataToEndOfFile()
-            readDone.signal()
+        var out = Data(), err = Data()
+        let reads = DispatchGroup()
+        for (pipe, assign) in [(stdout, { (d: Data) in out = d }), (stderr, { (d: Data) in err = d })] {
+            reads.enter()
+            DispatchQueue.global().async {
+                assign(pipe.fileHandleForReading.readDataToEndOfFile())
+                reads.leave()
+            }
         }
         if done.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
             throw Failure.timedOut
         }
-        readDone.wait()
-        return data
+        reads.wait()
+        return (process.terminationStatus, out, err)
+    }
+
+    /// Runs a command that changes the config; a refusal throws what passess said.
+    private func change(_ arguments: [String]) throws {
+        let r = try execute(arguments, timeout: 30)
+        guard r.status == 0 else {
+            let said = String(decoding: r.stderr, as: UTF8.self)
+                .split(separator: "\n").first.map { String($0) } ?? "passess exited \(r.status)"
+            throw Failure.refused(said.hasPrefix("passess: ") ? String(said.dropFirst(9)) : said)
+        }
+    }
+
+    /// `passess list --json`: every secret, and who may use it.
+    public func list() throws -> SecretList {
+        try decode(SecretList.self, from: run(["list", "--json"]))
+    }
+
+    /// `passess discover --json`: what the vault holds that passess does not use.
+    public func discover() throws -> Discovery {
+        try decode(Discovery.self, from: run(["discover", "--json"], timeout: 90))
+    }
+
+    /// `passess add`: a vault secret becomes one agents can use.
+    public func add(name: String, ref: String, clients: String, approve: Bool) throws {
+        try change(["add", name, "--ref", ref, "--clients", clients] + (approve ? ["--approve"] : []))
+    }
+
+    /// `passess set`: who may use a secret, and whether each use asks.
+    public func set(name: String, clients: String, approve: Bool) throws {
+        try change(["set", name, "--clients", clients, "--approve", approve ? "true" : "false"])
+    }
+
+    /// `passess remove`: passess forgets the secret; the vault keeps it.
+    public func remove(name: String) throws {
+        try change(["remove", name])
     }
 
     /// The CLI that starts the agent: the one on the search path, which

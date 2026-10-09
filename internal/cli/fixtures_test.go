@@ -54,7 +54,11 @@ func golden(t *testing.T, name, got, configDir string) {
 	}
 }
 
+// noHarness makes the test a person at a terminal: no harness markers in its
+// environment, and no coding agent among its ancestors, though it may run
+// inside one.
 func noHarness(t *testing.T) {
+	underChain(t)
 	for _, v := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID", "CODEX_SANDBOX",
 		"CODEX_CI", "CURSOR_TRACE_ID", "CURSOR_AGENT", "CURSOR_CLI", "GEMINI_CLI", "GEMINI_PROJECT_DIR", "OPENCODE",
 		"OPENCODE_PID", "OPENCODE_CLIENT", "OPENCODE_TERMINAL", "ANTIGRAVITY_CLI_ALIAS", "ZED_SESSION_ID",
@@ -129,4 +133,42 @@ func TestMenuBarFixtures(t *testing.T) {
 		t.Fatal("check printed a value")
 	}
 	golden(t, "check.json", out, dir)
+}
+
+// TestMenuBarSecretFixtures pins what the Secrets screen reads: `list --json`
+// with every kind of clients list, and `discover --json`.
+func TestMenuBarSecretFixtures(t *testing.T) {
+	noHarness(t)
+	dir := writeConfig(t, `version = 1
+[secrets.OPENROUTER_API_KEY]
+ref     = "bws://`+discProject+`/OPENROUTER_API_KEY"
+clients = ["claude-code", "opencode"]
+hosts   = ["openrouter.ai"]
+[secrets.HASS_TOKEN]
+ref     = "bws://`+discProject+`/HASS_TOKEN"
+clients = ["claude-code"]
+approve = true
+[secrets.SUDO_PASSWORD]
+ref     = "bws://`+discProject+`/SUDO_PASSWORD"
+clients = []
+[secrets.GITHUB_TOKEN]
+ref   = "keychain://passess/github"
+allow = ["gh", "git"]
+note  = "repo:read"
+[profiles.web]
+secrets = ["OPENROUTER_API_KEY"]
+allow   = ["node"]
+`)
+	out, _, _ := run(t, "list", "--json")
+	golden(t, "list.json", out, dir)
+
+	saved := discoverRunner
+	t.Cleanup(func() { discoverRunner = saved })
+	discoverRunner = discoverFake{t}
+	t.Setenv("BWS_ACCESS_TOKEN", "passess-fake-bws-machine-token-0123456789")
+	out, _, _ = run(t, "discover", "--json")
+	if strings.Contains(out, discValue) {
+		t.Fatal("discover printed a value")
+	}
+	golden(t, "discover.json", out, dir)
 }

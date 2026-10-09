@@ -61,7 +61,7 @@ func runRun(st *Streams, args []string) int {
 			return refuse(st, u, s, d)
 		}
 	}
-	if code := askApproval(st, u, prof.Secrets, argv); code != 0 {
+	if code := admit(st, u, prof.Secrets, argv); code != 0 {
 		return code
 	}
 

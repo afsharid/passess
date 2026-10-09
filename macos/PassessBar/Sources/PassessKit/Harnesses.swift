@@ -49,26 +49,26 @@ public func codingAgents(_ status: HarnessStatus) -> [AgentRow] {
         var parts: [String] = []
         var attention = !(h.actions ?? []).isEmpty || !(h.errors ?? []).isEmpty
         switch h.hooks {
-        case "ok": parts.append("hooks")
-        case "missing": parts.append("no hooks"); attention = true
-        case "drift": parts.append("hooks outdated"); attention = true
-        case "unavailable": parts.append("hooks by hand")
+        case "ok": parts.append(t("hooks"))
+        case "missing": parts.append(t("no hooks")); attention = true
+        case "drift": parts.append(t("hooks outdated")); attention = true
+        case "unavailable": parts.append(t("hooks by hand"))
         default: break
         }
         switch h.instructionsState {
-        case "ok": parts.append("instructions")
-        case "missing": parts.append("no instructions"); attention = true
-        case "drift": parts.append("instructions outdated"); attention = true
+        case "ok": parts.append(t("instructions"))
+        case "missing": parts.append(t("no instructions")); attention = true
+        case "drift": parts.append(t("instructions outdated")); attention = true
         default: break
         }
         let servers = h.servers ?? []
         if !servers.isEmpty {
-            parts.append("\(servers.count) MCP server\(servers.count == 1 ? "" : "s")")
+            parts.append(t(servers.count == 1 ? "%ld MCP server" : "%ld MCP servers", servers.count))
             if servers.contains(where: { $0.state != "ok" }) { attention = true }
         }
         let guarded = h.hooks == "ok" || h.instructionsState == "ok" || !servers.isEmpty
         let tone: Tone = attention ? .warning : (guarded ? .ok : .neutral)
-        var detail = parts.isEmpty ? "Nothing set up" : parts.joined(separator: " · ")
+        var detail = parts.isEmpty ? t("Nothing set up") : parts.joined(separator: " · ")
         if let error = h.errors?.first { detail = error }
         return AgentRow(id: h.id, monogram: monogram(h.id, label: h.label), title: h.label, detail: detail, tone: tone,
                         symbol: tone == .ok ? "checkmark.shield.fill" : tone == .warning ? "exclamationmark.shield.fill" : "shield",

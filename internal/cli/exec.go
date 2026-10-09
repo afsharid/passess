@@ -91,7 +91,7 @@ func runExec(st *Streams, args []string) int {
 	if code != 0 {
 		return code
 	}
-	if code := askApproval(st, u, wanted.names(), argv); code != 0 {
+	if code := admit(st, u, wanted.names(), argv); code != 0 {
 		return code
 	}
 	res, zero := newResolver(st, u)

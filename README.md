@@ -107,6 +107,30 @@ check` (which secrets resolve, never their values), `passess add NAME --ref …`
 `passess add NAME --keychain` (you type the value into the keychain yourself), and
 `passess doctor` (what is wrong and the command that fixes it). Each takes `--json`.
 
+### Which coding agents may use a secret
+
+`clients` connects a secret to the coding agents that may ask for it. Without it every
+agent may; `clients = []` means none. A command an agent left out asks for is refused,
+whether the agent shows in the caller's environment or among its parent processes
+([ADR 10](docs/adr/0010-secrets-name-the-agents-they-are-connected-to.md)). Your own
+terminal is not an agent and keeps what `allow` says.
+
+```toml
+[secrets.OPENROUTER_API_KEY]
+ref     = "bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/OPENROUTER_API_KEY"
+clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antigravity, cursor, gemini-cli, zed
+```
+
+```sh
+passess discover                     # bws secrets passess does not use yet, by name only
+passess add GITHUB_TOKEN --ref bws://<project>/GITHUB_TOKEN --clients claude-code --approve
+passess set GITHUB_TOKEN --clients claude-code,codex --approve false
+passess remove GITHUB_TOKEN          # passess forgets it; the vault keeps it
+```
+
+`add`, `set`, `remove` and `discover` are yours to run: they refuse inside an agent, and
+the hooks refuse them in agent shells. Passess.app does the same in a few clicks.
+
 ## MCP servers without tokens in harness configs
 
 Define each server once, in passess config:
@@ -354,28 +378,46 @@ value, in `agent-audit.jsonl` next to its socket.
 - whether everything is fine, and every problem with its fix, copyable;
 - two tiles: the agent, which you switch on and off here, and the secrets, whose
   check shows which resolve (names and sources only);
+- secrets that turned up in your vault and are not connected yet, each with Connect,
+  and the way into the Secrets window;
 - the coding agents: which have passess's hooks, instructions and MCP servers,
   and the `passess install` line for any that needs setup;
 - the live approvals, and whether each backend is usable.
 
+The Secrets window lists every secret with the coding agents it is connected to, and
+the vault's secrets passess does not use yet. Connect, or a click on a secret, opens a
+window with a checkbox per agent and "ask me first"; Save asks for Touch ID or your
+password, then runs `passess add` or `set`. No terminal, no config file.
+
 When an agent needs your approval, a window asks who wants which secret for which
-command, and Allow takes Touch ID. The app never receives a value.
+command, and Allow takes Touch ID. The app never receives a value. It follows the Mac's
+language: English, or Turkish.
 
 <p>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-panel-dark.png">
-  <img alt="The passess panel: all clear; the agent on and holding two values; three secrets resolve; Claude Code, Codex, OpenCode, Kiro and Antigravity guarded; one Allow for gh; bws and keychain ready" src="docs/images/menubar-panel-light.png" width="340">
+  <img alt="The passess panel: all clear; the agent on and holding two values; four secrets resolve; GITHUB_TOKEN new in the vault with Connect; Claude Code, Codex, OpenCode, Kiro and Antigravity guarded; one Allow for curl; bws and keychain ready" src="docs/images/menubar-panel-light.png" width="340">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-approval-dark.png">
   <img alt="An approval window: claude wants GITHUB_TOKEN for gh, with the command, the directory and the process, and Deny or Allow with Touch ID" src="docs/images/menubar-approval-light.png" width="400">
 </picture>
 </p>
+<p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-secrets-dark.png">
+  <img alt="The Secrets window: GITHUB_TOKEN, new in the vault, and slack-bot, each with Connect; four secrets with the agents each is connected to, two of them asking first" src="docs/images/menubar-secrets-light.png" width="480">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menubar-connect-dark.png">
+  <img alt="The Connect window for GITHUB_TOKEN: the name agents see, a checkbox per coding agent, ask me first, and Connect" src="docs/images/menubar-connect-light.png" width="420">
+</picture>
+</p>
 
 ```sh
 make macos-app        # needs only the Xcode Command Line Tools
 open bin/Passess.app
-make macos-previews   # the panel and the window in sample states, as PNG files
+make macos-previews   # the panel and the windows in sample states, as PNG files
 ```
 
 It bundles its own copy of the CLI, and starts the agent with the `passess` on your

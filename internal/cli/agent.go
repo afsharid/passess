@@ -571,6 +571,9 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 		}
 		wanted = append(wanted, struct{ env, name string }{w.Env, w.Name})
 	}
+	if code = checkClients(st, u, wanted.names(), callerAgents(st.Getenv, chain)); code != 0 {
+		return code
+	}
 	proj, err := loadProject(req.Dir)
 	if err != nil {
 		return failf(st, ExitConfig, "%v", err)

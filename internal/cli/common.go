@@ -94,17 +94,28 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 			return boot.Secret(ctx, config.Secret{Name: name, Refs: []ref.Ref{*r}})
 		}
 	}
-	bws.Token = from("backends.bws.access_token", u.Backends.BWS.AccessToken)
-	if bws.Token == nil && st.Getenv("BWS_ACCESS_TOKEN") != "" {
-		bws.Token = func(context.Context) (secret.Value, error) {
-			return secret.FromString(st.Getenv("BWS_ACCESS_TOKEN")), nil
-		}
-	}
+	bws.Token = bwsToken(st, u, boot)
 	vault.Token = from("backends.vault.token", u.Backends.Vault.Token)
 	bw.Session = from("backends.bw.session", u.Backends.BW.Session)
 
 	r := resolve.New(env, keychain, bws, op, vault, bw)
 	return r, func() { r.Zero(); boot.Zero(); bws.Zero(); vault.Zero() }
+}
+
+// bwsToken is where the bws machine token comes from: the reference in the
+// config, else BWS_ACCESS_TOKEN; nil when neither is set.
+func bwsToken(st *Streams, u *config.User, boot *resolve.Resolver) func(context.Context) (secret.Value, error) {
+	if r := u.Backends.BWS.AccessToken; r != nil {
+		return func(ctx context.Context) (secret.Value, error) {
+			return boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{*r}})
+		}
+	}
+	if st.Getenv("BWS_ACCESS_TOKEN") != "" {
+		return func(context.Context) (secret.Value, error) {
+			return secret.FromString(st.Getenv("BWS_ACCESS_TOKEN")), nil
+		}
+	}
+	return nil
 }
 
 // resolveExitCode maps a resolution failure to an exit code.

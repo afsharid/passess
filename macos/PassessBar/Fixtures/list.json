@@ -1,0 +1,117 @@
+{
+  "config": "/Users/you/.config/passess/config.toml",
+  "secrets": [
+    {
+      "name": "GITHUB_TOKEN",
+      "backends": [
+        "keychain"
+      ],
+      "refs": [
+        "keychain://passess/github"
+      ],
+      "allow": [
+        "gh",
+        "git"
+      ],
+      "clients": null,
+      "approve": false,
+      "hosts": [],
+      "profiles": [],
+      "mcp": [],
+      "note": "repo:read",
+      "needed_by_project": false
+    },
+    {
+      "name": "HASS_TOKEN",
+      "backends": [
+        "bws"
+      ],
+      "refs": [
+        "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/HASS_TOKEN"
+      ],
+      "allow": [],
+      "clients": [
+        "claude-code"
+      ],
+      "approve": true,
+      "hosts": [],
+      "profiles": [],
+      "mcp": [],
+      "needed_by_project": false
+    },
+    {
+      "name": "OPENROUTER_API_KEY",
+      "backends": [
+        "bws"
+      ],
+      "refs": [
+        "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/OPENROUTER_API_KEY"
+      ],
+      "allow": [],
+      "clients": [
+        "claude-code",
+        "opencode"
+      ],
+      "approve": false,
+      "hosts": [
+        "openrouter.ai"
+      ],
+      "profiles": [
+        "web"
+      ],
+      "mcp": [],
+      "needed_by_project": false
+    },
+    {
+      "name": "SUDO_PASSWORD",
+      "backends": [
+        "bws"
+      ],
+      "refs": [
+        "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/SUDO_PASSWORD"
+      ],
+      "allow": [],
+      "clients": [],
+      "approve": false,
+      "hosts": [],
+      "profiles": [],
+      "mcp": [],
+      "needed_by_project": false
+    }
+  ],
+  "missing": [],
+  "agents": [
+    {
+      "id": "claude-code",
+      "label": "Claude Code"
+    },
+    {
+      "id": "codex",
+      "label": "Codex"
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode"
+    },
+    {
+      "id": "kiro",
+      "label": "Kiro"
+    },
+    {
+      "id": "antigravity",
+      "label": "Antigravity"
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor"
+    },
+    {
+      "id": "gemini-cli",
+      "label": "Gemini CLI"
+    },
+    {
+      "id": "zed",
+      "label": "Zed"
+    }
+  ]
+}
