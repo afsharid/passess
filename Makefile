@@ -34,8 +34,11 @@ lint:
 check: vet test lint dsh-check
 
 # The DeepSeek Harness plugin (internal/apps/dsh) against a stand-in passess.
+# Without Node it is skipped locally; CI, which sets CI, must run it.
 dsh-check:
-	node internal/apps/dsh/test/plugin.test.mjs
+	@if command -v node >/dev/null 2>&1; then node internal/apps/dsh/test/plugin.test.mjs; \
+	elif [ -n "$$CI" ]; then echo "dsh-check: node not found" >&2; exit 1; \
+	else echo "dsh-check: skipped, node not found"; fi
 
 hooks:
 	git config core.hooksPath .githooks
