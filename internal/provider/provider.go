@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/afsharid/passess/internal/ref"
@@ -123,10 +124,13 @@ func trustedDirs() []string {
 }
 
 // accountHome is the home directory in the account database, "" when the
-// lookup fails. A variable so that tests can point it at a directory of
-// their own.
+// lookup fails. It looks the uid up rather than calling user.Current: without
+// cgo, Current falls back to $HOME and $USER when the uid has no passwd entry
+// (LDAP and SSSD accounts, containers run as an arbitrary uid), and those are
+// the caller's to set. A variable so that tests can point it at a directory
+// of their own.
 var accountHome = func() string {
-	if u, err := user.Current(); err == nil {
+	if u, err := user.LookupId(strconv.Itoa(os.Getuid())); err == nil {
 		return u.HomeDir
 	}
 	return ""
@@ -154,14 +158,14 @@ func TrustedPath() string {
 
 // BaseEnv is the environment backend CLIs run with: enough to find their
 // config and locale, nothing that could carry another secret. PATH is
-// TrustedPath, never the caller's, and HOME is the account's: it decides
-// where the CLI reads its own config, a server URL among it.
+// TrustedPath, never the caller's, and HOME is the account's or absent: it
+// decides where the CLI reads its own config, a server URL among it.
 func BaseEnv(getenv func(string) string) []string {
 	env := []string{"PATH=" + TrustedPath()}
+	// Without an account home there is no HOME the caller did not choose, so
+	// the CLI gets none rather than one that points it at another config.
 	if home := accountHome(); home != "" {
 		env = append(env, "HOME="+home)
-	} else if v := getenv("HOME"); v != "" {
-		env = append(env, "HOME="+v)
 	}
 	for _, k := range []string{"USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR"} {
 		if v := getenv(k); v != "" {
