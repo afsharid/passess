@@ -117,6 +117,13 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "argv": ["gh", "pr", "create", "--fill"], "dir": "\(NSHomeDirectory())/Projects/passess",
      "harness": "claude-code", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}
     """)
+    // A command long enough to hide something in its middle: it scrolls, whole.
+    let longAsk = decode(AgentAsk.self, """
+    {"id": "8", "secrets": ["GITHUB_TOKEN"], "program": "gh", "path": "/opt/homebrew/bin/gh",
+     "argv": ["gh", "api", "repos/afsharid/passess/issues", \(String(repeating: "\"--field\", \"label=triage\", ", count: 12))"--method", "POST", "--input", "-"],
+     "dir": "\(NSHomeDirectory())/Projects/passess",
+     "harness": "claude-code", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}
+    """)
 
     let project = "92fe9fe6-c441-4b27-b261-b4b9007117b9"
     let list = decode(SecretList.self, """
@@ -176,6 +183,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         ("panel-no-config", panel { $0.seed(doctor: noConfig, agent: agentOff) }, false),
         ("panel-cli-missing", panel { $0.seed(doctor: nil, failure: Passess.Failure.notFound.description, agent: nil) }, false),
         ("ask", { AnyView(AskView(card: askCard(ask), allowTitle: t("Allow with Touch ID"), onAllow: {}, onDeny: {})) }, false),
+        ("ask-long", { AnyView(AskView(card: askCard(longAsk), allowTitle: t("Allow with Touch ID"), onAllow: {}, onDeny: {})) }, false),
         ("secrets", { AnyView(SecretsView(model: secretsModel()).frame(width: 480, height: 470)) }, true),
         ("connect-new", { AnyView(ConnectView(model: ConnectModel(mode: .add(discovery.secrets[0]), list: list, cli: nil), onCancel: {})) }, true),
         ("connect-change", { AnyView(ConnectView(model: ConnectModel(mode: .edit(list.secrets[3]), list: list, cli: nil), onCancel: {})) }, true),

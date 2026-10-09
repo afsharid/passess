@@ -228,6 +228,7 @@ let turkish: [String: String] = [
     "Paste a machine account's access token. passess keeps it in your keychain and uses it only to read the secrets you connect; agents never see it.": "Bir makine hesabının erişim token'ını yapıştır. passess onu anahtar zincirinde tutar ve yalnız bağladığın sırları okumak için kullanır; ajanlar onu hiç görmez.",
     "Access token": "Erişim token'ı",
     "store the token that opens your vault": "kasanı açan token'ı saklamak",
+    "Long: scroll to read all of it before you allow.": "Uzun: izin vermeden önce kaydırıp tamamını oku.",
     "This copy of the app has no passess inside it, so it cannot take the token. Run `passess backend bws` in a terminal.": "Uygulamanın bu kopyasında passess yok, bu yüzden token'ı alamıyor. Bir terminalde `passess backend bws` çalıştır.",
     "Another passess build than yours, which it refuses: start it again": "Seninkinden farklı bir passess sürümü, komutlarını reddediyor: yeniden başlat",
 ]

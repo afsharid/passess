@@ -64,18 +64,39 @@ struct DetailLine: View {
     var monospaced = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: text.count > DetailLine.long ? .top : .firstTextBaseline, spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
                 .accessibilityHidden(true)
-            Text(text)
-                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
-                .lineLimit(3)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
+            // Never cut: the command and the caller are the caller's own words,
+            // and what a cut hides is what an Allow would let through. A long
+            // one scrolls in a box of fixed height and says so.
+            if text.count > DetailLine.long {
+                VStack(alignment: .leading, spacing: 4) {
+                    ScrollView(.vertical) {
+                        line.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 120)
+                    Text(t("Long: scroll to read all of it before you allow."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tone.warning.color)
+                }
+            } else {
+                line
+            }
         }
+    }
+
+    /// Characters past which a line scrolls instead of growing the window.
+    static let long = 240
+
+    private var line: some View {
+        Text(text)
+            .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
     }
 }
 
