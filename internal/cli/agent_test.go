@@ -603,7 +603,7 @@ func TestMaskThatGrowsTooLongIsWithheld(t *testing.T) {
 			if err != nil {
 				return
 			}
-			defer c.Close()
+			defer func() { _ = c.Close() }()
 			_, _ = bufio.NewReader(c).ReadString('\n')
 			_, _ = io.WriteString(c, answer+"\n")
 		}()
