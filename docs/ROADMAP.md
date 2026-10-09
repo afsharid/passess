@@ -77,7 +77,10 @@ Done:
   process holding the value.
 
 Next: a transparent proxy for programs other than curl, `fnox://`, `passess trust`,
-Linux and Windows polish, signed releases.
+Linux and Windows polish, signed releases. With signing, from the 2026-10-10 audit:
+a Developer ID signature and hardened runtime for Passess.app, so it can check the
+passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a pinned
+`govulncheck` in CI instead of `@latest`.
 
 **Slice 8 (in progress): secrets without a terminal.** Done
 ([ADR 10](adr/0010-secrets-name-the-agents-they-are-connected-to.md)):

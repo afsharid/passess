@@ -69,7 +69,22 @@ where the protection stops. Read the last section before relying on it.
   `agent.cache_ttl`. It disables core dumps and refuses debuggers that attach later,
   and zeroes values on expiry, `lock` and `stop`. It returns no value over its socket:
   it runs the command itself (ADR 8). A same-user process that reads its memory some
-  other way is T6.
+  other way is T6. Zeroing reaches the bytes passess holds as secrets, not every copy:
+  a value a backend returns as JSON (bws, Vault) is decoded into a string first, which
+  waits for the garbage collector. bw's custom fields are decoded only for the one
+  asked for. No core dump and no late debugger is what bounds the rest.
+- **An agent is known by a name it can choose.** passess sees a harness or an app by
+  its process name, the 16 bytes the kernel keeps, which a process sets for itself.
+  Detection only ever adds a refusal, with one exception: an app reads the keys
+  connected to it by name (ADR 11), and that holds only for secrets with no allow
+  list, which `passess exec` hands to any program anyway. The name an approval shows
+  for its caller is that process's own word; what an Allow binds to is the process
+  itself (pid and start time, ADR 9).
+- **Passess.app runs the passess on the search path.** For status, `install` and the
+  agent it runs the passess the harnesses run, so that the agent is their build. A
+  passess planted earlier on that path (`~/.local/bin`, `~/go/bin`) runs instead,
+  which is T5: it is what the harnesses would run too. The vault's machine token goes
+  only to the copy inside the app; binding that copy to a signature is planned.
 - **The agent is not a boundary.** A same-user process can skip it: a command at a
   terminal, or one run after `passess agent stop`, resolves in-process. The hooks refuse
   the plain ways around it in agent commands: `passess agent stop`, `serve` and
