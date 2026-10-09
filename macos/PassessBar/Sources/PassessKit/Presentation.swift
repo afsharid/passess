@@ -75,25 +75,25 @@ public struct Headline: Equatable {
 public func headline(doctor: Doctor?, failure: String?) -> Headline {
     guard let d = doctor else {
         if let failure = failure {
-            return Headline(title: "passess cannot run", detail: failure, health: .error)
+            return Headline(title: t("passess cannot run"), detail: failure, health: .error)
         }
-        return Headline(title: "Checking…", detail: "", health: .unknown)
+        return Headline(title: t("Checking…"), detail: "", health: .unknown)
     }
     let summary = secretsSummary(d)
     guard d.config.ok else {
-        return Headline(title: "No config yet", detail: d.config.error ?? "passess has no config to read", health: .error)
+        return Headline(title: t("No config yet"), detail: d.config.error ?? t("passess has no config to read"), health: .error)
     }
     let n = d.problems.count
     switch health(d) {
-    case .error: return Headline(title: "\(n) problem\(n == 1 ? "" : "s")", detail: summary, health: .error)
-    case .warning: return Headline(title: "\(n) warning\(n == 1 ? "" : "s")", detail: summary, health: .warning)
-    default: return Headline(title: "All clear", detail: summary, health: .ok)
+    case .error: return Headline(title: t(n == 1 ? "%ld problem" : "%ld problems", n), detail: summary, health: .error)
+    case .warning: return Headline(title: t(n == 1 ? "%ld warning" : "%ld warnings", n), detail: summary, health: .warning)
+    default: return Headline(title: t("All clear"), detail: summary, health: .ok)
     }
 }
 
 /// "10 secrets · 2 profiles".
 public func secretsSummary(_ d: Doctor) -> String {
-    "\(d.secrets) secret\(d.secrets == 1 ? "" : "s") · \(d.profiles) profile\(d.profiles == 1 ? "" : "s")"
+    t(d.secrets == 1 ? "%ld secret" : "%ld secrets", d.secrets) + " · " + t(d.profiles == 1 ? "%ld profile" : "%ld profiles", d.profiles)
 }
 
 public func problems(_ d: Doctor) -> [Item] {
@@ -108,7 +108,7 @@ public func problems(_ d: Doctor) -> [Item] {
 public func backends(_ d: Doctor) -> [Item] {
     d.backends.map { b in
         Item(id: "backend-\(b.scheme)", symbol: b.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
-             tone: b.ok ? .ok : .warning, title: b.scheme, detail: b.ok ? (b.detail ?? "Ready") : (b.detail ?? "Not usable"))
+             tone: b.ok ? .ok : .warning, title: b.scheme, detail: b.ok ? (b.detail ?? t("Ready")) : (b.detail ?? t("Not usable")))
     }
 }
 
@@ -128,8 +128,8 @@ public func checkItems(_ c: Check) -> [Item] {
 
 public func checkSummary(_ c: Check) -> (text: String, tone: Tone) {
     let ok = c.secrets.filter { $0.state == "ok" }.count
-    if c.secrets.isEmpty { return ("No secrets defined yet", .neutral) }
-    return ("\(ok) of \(c.secrets.count) resolve", ok == c.secrets.count ? .ok : .warning)
+    if c.secrets.isEmpty { return (t("No secrets defined yet"), .neutral) }
+    return (t("%ld of %ld resolve", ok, c.secrets.count), ok == c.secrets.count ? .ok : .warning)
 }
 
 /// The agent's part of the panel.
@@ -145,21 +145,22 @@ public struct AgentCard: Equatable {
 public func agentCard(_ a: AgentStatus?, approving: Bool, now: Date = Date()) -> AgentCard? {
     guard let a = a else { return nil }
     guard a.running else {
-        return AgentCard(running: false, status: "Off: every command asks the vault", holds: [], approving: false, approvals: [])
+        return AgentCard(running: false, status: t("Off: every command asks the vault"), holds: [], approving: false, approvals: [])
     }
     let holds = a.cached ?? []
-    var status: String
+    let status: String
     if a.cacheTTL == "0s" {
-        status = "Cache off"
+        status = t("Cache off")
     } else if holds.isEmpty {
-        status = "Holds no values"
+        status = t("Holds no values")
+    } else if let expires = a.expires {
+        status = t(holds.count == 1 ? "Holds %ld value until %@" : "Holds %ld values until %@", holds.count, clock(expires))
     } else {
-        status = "Holds \(holds.count) value\(holds.count == 1 ? "" : "s")"
-        if let expires = a.expires { status += " until \(clock(expires))" }
+        status = t(holds.count == 1 ? "Holds %ld value" : "Holds %ld values", holds.count)
     }
     let approvals = (a.approvals ?? []).map { ap in
         Item(id: "approval-\(ap.secret)-\(ap.program)-\(ap.anchor.pid)", symbol: "checkmark.shield.fill", tone: .ok,
-             title: "\(ap.secret) → \(ap.program)", detail: "\(ap.anchor.name) · until \(clock(ap.until))")
+             title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)))
     }
     return AgentCard(running: true, status: status, holds: holds, approving: approving, approvals: approvals)
 }
@@ -175,16 +176,17 @@ public struct AskCard: Equatable {
 }
 
 public func askCard(_ ask: AgentAsk, home: String = NSHomeDirectory()) -> AskCard {
-    let who = ask.anchor?.name ?? "An unidentified caller"
-    var caller = ask.anchor.map { "\($0.name), pid \($0.pid)" } ?? "no process passess can remember the answer for"
-    if let harness = ask.harness { caller += " · reports \(harness)" }
+    let who = ask.anchor?.name ?? t("An unidentified caller")
+    var caller = ask.anchor.map { t("%@, pid %ld", $0.name, $0.pid) } ?? t("no process passess can remember the answer for")
+    if let harness = ask.harness { caller += t(" · reports %@", harness) }
     let footnote: String
     if let until = ask.until {
-        footnote = "Allowing lets \(ask.program) have it whenever this \(who) asks, until \(clock(until)). The value never reaches this app."
+        footnote = t("Allowing lets %@ have it whenever this %@ asks, until %@. The value never reaches this app.",
+                     ask.program, who, clock(until))
     } else {
-        footnote = "Allowing counts for this one command. The value never reaches this app."
+        footnote = t("Allowing counts for this one command. The value never reaches this app.")
     }
-    return AskCard(title: "\(who) wants \(ask.secrets.joined(separator: ", "))", program: "for \(ask.program)",
+    return AskCard(title: t("%@ wants %@", who, ask.secrets.joined(separator: ", ")), program: t("for %@", ask.program),
                    command: ask.argv.joined(separator: " "), directory: abbreviate(ask.dir, home: home),
                    caller: caller, footnote: footnote)
 }

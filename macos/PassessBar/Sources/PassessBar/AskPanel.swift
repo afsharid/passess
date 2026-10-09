@@ -46,7 +46,7 @@ struct AskView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Spacer()
-                Button("Deny", action: onDeny)
+                Button(t("Deny"), action: onDeny)
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.large)
                 Button(action: onAllow) {
@@ -92,7 +92,7 @@ final class AskPanel: NSPanel, NSWindowDelegate {
                    backing: .buffered, defer: false)
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
-        title = "passess approval"
+        title = t("passess approval")
         isMovableByWindowBackground = true
         isReleasedWhenClosed = false
         hidesOnDeactivate = false

@@ -25,11 +25,11 @@ struct PanelView: View {
                 .padding(.bottom, 12)
                 content(d)
             } else if model.doctor != nil {
-                GetStarted(item: Item(id: "start", symbol: "sparkles", tone: .neutral, title: "Add a first secret in a terminal",
+                GetStarted(item: Item(id: "start", symbol: "sparkles", tone: .neutral, title: t("Add a first secret in a terminal"),
                                       detail: "passess add NAME --ref <reference>", action: .copy("passess add NAME --ref <reference>")),
                            model: model)
             } else if model.failure == Passess.Failure.notFound.description {
-                GetStarted(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral, title: "Install it in a terminal",
+                GetStarted(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral, title: t("Install it in a terminal"),
                                       detail: Passess.installCommand, action: .copy(Passess.installCommand)),
                            model: model)
             }
@@ -39,24 +39,28 @@ struct PanelView: View {
                 .padding(.vertical, 10)
         }
         .frame(width: 340)
+        .onAppear(perform: model.panelOpened)
     }
 
     @ViewBuilder
     private func content(_ d: Doctor) -> some View {
         let issues = problems(d)
         if !issues.isEmpty {
-            Card("Needs attention") {
+            Card(t("Needs attention")) {
                 ForEach(issues) { item in
                     ProblemRow(item: item, model: model)
                     if item.id != issues.last?.id { Divider() }
                 }
             }
         }
+        if model.secretList?.agents != nil {
+            SecretsEntry(model: model)
+        }
         if let status = model.harnesses, !status.harnesses.isEmpty {
             let rows = codingAgents(status)
             let guarded = rows.filter { $0.tone == .ok }.count
-            Card("Coding agents", trailing: {
-                Text("\(guarded) of \(rows.count) guarded")
+            Card(t("Coding agents"), trailing: {
+                Text(t("%ld of %ld guarded", guarded, rows.count))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }) {
@@ -64,9 +68,9 @@ struct PanelView: View {
             }
         }
         if let card = agentCard(model.agent, approving: model.approving), card.running {
-            Card("Approvals", trailing: { ApproverState(approving: card.approving) }) {
+            Card(t("Approvals"), trailing: { ApproverState(approving: card.approving) }) {
                 if card.approvals.isEmpty {
-                    Text(card.approving ? "None yet. Questions open a window of their own." : "Questions go unanswered until this app connects.")
+                    Text(card.approving ? t("None yet. Questions open a window of their own.") : t("Questions go unanswered until this app connects."))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -78,14 +82,56 @@ struct PanelView: View {
         if let check = model.check {
             let failing = checkItems(check).filter { $0.tone != .ok }
             if !failing.isEmpty {
-                Card("Secrets that do not resolve") {
+                Card(t("Secrets that do not resolve")) {
                     ForEach(failing) { ItemRow(item: $0) }
                 }
             }
         }
-        Card("Backends") {
+        Card(t("Backends")) {
             BackendsView(items: backends(d))
         }
+    }
+}
+
+/// The way into the Secrets window, with what turned up in the vault lately
+/// right here to connect.
+struct SecretsEntry: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        let fresh = model.found.filter(\.isNew)
+        Card(t("Secrets and connections")) {
+            ForEach(fresh.prefix(2)) { row in
+                FoundRowView(row: row, model: model)
+                Divider()
+            }
+            Button(action: model.openSecrets) {
+                HStack(spacing: 8) {
+                    ToneIcon(symbol: "key.fill", tone: .neutral)
+                    Text(summary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 4)
+                    Text(t("Show"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(t("See every secret and change who may use it"))
+        }
+    }
+
+    private var summary: String {
+        let n = model.secretList?.secrets.count ?? 0
+        let waiting = model.found.count
+        let secrets = t(n == 1 ? "%ld secret" : "%ld secrets", n)
+        return waiting == 0 ? secrets : secrets + " · " + t("%ld not connected", waiting)
     }
 }
 
@@ -103,9 +149,9 @@ extension Tone {
 
     var spoken: String {
         switch self {
-        case .ok: return "fine"
-        case .warning: return "needs attention"
-        case .error: return "problem"
+        case .ok: return t("fine")
+        case .warning: return t("needs attention")
+        case .error: return t("problem")
         case .neutral: return ""
         }
     }
@@ -231,8 +277,8 @@ struct Header: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Refresh")
-            .accessibilityLabel("Refresh")
+            .help(t("Refresh"))
+            .accessibilityLabel(t("Refresh"))
         }
     }
 }
@@ -290,16 +336,16 @@ struct AgentTile: View {
 
     var body: some View {
         if let card = agentCard(model.agent, approving: model.approving) {
-            Tile(symbol: card.running ? "bolt.fill" : "bolt", title: "Agent",
-                 detail: model.agentBusy ? "…" : card.running ? (card.holds.isEmpty ? "On" : "On · holds \(card.holds.count)") : "Off",
+            Tile(symbol: card.running ? "bolt.fill" : "bolt", title: t("Agent"),
+                 detail: model.agentBusy ? "…" : card.running ? (card.holds.isEmpty ? t("On") : t("On · holds %ld", card.holds.count)) : t("Off"),
                  lit: card.running, enabled: !model.agentBusy) {
                 model.agentCommand(card.running ? "stop" : "start")
             }
-            .help(card.running ? "\(card.status). Click to stop: the agent forgets every value and approval."
-                : "Start the agent: cached values, approvals")
+            .help(card.running ? t("%@. Click to stop: the agent forgets every value and approval.", card.status)
+                : t("Start the agent: cached values, approvals"))
         } else {
-            Tile(symbol: "bolt.slash", title: "Agent", detail: "Update passess", enabled: false) {}
-                .help("The passess on your PATH has no agent yet: brew upgrade passess")
+            Tile(symbol: "bolt.slash", title: t("Agent"), detail: t("Update passess"), enabled: false) {}
+                .help(t("The passess on your PATH has no agent yet: brew upgrade passess"))
         }
     }
 }
@@ -309,10 +355,10 @@ struct SecretsTile: View {
 
     var body: some View {
         let summary = model.check.map(checkSummary)
-        Tile(symbol: "key.fill", title: "Secrets",
-             detail: model.checking ? "Checking…" : summary?.text ?? "Click to check",
+        Tile(symbol: "key.fill", title: t("Secrets"),
+             detail: model.checking ? t("Checking…") : summary?.text ?? t("Click to check"),
              tint: summary?.tone.color ?? .primary, enabled: !model.checking, action: model.runCheck)
-            .help("Resolve every secret once and show which work. Names only; no value is shown.")
+            .help(t("Resolve every secret once and show which work. Names only; no value is shown."))
     }
 }
 
@@ -360,8 +406,8 @@ struct CopyButton: View {
                 .foregroundStyle(copied ? Tone.ok.color : .secondary)
         }
         .buttonStyle(.borderless)
-        .help(copied ? "Copied" : "Copy the command that fixes it")
-        .accessibilityLabel(copied ? "Copied" : "Copy the fix")
+        .help(copied ? t("Copied") : t("Copy the command that fixes it"))
+        .accessibilityLabel(copied ? t("Copied") : t("Copy the fix"))
     }
 }
 
@@ -404,7 +450,7 @@ struct ApproverState: View {
     let approving: Bool
 
     var body: some View {
-        Label(approving ? "answered here" : "not connected", systemImage: approving ? "hand.raised.fill" : "hand.raised.slash")
+        Label(approving ? t("answered here") : t("not connected"), systemImage: approving ? "hand.raised.fill" : "hand.raised.slash")
             .font(.system(size: 11))
             .foregroundStyle(approving ? Tone.ok.color : Tone.warning.color)
             .labelStyle(.titleAndIcon)
@@ -427,14 +473,14 @@ struct BackendsView: View {
                     }
                     .help(item.detail ?? "")
                     .accessibilityElement(children: .combine)
-                    .accessibilityValue("ready")
+                    .accessibilityValue(t("ready"))
                 }
                 Spacer(minLength: 0)
             }
         }
         ForEach(broken) { ItemRow(item: $0) }
         if items.isEmpty {
-            Text("No secret uses a vault yet")
+            Text(t("No secret uses a vault yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
@@ -446,7 +492,7 @@ struct GetStarted: View {
     @ObservedObject var model: BarModel
 
     var body: some View {
-        Card("Get started") {
+        Card(t("Get started")) {
             ProblemRow(item: item, model: model)
         }
     }
@@ -459,18 +505,21 @@ struct Footer: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Toggle("Open at Login", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
+            Toggle(t("Open at Login"), isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
                 .toggleStyle(.checkbox)
                 .font(.system(size: 12))
+                .fixedSize()
             if let version = model.doctor?.version {
                 Text(version)
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .layoutPriority(-1) // the first to give way when the words are longer
                     .help("passess \(version)")
             }
             Spacer()
             if let config = model.doctor?.config, config.ok {
-                Button("Config") { model.open(URL(fileURLWithPath: config.path)) }
+                Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))
                     .help(config.path)
@@ -481,9 +530,9 @@ struct Footer: View {
                 Image(systemName: "questionmark.circle")
             }
             .buttonStyle(.borderless)
-            .help("passess on GitHub")
-            .accessibilityLabel("Help")
-            Button("Quit") { NSApp.terminate(nil) }
+            .help(t("passess on GitHub"))
+            .accessibilityLabel(t("Help"))
+            Button(t("Quit")) { NSApp.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.system(size: 12))
                 .keyboardShortcut("q")

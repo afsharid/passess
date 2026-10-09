@@ -17,17 +17,23 @@ func renderPreviews(to dir: URL) -> Int32 {
         return 1
     }
     var failed = 0
-    for (name, view) in samples() {
-        for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
-            let url = dir.appendingPathComponent("\(name)-\(suffix).png")
-            if render(view, appearance: NSAppearance(named: appearance)!, to: url) {
-                print(url.path)
-            } else {
-                print("error: could not render \(name)-\(suffix)")
-                failed += 1
+    // English for every sample; the Secrets screens in Turkish too, as "-tr".
+    for (name, view, translated) in samples() {
+        for language in translated ? [L10n.Language.english, .turkish] : [.english] {
+            L10n.override = language
+            let base = language == .turkish ? "\(name)-tr" : name
+            for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
+                let url = dir.appendingPathComponent("\(base)-\(suffix).png")
+                if render(view(), appearance: NSAppearance(named: appearance)!, to: url) {
+                    print(url.path)
+                } else {
+                    print("error: could not render \(base)-\(suffix)")
+                    failed += 1
+                }
             }
         }
     }
+    L10n.override = nil
     return failed == 0 ? 0 : 1
 }
 
@@ -49,7 +55,7 @@ private func render(_ view: AnyView, appearance: NSAppearance, to url: URL) -> B
 }
 
 @MainActor
-private func samples() -> [(String, AnyView)] {
+private func samples() -> [(String, () -> AnyView, Bool)] {
     let now = Date()
     let later = ISO8601DateFormatter().string(from: now.addingTimeInterval(25 * 60))
     let tonight = ISO8601DateFormatter().string(from: now.addingTimeInterval(7 * 3600))
@@ -57,7 +63,7 @@ private func samples() -> [(String, AnyView)] {
     let healthy = decode(Doctor.self, """
     {"version": "0.5.0-alpha", "ok": true,
      "config": {"path": "/Users/you/.config/passess/config.toml", "ok": true},
-     "secrets": 3, "profiles": 1, "harness": null, "problems": [],
+     "secrets": 4, "profiles": 1, "harness": null, "problems": [],
      "backends": [{"scheme": "bws", "ok": true, "detail": "machine token from keychain://bws/machine"},
                   {"scheme": "keychain", "ok": true}]}
     """)
@@ -80,9 +86,9 @@ private func samples() -> [(String, AnyView)] {
     """)
     let agentOn = decode(AgentStatus.self, """
     {"running": true, "pid": 81095, "build": "0.5.0-alpha", "cache_ttl": "10m0s",
-     "cached": ["GITHUB_TOKEN", "OPENAI_API_KEY"], "expires": "\(later)", "jobs": 0, "served": 14,
+     "cached": ["OPENROUTER_API_KEY", "HASS_TOKEN"], "expires": "\(later)", "jobs": 0, "served": 14,
      "approvers": 1, "pending": 0,
-     "approvals": [{"secret": "GITHUB_TOKEN", "program": "gh", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}]}
+     "approvals": [{"secret": "HASS_TOKEN", "program": "curl", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}]}
     """)
     let agentOff = decode(AgentStatus.self, #"{"running": false}"#)
     func harness(_ id: String, _ label: String, hooks: String, instructions: String, servers: Int = 0, actions: Int = 0) -> String {
@@ -102,31 +108,73 @@ private func samples() -> [(String, AnyView)] {
         harness("claude", "Claude Code", hooks: "ok", instructions: "ok"),
         harness("codex", "Codex", hooks: "missing", instructions: "ok", actions: 1),
     ].joined(separator: ",") + "]}")
-    let check = decode(Check.self, """
-    {"config": "/Users/you/.config/passess/config.toml", "ok": true,
-     "secrets": [{"name": "GITHUB_TOKEN", "state": "ok", "from": "op://Dev/GitHub PAT/credential"},
-                 {"name": "OPENAI_API_KEY", "state": "ok", "from": "bws://dev/OPENAI_API_KEY"},
-                 {"name": "STRIPE_TEST_KEY", "state": "ok", "from": "keychain://passess/stripe-test"}]}
-    """)
     let ask = decode(AgentAsk.self, """
     {"id": "7", "secrets": ["GITHUB_TOKEN"], "program": "gh", "path": "/opt/homebrew/bin/gh",
      "argv": ["gh", "pr", "create", "--fill"], "dir": "\(NSHomeDirectory())/Projects/passess",
      "harness": "claude-code", "anchor": {"pid": 46551, "name": "claude"}, "until": "\(tonight)"}
     """)
 
-    func panel(_ configure: (BarModel) -> Void) -> AnyView {
-        let model = BarModel()
-        configure(model)
-        return AnyView(PanelView(model: model))
+    let project = "92fe9fe6-c441-4b27-b261-b4b9007117b9"
+    let list = decode(SecretList.self, """
+    {"config": "/Users/you/.config/passess/config.toml",
+     "agents": [{"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
+                {"id": "opencode", "label": "OpenCode"}, {"id": "kiro", "label": "Kiro"},
+                {"id": "antigravity", "label": "Antigravity"}, {"id": "cursor", "label": "Cursor"},
+                {"id": "gemini-cli", "label": "Gemini CLI"}, {"id": "zed", "label": "Zed"}],
+     "secrets": [
+      {"name": "HASS_TOKEN", "backends": ["bws"], "refs": ["bws://\(project)/HASS_TOKEN"], "allow": [],
+       "clients": ["claude-code"], "approve": true, "profiles": [], "mcp": []},
+      {"name": "OPENROUTER_API_KEY", "backends": ["bws"], "refs": ["bws://\(project)/OPENROUTER_API_KEY"], "allow": [],
+       "clients": ["claude-code", "codex", "opencode"], "approve": false, "profiles": [], "mcp": []},
+      {"name": "SUDO_PASSWORD", "backends": ["bws"], "refs": ["bws://\(project)/SUDO_PASSWORD"], "allow": [],
+       "clients": [], "approve": true, "profiles": [], "mcp": []},
+      {"name": "TELEGRAM_BOT_TOKEN", "backends": ["bws"], "refs": ["bws://\(project)/TELEGRAM_BOT_TOKEN"], "allow": [],
+       "clients": null, "approve": false, "profiles": ["hermes"], "mcp": []}]}
+    """)
+    let discovery = decode(Discovery.self, """
+    {"backends": [{"scheme": "bws", "ok": true}],
+     "secrets": [{"key": "GITHUB_TOKEN", "project": "ai-stack", "name": "GITHUB_TOKEN",
+                  "ref": "bws://\(project)/GITHUB_TOKEN", "name_taken": false},
+                 {"key": "slack-bot", "project": "ai-stack", "name": "SLACK_BOT",
+                  "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d", "name_taken": false}]}
+    """)
+    let seen = ["bws://\(project)/GITHUB_TOKEN": now, "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d": Date.distantPast]
+    let listCheck = decode(Check.self, """
+    {"config": "/Users/you/.config/passess/config.toml", "ok": true,
+     "secrets": [{"name": "HASS_TOKEN", "state": "ok"}, {"name": "OPENROUTER_API_KEY", "state": "ok"},
+                 {"name": "SUDO_PASSWORD", "state": "ok"}, {"name": "TELEGRAM_BOT_TOKEN", "state": "not found"}]}
+    """)
+
+    func panel(_ configure: @escaping (BarModel) -> Void) -> () -> AnyView {
+        {
+            let model = BarModel()
+            configure(model)
+            return AnyView(PanelView(model: model))
+        }
     }
+    func secretsModel() -> BarModel {
+        let model = BarModel()
+        model.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: listCheck, secretList: list,
+                   discovery: discovery, firstSeen: seen)
+        return model
+    }
+    let allResolve = decode(Check.self, """
+    {"config": "/Users/you/.config/passess/config.toml", "ok": true,
+     "secrets": [{"name": "HASS_TOKEN", "state": "ok"}, {"name": "OPENROUTER_API_KEY", "state": "ok"},
+                 {"name": "SUDO_PASSWORD", "state": "ok"}, {"name": "TELEGRAM_BOT_TOKEN", "state": "ok"}]}
+    """)
     return [
-        ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: check, checkedAt: now, approving: true) }),
-        ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }),
-        ("panel-old-cli", panel { $0.seed(doctor: healthy, agent: nil, harnesses: agents) }),
-        ("panel-loading", panel { $0.seed(doctor: nil, agent: nil) }),
-        ("panel-no-config", panel { $0.seed(doctor: noConfig, agent: agentOff) }),
-        ("panel-cli-missing", panel { $0.seed(doctor: nil, failure: Passess.Failure.notFound.description, agent: nil) }),
-        ("ask", AnyView(AskView(card: askCard(ask), allowTitle: "Allow with Touch ID", onAllow: {}, onDeny: {}))),
+        ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
+                                          approving: true, secretList: list, discovery: discovery, firstSeen: seen) }, true),
+        ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }, false),
+        ("panel-old-cli", panel { $0.seed(doctor: healthy, agent: nil, harnesses: agents) }, false),
+        ("panel-loading", panel { $0.seed(doctor: nil, agent: nil) }, false),
+        ("panel-no-config", panel { $0.seed(doctor: noConfig, agent: agentOff) }, false),
+        ("panel-cli-missing", panel { $0.seed(doctor: nil, failure: Passess.Failure.notFound.description, agent: nil) }, false),
+        ("ask", { AnyView(AskView(card: askCard(ask), allowTitle: t("Allow with Touch ID"), onAllow: {}, onDeny: {})) }, false),
+        ("secrets", { AnyView(SecretsView(model: secretsModel()).frame(width: 480, height: 470)) }, true),
+        ("connect-new", { AnyView(ConnectView(model: ConnectModel(mode: .add(discovery.secrets[0]), list: list, cli: nil), onCancel: {})) }, true),
+        ("connect-change", { AnyView(ConnectView(model: ConnectModel(mode: .edit(list.secrets[3]), list: list, cli: nil), onCancel: {})) }, true),
     ]
 }
 

@@ -17,13 +17,31 @@ final class BarModel: ObservableObject {
     @Published private(set) var approving = false
     @Published private(set) var copied: String? // id of the item whose text was just copied
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    /// `passess list --json`: the secrets and who may use each.
+    @Published private(set) var secretList: SecretList?
+    /// `passess discover --json`: what the vault holds that passess does not use.
+    @Published private(set) var discovery: Discovery?
+    /// When each of those first turned up, to mark the new ones.
+    @Published private(set) var firstSeen: [String: Date] = BarModel.loadFirstSeen()
 
     private let work = DispatchQueue(label: "passess.bar.work")
+    private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh
     private var refreshing = false
+    private var discovering = false
+    private var discoveredAt: Date?
     private var timer: Timer?
+    private var frozen = false // a preview: seeded state, nothing runs
+    private var connectPanel: ConnectPanel?
+    private var secretsWindow: SecretsWindow?
     let approver = ApproverController()
 
     var health: Health { doctor == nil && failure == nil ? .unknown : PassessKit.health(doctor) }
+
+    /// The vault secrets not connected yet, newest first.
+    var found: [FoundRow] {
+        guard secretList?.agents != nil, let d = discovery else { return [] }
+        return foundRows(d, firstSeen: firstSeen).sorted { $0.isNew && !$1.isNew }
+    }
 
     func start() {
         approver.onChange = { [weak self] in
@@ -33,11 +51,85 @@ final class BarModel: ObservableObject {
         }
         approver.start()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
+        discover(maxAge: 0)
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.refresh()
+            self?.discover(maxAge: 30 * 60)
+        }
+    }
+
+    /// The panel opened: what it shows should be current.
+    func panelOpened() {
+        refresh()
+        discover(maxAge: 120)
+    }
+
+    /// `passess discover`, at most once per maxAge seconds: it asks the vault,
+    /// which sends its values along with the names (passess drops them).
+    func discover(maxAge: TimeInterval) {
+        guard !frozen, !discovering, let cli = Passess.locate() else { return }
+        if let at = discoveredAt, Date().timeIntervalSince(at) < maxAge { return }
+        discovering = true
+        vault.async {
+            let found = try? cli.discover()
+            DispatchQueue.main.async {
+                self.discovering = false
+                self.discoveredAt = Date()
+                if let found = found, found.backends.contains(where: \.ok) {
+                    self.firstSeen = noteFirstSeen(self.firstSeen, discovery: found)
+                    BarModel.saveFirstSeen(self.firstSeen)
+                }
+                self.discovery = found
+            }
+        }
+    }
+
+    func openSecrets() {
+        if secretsWindow == nil {
+            secretsWindow = SecretsWindow(model: self) { [weak self] in self?.secretsWindow = nil }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        secretsWindow?.makeKeyAndOrderFront(nil)
+        refresh()
+        discover(maxAge: 30)
+    }
+
+    func openConnect(_ found: Discovery.Found) {
+        show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate()))
+    }
+
+    func openEdit(_ secret: SecretList.Secret) {
+        show(ConnectModel(mode: .edit(secret), list: secretList, cli: Passess.locate()))
+    }
+
+    private func show(_ connect: ConnectModel) {
+        connectPanel?.close()
+        let panel = ConnectPanel(model: connect) { [weak self] in self?.connectPanel = nil }
+        connect.onDone = { [weak self, weak panel] in
+            panel?.close()
+            guard let self = self else { return }
+            self.check = nil // it describes the secrets as they were
+            self.refresh()
+            self.discover(maxAge: 0)
+        }
+        connectPanel = panel
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private static let firstSeenKey = "firstSeenVaultSecrets"
+
+    private static func loadFirstSeen() -> [String: Date] {
+        let raw = UserDefaults.standard.dictionary(forKey: firstSeenKey) as? [String: Double] ?? [:]
+        return raw.mapValues { Date(timeIntervalSince1970: $0) }
+    }
+
+    private static func saveFirstSeen(_ seen: [String: Date]) {
+        UserDefaults.standard.set(seen.mapValues { $0.timeIntervalSince1970 }, forKey: firstSeenKey)
     }
 
     func refresh() {
-        guard !refreshing else { return }
+        guard !frozen, !refreshing else { return }
         guard let cli = Passess.locate() else {
             doctor = nil
             failure = Passess.Failure.notFound.description
@@ -50,12 +142,14 @@ final class BarModel: ObservableObject {
             do { doctor = try cli.doctor() } catch { failure = String(describing: error) }
             let agent = try? (Passess.locateForAgent() ?? cli).agentStatus()
             let harnesses = try? cli.harnesses()
+            let list = try? cli.list()
             DispatchQueue.main.async {
                 self.refreshing = false
                 self.doctor = doctor
                 self.failure = failure
                 self.agent = agent
                 self.harnesses = harnesses
+                self.secretList = list
             }
         }
     }
@@ -101,7 +195,9 @@ final class BarModel: ObservableObject {
 
     /// Fixed state for previews: nothing runs.
     func seed(doctor: Doctor?, failure: String? = nil, agent: AgentStatus?, harnesses: HarnessStatus? = nil,
-              check: Check? = nil, checkedAt: Date? = nil, approving: Bool = false) {
+              check: Check? = nil, checkedAt: Date? = nil, approving: Bool = false,
+              secretList: SecretList? = nil, discovery: Discovery? = nil, firstSeen: [String: Date] = [:]) {
+        frozen = true
         self.doctor = doctor
         self.failure = failure
         self.agent = agent
@@ -109,6 +205,9 @@ final class BarModel: ObservableObject {
         self.check = check
         self.checkedAt = checkedAt
         self.approving = approving
+        self.secretList = secretList
+        self.discovery = discovery
+        self.firstSeen = firstSeen
         openAtLogin = true
     }
 
@@ -117,8 +216,9 @@ final class BarModel: ObservableObject {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Could not change Open at Login"
-            alert.informativeText = "\(error.localizedDescription)\n\nMove Passess.app to /Applications and try again, or add it under System Settings → General → Login Items."
+            alert.messageText = t("Could not change Open at Login")
+            alert.informativeText = "\(error.localizedDescription)\n\n"
+                + t("Move Passess.app to /Applications and try again, or add it under System Settings → General → Login Items.")
             alert.runModal()
         }
         openAtLogin = SMAppService.mainApp.status == .enabled

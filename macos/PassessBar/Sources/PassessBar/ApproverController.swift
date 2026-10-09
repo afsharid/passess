@@ -1,5 +1,4 @@
 import AppKit
-import LocalAuthentication
 import PassessKit
 
 /// Answers the agent's approval questions. While the agent runs, the app stays
@@ -95,11 +94,8 @@ final class ApproverController {
     /// Touch ID, or the password. A cancelled prompt leaves the question on
     /// screen, to allow again or deny.
     private func authenticate(_ ask: AgentAsk) {
-        let context = LAContext()
-        let reason = "allow \(ask.secrets.joined(separator: ", ")) for \(ask.program)"
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
-            guard ok else { return }
-            DispatchQueue.main.async { self.answer(ask, allow: true) }
+        Authenticator.confirm(t("allow %@ for %@", ask.secrets.joined(separator: ", "), ask.program)) { ok in
+            if ok { self.answer(ask, allow: true) }
         }
     }
 
@@ -119,11 +115,6 @@ final class ApproverController {
     }
 
     private func allowTitle() -> String {
-        let context = LAContext()
-        var error: NSError?
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error), context.biometryType == .touchID {
-            return "Allow with Touch ID"
-        }
-        return "Allow…"
+        Authenticator.hasTouchID ? t("Allow with Touch ID") : t("Allow…")
     }
 }
