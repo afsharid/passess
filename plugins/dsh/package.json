@@ -1,0 +1,8 @@
+{
+  "name": "@passess/dsh-credentials",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness reads the keys connected to it in passess",
+  "type": "module",
+  "exports": { ".": "./index.js" }
+}

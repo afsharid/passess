@@ -59,6 +59,15 @@ var Agents = []Agent{
 	{"dsh", "DeepSeek Harness"},
 }
 
+// apps are the agents that are desktop apps reading their own API keys:
+// started from the Dock, they have no launcher to hand them one, so they ask
+// passess helper for each key a secret connects them to (ADR 11).
+var apps = map[string]bool{"dsh": true}
+
+// IsApp reports whether the agent with this ID is a desktop app that asks
+// passess helper for its own keys.
+func IsApp(id string) bool { return apps[id] }
+
 // IsAgent reports whether id is one of Agents.
 func IsAgent(id string) bool {
 	for _, a := range Agents {

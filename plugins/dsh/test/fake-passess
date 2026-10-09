@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stand-in for passess: logs each call, answers list and helper.
+echo "$*" >> "$(dirname "$0")/calls.log"
+case "$1" in
+list) printf '%s\n' '{"secrets":[{"name":"CONNECTED","clients":["dsh"]},{"name":"EVERY","clients":null},{"name":"BROKEN","clients":["dsh"]}]}' ;;
+helper)
+  case "$2" in
+  CONNECTED) echo "fake-value-123" ;;
+  *) echo "passess: $2 is not connected to DeepSeek Harness by name." >&2; exit 77 ;;
+  esac ;;
+esac

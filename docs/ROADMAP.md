@@ -85,7 +85,10 @@ Linux and Windows polish, signed releases.
 - `discover` lists the bws secrets passess does not use yet; `set` and `remove` change
   and forget one; `add --clients --approve`;
 - in Passess.app, the Secrets window and the Connect window, with Touch ID; the app in
-  English and Turkish.
+  English and Turkish;
+- DeepSeek Harness as an agent and the first app: a secret connected to it by name
+  reaches it through `passess helper`, however it is opened
+  ([ADR 11](adr/0011-an-app-reads-the-keys-connected-to-it.md)).
 
 Next, in order: apps as targets (Hermes, OpenClaw, DeepSeek Harness: connecting a secret
 adds it to the app's launch profile), then a client's own API connection through a
