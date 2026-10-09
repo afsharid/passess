@@ -103,11 +103,18 @@ func runDiscover(st *Streams, args []string) int {
 	w := tabwriter.NewWriter(st.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "IN THE VAULT\tPROJECT\tADD WITH")
 	for _, d := range out.Secrets {
-		fmt.Fprintf(w, "%s\t%s\tpassess add %s --ref %s\n", d.Key, d.Project, d.Name, d.Ref)
+		// Whoever can write to the vault chooses these names; an escape
+		// sequence in one must not redraw the table the user reads.
+		fmt.Fprintf(w, "%s\t%s\tpassess add %s --ref %s\n", vaultName(d.Key), vaultName(d.Project), d.Name, d.Ref)
 	}
 	_ = w.Flush()
 	fmt.Fprintln(st.Stdout, "\nOr connect them in Passess.app.")
 	return code
+}
+
+// vaultName is a name from the vault fit for one table cell: printable, no tab.
+func vaultName(s string) string {
+	return printable(strings.ReplaceAll(s, "\t", " "))
 }
 
 // unreferenced returns the items no configured secret refers to, each with a
