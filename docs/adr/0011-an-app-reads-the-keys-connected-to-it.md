@@ -36,9 +36,10 @@ tick in the Connect window does not mean.
   as the instructions block of ADR 7 is spliced. The plugin wraps DSH's credentials
   service: a key DSH does not find in its own sources, and that `passess list` shows
   connected to `dsh`, it asks of `passess helper` without a shell; it keeps the value
-  in memory for a few minutes and never logs or writes it. While loaded it keeps
-  DSH's pid in passess's state directory, so status can tell a loaded plugin from
-  one that is only installed.
+  in memory for a few minutes and never logs or writes it. While loaded it rewrites
+  a status file in passess's state directory every 30 seconds, so status can tell a
+  loaded plugin from one that is only installed. A heartbeat, not a pid: DSH loads
+  plugins in more than one process, and one of them exits after start.
 - `passess status` reports each key the app's providers name (`apiKeyEnv`) and whether
   it is connected to the app by name, so the app can show what to connect.
 
