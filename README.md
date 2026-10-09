@@ -285,8 +285,9 @@ does not keep it from the harness's own agent, which can run what the harness ru
 A desktop app passess knows, DeepSeek Harness (`dsh`) for now, needs no allow entry:
 connecting the secret to it by name in Passess.app is the opt-in, and only the app's
 own process, not a shell under it, gets the value. A secret connected to every agent
-does not count. The app side is a plugin in the app's profile that runs `passess
-helper` (ADR 11).
+does not count. The app side is a plugin passess carries: Set up in Passess.app, or
+`passess install dsh --apply`, puts it in the app's profile, and `passess status dsh`
+shows each key the app asks for and whether it reaches the app (ADR 11).
 
 ## Secrets already in clear
 

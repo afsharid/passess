@@ -115,7 +115,8 @@
     },
     {
       "id": "dsh",
-      "label": "DeepSeek Harness"
+      "label": "DeepSeek Harness",
+      "app": true
     }
   ]
 }

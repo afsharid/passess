@@ -79,8 +79,9 @@ func TestMenuBarAgentFixtures(t *testing.T) {
 		Approvals: []agent.Approval{{Secret: "GITHUB_TOKEN", Program: "gh", Anchor: agent.Proc{PID: 4141, Name: "claude"},
 			Until: at.Add(8 * time.Hour)}}}
 	const home = "/Users/you/.config/passess"
-	golden(t, "agent-status.json", string(statusJSON(true, info))+"\n", home)
-	golden(t, "agent-status-stopped.json", string(statusJSON(false, nil))+"\n", home)
+	golden(t, "agent-status.json", string(statusJSON(true, info, false))+"\n", home)
+	golden(t, "agent-status-outdated.json", string(statusJSON(true, info, true))+"\n", home)
+	golden(t, "agent-status-stopped.json", string(statusJSON(false, nil, false))+"\n", home)
 	ask, err := json.MarshalIndent(agent.Frame{Ask: &agent.AskFor{ID: "7", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh",
 		Path: "/opt/homebrew/bin/gh", Argv: []string{"gh", "api", "user"}, Dir: "/Users/you/project", Harness: "claude-code",
 		Anchor: &agent.Proc{PID: 4242, Name: "claude"}, Until: at.Add(8 * time.Hour)}}, "", "  ")
@@ -102,6 +103,12 @@ func TestMenuBarAgentFixtures(t *testing.T) {
 		{ID: "claude-desktop", Label: "Claude Desktop", Config: "/Users/you/Library/Application Support/Claude/claude_desktop_config.json",
 			Servers: []harness.ServerStatus{}, Unmanaged: []harness.Entry{}, InstructionsState: harness.BlockNone,
 			Hooks: "none", Actions: []harness.Action{}, Errors: []string{}},
+	}, Apps: []appReport{
+		// an app set up and loaded, one key that reaches it, one that does not
+		{ID: "dsh", Label: "DeepSeek Harness", Config: "/Users/you/.dsh/profiles/desktop/cordis.patch.yml",
+			Plugin: "ok", Active: "2026-10-09T20:00:00.000Z",
+			Keys:    []appKey{{Name: "EVREN_LLM_API_KEY", State: keyEveryAgent}, {Name: "OTHER_KEY", State: keyConnected}},
+			Changes: []string{}, Errors: []string{}},
 	}}, "", "  ")
 	if err != nil {
 		t.Fatal(err)

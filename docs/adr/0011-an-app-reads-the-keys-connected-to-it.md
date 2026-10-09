@@ -30,10 +30,17 @@ tick in the Connect window does not mean.
   running a command, and the rule of ADR 8 applies unchanged.
 - Everything else `helper` does stays: no value on a terminal, `clients` checked for
   every agent seen in the call, approval asked for a secret marked `approve`.
-- The app side ships here, as the Claude Code plugin does: `plugins/dsh` wraps DSH's
-  credentials service. A key DSH does not find in its own sources, and that `passess
-  list` shows connected to `dsh`, it asks of `passess helper` without a shell; it keeps
-  the value in memory for a few minutes and never logs or writes it.
+- The app side ships inside the passess binary (`internal/apps/dsh`). `passess install
+  dsh --apply`, or Set up in Passess.app, writes the plugin to passess's data directory
+  and splices the row that loads it into DSH's profile patch between marker comments,
+  as the instructions block of ADR 7 is spliced. The plugin wraps DSH's credentials
+  service: a key DSH does not find in its own sources, and that `passess list` shows
+  connected to `dsh`, it asks of `passess helper` without a shell; it keeps the value
+  in memory for a few minutes and never logs or writes it. While loaded it keeps
+  DSH's pid in passess's state directory, so status can tell a loaded plugin from
+  one that is only installed.
+- `passess status` reports each key the app's providers name (`apiKeyEnv`) and whether
+  it is connected to the app by name, so the app can show what to connect.
 
 ## Consequences
 

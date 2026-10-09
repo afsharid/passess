@@ -33,9 +33,9 @@ lint:
 
 check: vet test lint dsh-check
 
-# The DeepSeek Harness plugin (plugins/dsh) against a stand-in passess.
+# The DeepSeek Harness plugin (internal/apps/dsh) against a stand-in passess.
 dsh-check:
-	node plugins/dsh/test/plugin.test.mjs
+	node internal/apps/dsh/test/plugin.test.mjs
 
 hooks:
 	git config core.hooksPath .githooks

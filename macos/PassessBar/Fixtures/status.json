@@ -47,5 +47,26 @@
       "actions": [],
       "errors": []
     }
+  ],
+  "apps": [
+    {
+      "id": "dsh",
+      "label": "DeepSeek Harness",
+      "config": "/Users/you/.dsh/profiles/desktop/cordis.patch.yml",
+      "plugin": "ok",
+      "active": "2026-10-09T20:00:00.000Z",
+      "keys": [
+        {
+          "name": "EVREN_LLM_API_KEY",
+          "state": "every-agent"
+        },
+        {
+          "name": "OTHER_KEY",
+          "state": "connected"
+        }
+      ],
+      "changes": [],
+      "errors": []
+    }
   ]
 }

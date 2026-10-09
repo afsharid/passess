@@ -1,11 +1,15 @@
-// Run: node plugins/dsh/test/plugin.test.mjs
+// Run: node internal/apps/dsh/test/plugin.test.mjs (make dsh-check)
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const plugin = await import('../index.js')
+const plugin = await import('../index.mjs')
+const state = mkdtempSync(join(tmpdir(), 'passess-dsh-'))
+process.env.XDG_STATE_HOME = state
+const statusFile = join(state, 'passess', 'dsh-plugin.json')
 const log = join(here, 'calls.log') // fake-passess appends here
 rmSync(log, { force: true })
 
@@ -41,7 +45,12 @@ assert.deepEqual(before.trim().split('\n'), ['list --json', 'helper CONNECTED', 
 assert.ok(warnings.some(w => w.includes('not connected')), 'the refusal is logged')
 assert.ok(!warnings.some(w => w.includes('fake-value-123')), 'a value is never logged')
 
-effects.forEach(dispose => dispose())
+const reported = JSON.parse(readFileSync(statusFile, 'utf8'))
+assert.equal(reported.pid, process.pid, 'the status file names the running process')
+
+await Promise.all(effects.map(dispose => dispose()))
 assert.equal(service.resolve, originalResolve, 'dispose restores the service')
+assert.ok(!existsSync(statusFile), 'dispose removes the status file')
 rmSync(log, { force: true })
+rmSync(state, { recursive: true, force: true })
 console.log('plugin: all checks passed')

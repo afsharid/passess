@@ -16,6 +16,8 @@ final class BarModel: ObservableObject {
     @Published private(set) var agentBusy = false
     @Published private(set) var approving = false
     @Published private(set) var copied: String? // id of the item whose text was just copied
+    @Published private(set) var installing: String? // the agent `passess install` is setting up
+    @Published private(set) var installFailure: [String: String] = [:] // by agent: what passess said
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
     /// `passess list --json`: the secrets and who may use each.
     @Published private(set) var secretList: SecretList?
@@ -90,12 +92,46 @@ final class BarModel: ObservableObject {
         discover(maxAge: 30)
     }
 
-    func openConnect(_ found: Discovery.Found) {
-        show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate()))
+    func openConnect(_ found: Discovery.Found, tick: String? = nil) {
+        show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate(), tick: tick))
     }
 
-    func openEdit(_ secret: SecretList.Secret) {
-        show(ConnectModel(mode: .edit(secret), list: secretList, cli: Passess.locate()))
+    func openEdit(_ secret: SecretList.Secret, tick: String? = nil) {
+        show(ConnectModel(mode: .edit(secret), list: secretList, cli: Passess.locate(), tick: tick))
+    }
+
+    /// Opens the window that connects the key an app asks for to that app:
+    /// the secret passess has by that name, or the vault's, or the list.
+    func connectKey(_ name: String, to app: String) {
+        if let secret = secretList?.secrets.first(where: { $0.name == name }) {
+            openEdit(secret, tick: app)
+        } else if let found = discovery?.secrets.first(where: { $0.name == name || $0.key == name }) {
+            openConnect(found, tick: app)
+        } else {
+            secretsFilter = name
+            openSecrets()
+        }
+    }
+
+    /// `passess install ID --apply`, with the CLI harnesses run, so what it
+    /// writes names that binary and not this app's copy.
+    func install(_ id: String) {
+        guard !frozen, installing == nil, let cli = Passess.locateForAgent() else { return }
+        installing = id
+        work.async {
+            var failure: String?
+            do { try cli.install(id) } catch { failure = String(describing: error) }
+            DispatchQueue.main.async {
+                self.installing = nil
+                self.installFailure[id] = failure
+                self.refresh()
+            }
+        }
+    }
+
+    /// Whether the app an agent ID stands for is open.
+    func isRunning(_ id: String) -> Bool {
+        (AgentStyle.apps[id] ?? []).contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
     }
 
     private func show(_ connect: ConnectModel) {
@@ -126,8 +162,12 @@ final class BarModel: ObservableObject {
             var doctor: Doctor?
             var failure: String?
             do { doctor = try cli.doctor() } catch { failure = String(describing: error) }
-            let agent = try? (Passess.locateForAgent() ?? cli).agentStatus()
-            let harnesses = try? cli.harnesses()
+            // The agent and the harnesses through the CLI on the PATH, which
+            // harnesses run: what install writes names it, so status compares
+            // against it, and the agent must be its build.
+            let onPath = Passess.locateForAgent() ?? cli
+            let agent = try? onPath.agentStatus()
+            let harnesses = try? onPath.harnesses()
             let list = try? cli.list()
             DispatchQueue.main.async {
                 self.refreshing = false
@@ -136,8 +176,19 @@ final class BarModel: ObservableObject {
                 self.agent = agent
                 self.harnesses = harnesses
                 self.secretList = list
+                self.updateAgent()
             }
         }
+    }
+
+    /// After an upgrade the running agent is the old build and refuses the new
+    /// passess: start replaces it. Once per build, so a start that fails is
+    /// not retried every minute; the tile still offers it.
+    private var updatedFrom: String?
+    private func updateAgent() {
+        guard let a = agent, a.outdated == true, let build = a.build, updatedFrom != build else { return }
+        updatedFrom = build
+        agentCommand("start")
     }
 
     func runCheck() {

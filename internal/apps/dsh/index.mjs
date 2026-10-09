@@ -6,10 +6,15 @@
 // keeps its value; one it does not, and that passess connects to "dsh" by
 // name, is asked of `passess helper NAME`, run without a shell so passess sees
 // DSH itself as its parent. Values stay in memory for ttlSeconds and are never
-// logged or written.
+// logged or written. While it runs, a status file in passess's state directory
+// holds DSH's pid, so `passess status dsh` can say it is active.
+//
+// `passess install dsh` writes this file and the profile row that loads it;
+// edits here are replaced by the next install.
 
 import { execFile } from 'node:child_process'
-import { access, constants } from 'node:fs/promises'
+import { access, constants, mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 export const name = 'passess-credentials'
 export const inject = ['credentials']
@@ -94,10 +99,16 @@ export function apply(ctx, config = {}) {
     return (await connectedNames()).has(ref) ? { configured: true, source: 'env', writable: false } : own
   }
 
+  const status = join(process.env.XDG_STATE_HOME ? join(process.env.XDG_STATE_HOME, 'passess') : join(process.env.HOME ?? '', '.local', 'state', 'passess'), 'dsh-plugin.json')
+  const reported = mkdir(join(status, '..'), { recursive: true, mode: 0o700 })
+    .then(() => writeFile(status, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }) + '\n', { mode: 0o600 }))
+    .catch(error => ctx.logger.warn('passess-credentials: status file: %s', error.message))
+
   ctx.effect(() => () => {
     creds.resolve = resolve
     creds.describe = describe
     values.clear()
+    return reported.then(() => rm(status, { force: true })).catch(() => {})
   })
 }
 

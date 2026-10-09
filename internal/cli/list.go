@@ -35,7 +35,22 @@ type listOutput struct {
 	Project string         `json:"project,omitempty"`
 	Secrets []listedSecret `json:"secrets"`
 	Missing []string       `json:"missing"` // needed by the project, not defined by the user
-	Agents  []detect.Agent `json:"agents"`  // what a clients list may name
+	Agents  []listedAgent  `json:"agents"`  // what a clients list may name
+}
+
+// listedAgent is an agent a clients list may name. App marks a desktop app
+// that reads its own keys: only a list naming it lets one reach it (ADR 11).
+type listedAgent struct {
+	detect.Agent
+	App bool `json:"app,omitempty"`
+}
+
+func listedAgents() []listedAgent {
+	out := make([]listedAgent, len(detect.Agents))
+	for i, a := range detect.Agents {
+		out[i] = listedAgent{Agent: a, App: detect.IsApp(a.ID)}
+	}
+	return out
 }
 
 func runList(st *Streams, args []string) int {
@@ -49,7 +64,7 @@ func runList(st *Streams, args []string) int {
 	if code != 0 {
 		return code
 	}
-	out := listOutput{Config: u.Path, Secrets: []listedSecret{}, Missing: []string{}, Agents: detect.Agents}
+	out := listOutput{Config: u.Path, Secrets: []listedSecret{}, Missing: []string{}, Agents: listedAgents()}
 	if proj != nil {
 		out.Project = proj.Path
 	}

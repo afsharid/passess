@@ -139,6 +139,8 @@ public struct AgentCard: Equatable {
     public let holds: [String] // secret names
     public let approving: Bool
     public let approvals: [Item]
+    /// Another build than the passess on the PATH: start replaces it.
+    public var outdated = false
 }
 
 /// nil when the CLI could not say.
@@ -149,7 +151,9 @@ public func agentCard(_ a: AgentStatus?, approving: Bool, now: Date = Date()) ->
     }
     let holds = a.cached ?? []
     let status: String
-    if a.cacheTTL == "0s" {
+    if a.outdated == true {
+        status = t("Another passess build than yours, which it refuses: start it again")
+    } else if a.cacheTTL == "0s" {
         status = t("Cache off")
     } else if holds.isEmpty {
         status = t("Holds no values")
@@ -162,7 +166,8 @@ public func agentCard(_ a: AgentStatus?, approving: Bool, now: Date = Date()) ->
         Item(id: "approval-\(ap.secret)-\(ap.program)-\(ap.anchor.pid)", symbol: "checkmark.shield.fill", tone: .ok,
              title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)))
     }
-    return AgentCard(running: true, status: status, holds: holds, approving: approving, approvals: approvals)
+    return AgentCard(running: true, status: status, holds: holds, approving: approving, approvals: approvals,
+                     outdated: a.outdated ?? false)
 }
 
 /// What the approval panel says about one question.

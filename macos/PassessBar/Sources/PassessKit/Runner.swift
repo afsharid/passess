@@ -125,6 +125,12 @@ public struct Passess {
         try change(["set", name, "--clients", clients, "--approve", approve ? "true" : "false"])
     }
 
+    /// `passess install ID --apply`: sets up a coding agent or an app (hooks,
+    /// instructions, MCP servers, an app's plugin), after a backup.
+    public func install(_ id: String) throws {
+        try change(["install", id, "--apply"])
+    }
+
     /// `passess remove`: passess forgets the secret; the vault keeps it.
     public func remove(name: String) throws {
         try change(["remove", name])
