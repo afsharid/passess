@@ -47,7 +47,7 @@ func runHelper(st *Streams, args []string) int {
 	if err != nil {
 		self = "passess"
 	}
-	if code := askApproval(st, u, []string{name}, []string{self, "helper", name}); code != 0 {
+	if code := admit(st, u, []string{name}, []string{self, "helper", name}); code != 0 {
 		return code
 	}
 	res, zero := newResolver(st, u)

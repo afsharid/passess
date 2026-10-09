@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/afsharid/passess/internal/detect"
 )
 
 func init() {
@@ -16,7 +18,14 @@ func init() {
 type listedSecret struct {
 	Name     string   `json:"name"`
 	Backends []string `json:"backends"`
+	Refs     []string `json:"refs"`
 	Allow    []string `json:"allow"`
+	// Clients are the coding agents it is connected to; null means every one.
+	Clients  []string `json:"clients"`
+	Approve  bool     `json:"approve"`
+	Hosts    []string `json:"hosts"`
+	Profiles []string `json:"profiles"` // profiles that hand it to a program
+	MCP      []string `json:"mcp"`      // MCP servers that use it
 	Note     string   `json:"note,omitempty"`
 	Project  bool     `json:"needed_by_project"`
 }
@@ -26,6 +35,7 @@ type listOutput struct {
 	Project string         `json:"project,omitempty"`
 	Secrets []listedSecret `json:"secrets"`
 	Missing []string       `json:"missing"` // needed by the project, not defined by the user
+	Agents  []detect.Agent `json:"agents"`  // what a clients list may name
 }
 
 func runList(st *Streams, args []string) int {
@@ -39,20 +49,33 @@ func runList(st *Streams, args []string) int {
 	if code != 0 {
 		return code
 	}
-	out := listOutput{Config: u.Path, Secrets: []listedSecret{}, Missing: []string{}}
+	out := listOutput{Config: u.Path, Secrets: []listedSecret{}, Missing: []string{}, Agents: detect.Agents}
 	if proj != nil {
 		out.Project = proj.Path
 	}
 	for _, name := range u.SortedNames() {
 		s := u.Secrets[name]
-		var backends []string
+		var backends, refs []string
 		for _, r := range s.Refs {
 			if !contains(backends, r.Scheme) {
 				backends = append(backends, r.Scheme)
 			}
+			refs = append(refs, r.String())
 		}
 		_, needed := proj.NeedsName(name)
-		out.Secrets = append(out.Secrets, listedSecret{Name: name, Backends: backends, Allow: nonNil(s.Allow), Note: s.Note, Project: needed})
+		ls := listedSecret{Name: name, Backends: backends, Refs: refs, Allow: nonNil(s.Allow), Clients: s.Clients,
+			Approve: s.Approve, Hosts: nonNil(s.Hosts), Profiles: []string{}, MCP: []string{}, Note: s.Note, Project: needed}
+		for _, p := range sortedKeys(u.Profiles) {
+			if contains(u.Profiles[p].Secrets, name) {
+				ls.Profiles = append(ls.Profiles, p)
+			}
+		}
+		for _, m := range sortedKeys(u.MCP) {
+			if contains(u.MCP[m].Secrets(), name) {
+				ls.MCP = append(ls.MCP, m)
+			}
+		}
+		out.Secrets = append(out.Secrets, ls)
 	}
 	if proj != nil {
 		for name := range proj.Needs {
@@ -67,7 +90,7 @@ func runList(st *Streams, args []string) int {
 		return writeJSON(st, out)
 	}
 	w := tabwriter.NewWriter(st.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tBACKEND\tALLOWED\tNOTE")
+	fmt.Fprintln(w, "NAME\tBACKEND\tALLOWED\tAGENTS\tNOTE")
 	for _, s := range out.Secrets {
 		allow := "any program except shells and interpreters"
 		if len(s.Allow) > 0 {
@@ -77,7 +100,7 @@ func runList(st *Streams, args []string) int {
 		if s.Project {
 			name += " *"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, strings.Join(s.Backends, ", "), allow, s.Note)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, strings.Join(s.Backends, ", "), allow, agentsText(s.Clients), s.Note)
 	}
 	_ = w.Flush()
 	if out.Project != "" {
@@ -103,4 +126,15 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// agentsText says which coding agents a clients list names.
+func agentsText(clients []string) string {
+	switch {
+	case clients == nil:
+		return "all"
+	case len(clients) == 0:
+		return "none"
+	}
+	return strings.Join(clients, ", ")
 }

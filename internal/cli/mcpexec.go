@@ -94,7 +94,7 @@ func runMCPExec(st *Streams, args []string) int {
 		}
 		argv = []string{self, "mcp-exec", name}
 	}
-	if code := askApproval(st, u, srv.Secrets(), argv); code != 0 {
+	if code := admit(st, u, srv.Secrets(), argv); code != 0 {
 		return code
 	}
 	res, zero := newResolver(st, u)

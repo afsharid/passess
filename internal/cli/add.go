@@ -39,8 +39,10 @@ func runAdd(st *Streams, args []string) int {
 	fs.Var(&allow, "allow", "programs that may receive it, comma-separated")
 	note := fs.String("note", "", "free-text note")
 	keychain := fs.Bool("keychain", false, "prompt for the value in this terminal and store it in the OS keychain")
+	clients := fs.String("clients", "all", "coding agents it is connected to: IDs comma-separated (claude-code,codex), all, or none")
+	approve := fs.Bool("approve", false, "every new program and caller waits for your Allow")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--note TEXT]")
+		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--clients claude-code,codex] [--approve] [--note TEXT]")
 		fmt.Fprintln(st.Stderr, "       passess add NAME --keychain [--allow …]   (you type the value; it never passes through passess)")
 		fs.PrintDefaults()
 	}
@@ -71,6 +73,10 @@ func runAdd(st *Streams, args []string) int {
 	}
 	if strings.ContainsAny(*note, "\n\r\x00") {
 		return failf(st, ExitUsage, "--note must be one line")
+	}
+	clientsLit, err := clientsLiteral(*clients)
+	if err != nil {
+		return failf(st, ExitUsage, "%v", err)
 	}
 	if h := detect.Harness(st.Getenv); h != "" {
 		return failf(st, ExitNoPerm, "passess add decides which programs may receive which secrets; run it yourself in a terminal, not from %s. Tell the user the name and reference you need.", h)
@@ -110,6 +116,12 @@ func runAdd(st *Streams, args []string) int {
 	}
 
 	block := secretBlock(name, refs, allow, *note)
+	if clientsLit != nil {
+		block = append(block, "clients = "+*clientsLit+"\n"...)
+	}
+	if *approve {
+		block = append(block, "approve = true\n"...)
+	}
 	after := before
 	if len(after) == 0 {
 		after = []byte("version = 1\n")

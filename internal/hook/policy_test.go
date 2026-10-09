@@ -46,6 +46,7 @@ func TestShellCommands(t *testing.T) {
 		"bash -c 'cat .env'", "sh -c \"printenv\"", "eval printenv", "bash -lc 'cat .env'", "sh -ec env", "cat .envrc",
 		// Commands that change what protects the user, and hiding the harness.
 		"passess add EVIL --ref keychain://passess/X --allow curl", "passess migrate env .env --apply --yes",
+		"passess set GITHUB_TOKEN --clients all", "passess remove GITHUB_TOKEN", "passess discover --json",
 		"passess uninstall --apply", "passess install --no-hooks --apply",
 		// A literal cd earlier in the line moves where relative paths point.
 		`cd ~/.config/passess && echo 'allow = ["sh"]' >> config.toml`, "cd ~/.local/state/passess/backups && cat x",

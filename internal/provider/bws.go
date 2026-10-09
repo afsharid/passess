@@ -193,6 +193,60 @@ func (b *BWS) list(ctx context.Context, projectID string) error {
 	return nil
 }
 
+// Item names a secret the machine account can read; it never holds a value.
+type Item struct {
+	ID        string
+	Key       string
+	ProjectID string // "" for a secret in no project
+	Project   string // the project's name
+}
+
+// Items lists every secret the machine account can read, by name. bws puts
+// the values in the same output; it is cleared before Items returns, and no
+// value is kept.
+func (b *BWS) Items(ctx context.Context) ([]Item, error) {
+	out, err := b.run(ctx, "secret", "list")
+	if err != nil {
+		return nil, err
+	}
+	var ss []struct {
+		ID        string `json:"id"`
+		Key       string `json:"key"`
+		ProjectID string `json:"projectId"`
+	}
+	err = json.Unmarshal(out, &ss)
+	clear(out)
+	if err != nil {
+		return nil, errors.New("bws returned output passess cannot read")
+	}
+	if b.projects == nil {
+		b.projects = map[string]string{}
+	}
+	names := map[string]string{} // id -> name
+	if len(ss) > 0 {
+		pout, err := b.run(ctx, "project", "list")
+		if err != nil {
+			return nil, err
+		}
+		var ps []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(pout, &ps); err != nil {
+			return nil, errors.New("bws returned output passess cannot read")
+		}
+		for _, p := range ps {
+			names[p.ID] = p.Name
+			b.projects[p.Name] = p.ID
+		}
+	}
+	items := make([]Item, 0, len(ss))
+	for _, s := range ss {
+		items = append(items, Item{ID: s.ID, Key: s.Key, ProjectID: s.ProjectID, Project: names[s.ProjectID]})
+	}
+	return items, nil
+}
+
 // Zero clears the token and every value the provider holds.
 func (b *BWS) Zero() {
 	b.token.Zero()

@@ -130,3 +130,41 @@ func TestMenuBarFixtures(t *testing.T) {
 	}
 	golden(t, "check.json", out, dir)
 }
+
+// TestMenuBarSecretFixtures pins what the Secrets screen reads: `list --json`
+// with every kind of clients list, and `discover --json`.
+func TestMenuBarSecretFixtures(t *testing.T) {
+	noHarness(t)
+	dir := writeConfig(t, `version = 1
+[secrets.OPENROUTER_API_KEY]
+ref     = "bws://`+discProject+`/OPENROUTER_API_KEY"
+clients = ["claude-code", "opencode"]
+hosts   = ["openrouter.ai"]
+[secrets.HASS_TOKEN]
+ref     = "bws://`+discProject+`/HASS_TOKEN"
+clients = ["claude-code"]
+approve = true
+[secrets.SUDO_PASSWORD]
+ref     = "bws://`+discProject+`/SUDO_PASSWORD"
+clients = []
+[secrets.GITHUB_TOKEN]
+ref   = "keychain://passess/github"
+allow = ["gh", "git"]
+note  = "repo:read"
+[profiles.web]
+secrets = ["OPENROUTER_API_KEY"]
+allow   = ["node"]
+`)
+	out, _, _ := run(t, "list", "--json")
+	golden(t, "list.json", out, dir)
+
+	saved := discoverRunner
+	t.Cleanup(func() { discoverRunner = saved })
+	discoverRunner = discoverFake{t}
+	t.Setenv("BWS_ACCESS_TOKEN", "passess-fake-bws-machine-token-0123456789")
+	out, _, _ = run(t, "discover", "--json")
+	if strings.Contains(out, discValue) {
+		t.Fatal("discover printed a value")
+	}
+	golden(t, "discover.json", out, dir)
+}

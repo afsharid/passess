@@ -1,0 +1,59 @@
+{
+  "backends": [
+    {
+      "scheme": "bws",
+      "ok": true
+    }
+  ],
+  "secrets": [
+    {
+      "key": "loose",
+      "project": "",
+      "name": "LOOSE",
+      "ref": "bws://10000000-0000-4000-8000-000000000007",
+      "name_taken": false
+    },
+    {
+      "key": "DUP",
+      "project": "ai-stack",
+      "name": "DUP",
+      "ref": "bws://10000000-0000-4000-8000-000000000005",
+      "name_taken": false
+    },
+    {
+      "key": "DUP",
+      "project": "ai-stack",
+      "name": "DUP",
+      "ref": "bws://10000000-0000-4000-8000-000000000006",
+      "name_taken": false
+    },
+    {
+      "key": "KNOWN",
+      "project": "ai-stack",
+      "name": "KNOWN",
+      "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/KNOWN",
+      "name_taken": false
+    },
+    {
+      "key": "NEW_KEY",
+      "project": "ai-stack",
+      "name": "NEW_KEY",
+      "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/NEW_KEY",
+      "name_taken": false
+    },
+    {
+      "key": "OTHER",
+      "project": "ai-stack",
+      "name": "OTHER",
+      "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/OTHER",
+      "name_taken": false
+    },
+    {
+      "key": "nvidia-nim",
+      "project": "ai-stack",
+      "name": "NVIDIA_NIM",
+      "ref": "bws://10000000-0000-4000-8000-000000000003",
+      "name_taken": false
+    }
+  ]
+}

@@ -108,3 +108,36 @@ func TestBWSRejectedToken(t *testing.T) {
 		t.Fatalf("stderr token leaked into the error: %v", err)
 	}
 }
+
+// Items names every secret the machine account can read and keeps no value:
+// the output bws printed them in is cleared.
+func TestBWSItemsNamesOnly(t *testing.T) {
+	var listed []byte
+	run := &fakeRunner{reply: func(c Cmd) (Result, error) {
+		switch c.Args[0] + " " + c.Args[1] {
+		case "secret list":
+			if c.Args[2] != "--output" {
+				t.Fatalf("Items lists every project at once, got %q", c.Args)
+			}
+			listed = []byte(`[{"id":"` + secretID + `","key":"NVIDIA_API_KEY","value":"` + nvidiaValue + `","projectId":"` + projectID + `"},
+				{"id":"44444444-2222-4333-8444-555555555555","key":"loose","value":"passess-fake-loose-0123456789","projectId":null}]`)
+			return Result{Stdout: listed}, nil
+		case "project list":
+			return Result{Stdout: []byte(`[{"id":"` + projectID + `","name":"dev-project"}]`)}, nil
+		}
+		t.Fatalf("unexpected bws %q", c.Args)
+		return Result{}, nil
+	}}
+	items, err := newBWS(run).Items(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Item{{ID: secretID, Key: "NVIDIA_API_KEY", ProjectID: projectID, Project: "dev-project"},
+		{ID: "44444444-2222-4333-8444-555555555555", Key: "loose"}}
+	if !slices.Equal(items, want) {
+		t.Fatalf("items = %+v", items)
+	}
+	if strings.Trim(string(listed), "\x00") != "" {
+		t.Fatal("the listing that held values was not cleared")
+	}
+}
