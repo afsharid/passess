@@ -13,7 +13,7 @@
 // edits here are replaced by the next install.
 
 import { execFile } from 'node:child_process'
-import { access, constants, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, constants, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export const name = 'passess-credentials'
@@ -99,16 +99,27 @@ export function apply(ctx, config = {}) {
     return (await connectedNames()).has(ref) ? { configured: true, source: 'env', writable: false } : own
   }
 
+  // A heartbeat: passess status counts the plugin loaded while this file is
+  // fresh, whichever of DSH's processes runs it.
   const status = join(process.env.XDG_STATE_HOME ? join(process.env.XDG_STATE_HOME, 'passess') : join(process.env.HOME ?? '', '.local', 'state', 'passess'), 'dsh-plugin.json')
-  const reported = mkdir(join(status, '..'), { recursive: true, mode: 0o700 })
-    .then(() => writeFile(status, JSON.stringify({ pid: process.pid, since: new Date().toISOString() }) + '\n', { mode: 0o600 }))
+  const body = JSON.stringify({ pid: process.pid, since: new Date().toISOString() }) + '\n'
+  const report = () => mkdir(join(status, '..'), { recursive: true, mode: 0o700 })
+    .then(() => writeFile(status, body, { mode: 0o600 }))
     .catch(error => ctx.logger.warn('passess-credentials: status file: %s', error.message))
+  let reported = report()
+  const beat = setInterval(() => { reported = report() }, (config.beatSeconds ?? 30) * 1000)
+  beat.unref?.()
 
   ctx.effect(() => () => {
+    clearInterval(beat)
     creds.resolve = resolve
     creds.describe = describe
     values.clear()
-    return reported.then(() => rm(status, { force: true })).catch(() => {})
+    // Only this instance's file: a reloaded plugin may already have written its own.
+    return reported
+      .then(() => readFile(status, 'utf8'))
+      .then(text => (text === body ? rm(status, { force: true }) : undefined))
+      .catch(() => {})
   })
 }
 

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testDSH(t *testing.T) DSH {
@@ -147,11 +148,14 @@ func TestActive(t *testing.T) {
 	}
 	write(os.Getpid())
 	if got := d.Active(); !strings.HasPrefix(got, "2026-10-09") {
-		t.Fatalf("a running process: %q", got)
+		t.Fatalf("a fresh heartbeat: %q", got)
 	}
-	write(1 << 30) // no such process
+	old := time.Now().Add(-2 * beatFresh)
+	if err := os.Chtimes(d.Status, old, old); err != nil {
+		t.Fatal(err)
+	}
 	if d.Active() != "" {
-		t.Fatal("a process that ended: not active")
+		t.Fatal("a stale heartbeat: not active")
 	}
 }
 

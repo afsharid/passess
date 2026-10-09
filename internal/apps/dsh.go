@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
+	"time"
 )
 
 //go:embed dsh/index.mjs
@@ -209,22 +209,28 @@ func (d DSH) Keys() []string {
 	return out
 }
 
-// Active returns when the plugin started in a DSH that is still running, or
-// "" when no running DSH has loaded it.
+// beatFresh is how long a status file counts after the plugin last wrote it:
+// it writes every 30 seconds while loaded.
+const beatFresh = 90 * time.Second
+
+// Active returns when the plugin started in a running DSH, or "" when none
+// has it loaded: the plugin rewrites its status file as a heartbeat, so a
+// stale one is a DSH that ended, or a process of it that loaded the plugin
+// and exited, without unloading it.
 func (d DSH) Active() string {
+	info, err := os.Stat(d.Status)
+	if err != nil || time.Since(info.ModTime()) > beatFresh {
+		return ""
+	}
 	data, err := os.ReadFile(d.Status)
 	if err != nil {
 		return ""
 	}
 	var s struct {
-		PID   int    `json:"pid"`
 		Since string `json:"since"`
 	}
-	if json.Unmarshal(data, &s) != nil || s.PID <= 1 {
+	if json.Unmarshal(data, &s) != nil || s.Since == "" {
 		return ""
-	}
-	if err := syscall.Kill(s.PID, 0); err != nil && !errors.Is(err, syscall.EPERM) {
-		return "" // DSH ended without unloading it
 	}
 	return s.Since
 }

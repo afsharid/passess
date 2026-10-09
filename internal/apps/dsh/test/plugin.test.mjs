@@ -1,6 +1,6 @@
 // Run: node internal/apps/dsh/test/plugin.test.mjs (make dsh-check)
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +51,15 @@ assert.equal(reported.pid, process.pid, 'the status file names the running proce
 await Promise.all(effects.map(dispose => dispose()))
 assert.equal(service.resolve, originalResolve, 'dispose restores the service')
 assert.ok(!existsSync(statusFile), 'dispose removes the status file')
+
+// A reloaded plugin writes its own file first: the old one's dispose keeps it.
+const second = { ...ctx, credentials: { ...service }, effect: f => effects2.push(f()) }
+const effects2 = []
+plugin.apply(second, { passess: join(here, 'fake-passess') })
+await new Promise(r => setTimeout(r, 50))
+writeFileSync(statusFile, '{"pid": 1, "since": "another instance"}\n')
+await Promise.all(effects2.map(dispose => dispose()))
+assert.ok(existsSync(statusFile), "dispose keeps another instance's status file")
 rmSync(log, { force: true })
 rmSync(state, { recursive: true, force: true })
 console.log('plugin: all checks passed')
