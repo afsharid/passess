@@ -80,8 +80,9 @@ where the protection stops. Read the last section before relying on it.
   list, which `passess exec` hands to any program anyway. The name an approval shows
   for its caller is that process's own word; what an Allow binds to is the process
   itself (pid and start time, ADR 9).
-- **Passess.app runs the passess on the search path.** For status, `install` and the
-  agent it runs the passess the harnesses run, so that the agent is their build. A
+- **Passess.app runs the passess on the search path.** For `install` and the agent it
+  runs the passess the harnesses run, so that the agent is their build; for the rest
+  it runs its own copy first. A
   passess planted earlier on that path (`~/.local/bin`, `~/go/bin`) runs instead,
   which is T5: it is what the harnesses would run too. The vault's machine token goes
   only to the copy inside the app; binding that copy to a signature is planned.
