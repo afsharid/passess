@@ -11,6 +11,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,9 +71,28 @@ func (d DSH) Installed() bool {
 	return false
 }
 
-// block is the patch rows that load the plugin from path.
+// block is the patch rows that load the plugin from path. The path is a
+// double-quoted scalar, which YAML reads as JSON reads a string, so no byte
+// of it can end the row or start another; checkPath has already refused
+// anything but a plain absolute path.
 func block(path string) string {
-	return BlockStart + "\n- insert:\n    - id: passess-credentials\n      name: " + path + "\n" + BlockEnd + "\n"
+	quoted, _ := json.Marshal(path) // a string always marshals
+	return BlockStart + "\n- insert:\n    - id: passess-credentials\n      name: " + string(quoted) + "\n" + BlockEnd + "\n"
+}
+
+// checkPath refuses a plugin path that is not absolute or holds a control
+// character: it comes from XDG_DATA_HOME or HOME, which whoever runs
+// passess sets, and ends up in a file DSH loads code from.
+func checkPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("the plugin path %q is not absolute; check XDG_DATA_HOME and HOME", path)
+	}
+	for _, r := range path {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return fmt.Errorf("the plugin path %q holds a control character; check XDG_DATA_HOME and HOME", path)
+		}
+	}
+	return nil
 }
 
 // span locates passess's block in doc; ok is false without both markers.
@@ -125,6 +145,9 @@ func (d DSH) RowState() string {
 // patch, creating the patch if DSH has not yet. It changes nothing that is
 // already in place.
 func (d DSH) Install() error {
+	if err := checkPath(d.Plugin); err != nil {
+		return err
+	}
 	if d.PluginState() != StateOK {
 		if err := os.MkdirAll(filepath.Dir(d.Plugin), 0o750); err != nil {
 			return err
@@ -152,7 +175,18 @@ func (d DSH) Install() error {
 	if err := os.MkdirAll(filepath.Dir(d.Patch), 0o700); err != nil {
 		return err
 	}
-	return writeAtomic(d.Patch, []byte(doc), 0o600)
+	if err := writeAtomic(d.Patch, []byte(doc), 0o600); err != nil {
+		return err
+	}
+	// Read it back: the file must hold this block and nothing else of ours,
+	// or the user's own file goes back as it was.
+	if d.RowState() != StateOK || strings.Count(doc, BlockStart) != 1 {
+		if len(data) > 0 {
+			_ = writeAtomic(d.Patch, data, 0o600)
+		}
+		return fmt.Errorf("%s did not read back as written; left as it was", d.Patch)
+	}
+	return nil
 }
 
 // Uninstall takes passess's block out of the patch and removes the plugin.
