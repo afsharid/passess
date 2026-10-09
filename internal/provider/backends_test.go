@@ -175,7 +175,7 @@ func TestBitwarden(t *testing.T) {
 		case "get item Stripe":
 			return Result{Stdout: []byte(`{"name":"Stripe","fields":[{"name":"api_key","value":"passess-fake-stripe-0123456789"}]}`)}, nil
 		case "get item Multi":
-			return Result{Stdout: []byte(`{"name":"Multi","fields":[{"name":"other","value":"passess-fake-other-0123456789"},{"name":"flag","value":null},{"name":"api_key","value":"passess-fake-multi-0123456789"}]}`)}, nil
+			return Result{Stdout: []byte(`{"name":"Multi","fields":[{"name":"other","value":"passess-fake-other-0123456789"},{"name":"flag","value":null},{"name":"api_key","value":""},{"name":"api_key","value":"passess-fake-multi-0123456789"}]}`)}, nil
 		case "get password Twins":
 			return Result{Exit: 1, Stderr: []byte("More than one result was found.")}, nil
 		case "get password Locked":
@@ -190,7 +190,8 @@ func TestBitwarden(t *testing.T) {
 	if err != nil || string(v.Bytes()) != "passess-fake-stripe-0123456789" {
 		t.Fatalf("custom field: %v", err)
 	}
-	// Among other fields, a null one included, only the one asked for.
+	// Among other fields, a null one and an empty one of the same name
+	// included, only the one asked for.
 	v, err = p.Resolve(context.Background(), mustRef(t, "bw://Multi/api_key"))
 	if err != nil || string(v.Bytes()) != "passess-fake-multi-0123456789" {
 		t.Fatalf("custom field among others: %v", err)

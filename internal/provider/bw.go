@@ -107,7 +107,7 @@ func (b Bitwarden) Resolve(ctx context.Context, r ref.Ref) (secret.Value, error)
 		}
 		var v string
 		if json.Unmarshal(f.Value, &v) != nil || v == "" {
-			break
+			continue // an empty field of that name; a later one may hold it
 		}
 		return secret.FromString(v), nil
 	}
