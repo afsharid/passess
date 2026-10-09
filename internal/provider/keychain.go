@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -49,12 +50,17 @@ func (k Keychain) Available(ctx context.Context) error {
 // reads it back to confirm. The value reaches security(1) on stdin through its
 // interactive mode (secret-tool reads stdin anyway), so it never appears on a
 // command line.
+// keychainName is what Store accepts as a service or an account: they reach
+// security(1)'s interactive parser as quoted words, and this set needs no
+// quoting at all, whoever calls Store next.
+var keychainName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
 func (k Keychain) Store(ctx context.Context, service, account string, value secret.Value) error {
 	if bytes.ContainsAny(value.Bytes(), "\n\r\x00") {
 		return errors.New("a value with line breaks cannot be stored in the keychain this way")
 	}
-	if strings.ContainsAny(service+account, "/\n\r\"") {
-		return errors.New("keychain service and account names may not contain /, quotes or line breaks")
+	if !keychainName.MatchString(service) || !keychainName.MatchString(account) {
+		return errors.New("keychain service and account names may hold only letters, digits, dot, underscore and hyphen")
 	}
 	tool, err := k.tool()
 	if err != nil {

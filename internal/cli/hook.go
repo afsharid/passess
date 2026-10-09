@@ -102,9 +102,14 @@ func hookEnv(st *Streams) hook.Env {
 	return env
 }
 
+// maskWithheld replaces a tool output the agent took but could not send back
+// masked: it may hold values, so it does not go on as it was.
+const maskWithheld = "[passess withheld this output: the agent could not send it back masked]"
+
 // agentMask asks the agent at sock to mask the values it holds in text. No
-// agent, a text too long or any trouble, and the hook goes on without it:
-// hooks fail open.
+// agent, a text too long to send or a refusal, and the hook goes on without
+// it: hooks fail open. An answer it cannot read, or one too long to send
+// back, withholds the text instead: the agent saw values in it.
 func agentMask(sock, text string) (string, bool) {
 	if len(text) > agent.MaxRedact {
 		return "", false
@@ -120,8 +125,11 @@ func agentMask(sock, text string) (string, bool) {
 	if c.Send(agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Redact, Text: agent.Blob(text)}, nil) != nil {
 		return "", false
 	}
-	f, err := c.ReadFrame()
-	if err != nil || f.Error != "" {
+	f, err := c.ReadMasked()
+	switch {
+	case err != nil, f.Error == agent.MaskTooLong:
+		return maskWithheld, true
+	case f.Error != "":
 		return "", false
 	}
 	return string(f.Text), true

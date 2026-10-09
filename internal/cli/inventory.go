@@ -117,10 +117,7 @@ func inventory(u *config.User, proj *config.Project, harnesses []harnessReport, 
 				where = append(where, w)
 				noteKeychain(r, name)
 			}
-			programs := "any but shells and interpreters"
-			if len(s.Allow) > 0 {
-				programs = strings.Join(s.Allow, ", ")
-			}
+			programs := allowedText(s.Allow, "any but shells and interpreters")
 			row(code(name), cell(strings.Join(where, ", ")), cell(strings.Join(consumers[name], ", ")), cell(programs), cell(s.Note))
 		}
 	}

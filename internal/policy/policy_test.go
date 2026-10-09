@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -170,11 +171,73 @@ func TestEffective(t *testing.T) {
 	if got := Effective([]string{"gh"}, []string{"curl"}); got == nil || len(got) != 0 {
 		t.Fatalf("disjoint lists must allow nothing, got %v", got)
 	}
+	// allow = [] in the user's config locks a secret to no program; a
+	// project file must not open it.
+	if got := Effective([]string{}, []string{"curl"}); got == nil || len(got) != 0 {
+		t.Fatalf("a project widened a secret locked to no program: %v", got)
+	}
+	if got := Effective([]string{"gh"}, []string{}); got == nil || len(got) != 0 {
+		t.Fatalf("a project that allows nothing must narrow to nothing: %v", got)
+	}
 }
 
 // A caller that restricts PATH to the disguise's own directory must not hide
 // the real interpreter from the copy check: the check also looks in fixed
 // system directories.
+// Every denied family and every alias of one is looked up for renamed
+// copies: the list is built from them, so none can drift out of it.
+func TestLookupsCoverEveryDeniedName(t *testing.T) {
+	for _, set := range []map[string]bool{denied, func() map[string]bool {
+		m := map[string]bool{}
+		for a := range aliases {
+			m[a] = true
+		}
+		return m
+	}()} {
+		for name := range set {
+			if !slices.Contains(lookups, name) {
+				t.Errorf("%s is denied but a renamed copy of it would not be recognized", name)
+			}
+		}
+	}
+}
+
+// A renamed copy of an interpreter the old hand-kept list missed (expect,
+// tclsh) is seen through like a copy of sh.
+func TestRenamedCopiesOfEveryInterpreterAreSeen(t *testing.T) {
+	var orig string
+	for _, name := range []string{"expect", "tclsh"} {
+		if p, err := exec.LookPath(name); err == nil {
+			orig, _ = filepath.EvalSymlinks(p)
+			break
+		}
+	}
+	if orig == "" {
+		t.Skip("neither expect nor tclsh on PATH")
+	}
+	data, err := os.ReadFile(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(t.TempDir(), "buildtool")
+	if err := os.WriteFile(copied, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lookPath := func(name string) (string, error) {
+		if name == "buildtool" {
+			return copied, nil
+		}
+		return exec.LookPath(name)
+	}
+	p, err := Inspect("buildtool", lookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Fatalf("a renamed copy of %s got the secret (families %v)", orig, p.Families)
+	}
+}
+
 func TestCopyCheckDoesNotDependOnCallerPATH(t *testing.T) {
 	shPath, err := exec.LookPath("sh")
 	if err != nil {

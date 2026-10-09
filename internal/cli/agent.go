@@ -413,7 +413,7 @@ func (s *agentServer) handle(c *agent.Conn) {
 	case agent.Approver:
 		s.serveApprover(c)
 	case agent.Redact:
-		_ = c.Write(agent.Frame{Text: s.mask(req.Text)})
+		_ = c.Write(maskAnswer(req.Text, s.mask(req.Text)))
 	case agent.Status:
 		_ = c.Write(agent.Frame{Info: s.info()})
 	case agent.Lock:
@@ -474,6 +474,16 @@ func (s *agentServer) mask(text agent.Blob) agent.Blob {
 	}
 	defer rd.Zero()
 	return agent.Blob(rd.Redact([]byte(text)))
+}
+
+// maskAnswer is the frame that answers a Redact request: the masked text, or
+// MaskTooLong when masking grew it past what a hook reads back, since that
+// text holds values and must not go back unmasked either.
+func maskAnswer(text, masked agent.Blob) agent.Frame {
+	if len(masked) > len(text)+agent.MaxMaskGrowth {
+		return agent.Frame{Error: agent.MaskTooLong}
+	}
+	return agent.Frame{Text: masked}
 }
 
 // stop closes the socket, forgets every value and lets serve return once

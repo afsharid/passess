@@ -91,6 +91,15 @@ func TestLoadProject(t *testing.T) {
 	if none.ProjectAllow("X") != nil {
 		t.Fatal("nil project must allow no narrowing")
 	}
+	// No allow key leaves the user's list alone (nil); allow = [] narrows to
+	// no program (empty): policy.Effective tells the two apart.
+	locked, err := LoadProject(write(t, ProjectFile, "version = 1\n[needs.K]\nallow = []\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := locked.ProjectAllow("K"); got == nil || len(got) != 0 {
+		t.Fatalf("allow = [] must stay an empty list, got %#v", got)
+	}
 
 	for name, body := range map[string]string{
 		"ref in needs":    "version = 1\n[needs.A]\nref = \"keychain://x/y\"\n",

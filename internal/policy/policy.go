@@ -29,9 +29,13 @@ var denied = map[string]bool{}
 // a shell, whichever one it turns out to be.
 var aliases = map[string]string{}
 
-// lookups are the names searched on PATH to recognize renamed copies.
-var lookups = strings.Fields(`sh bash zsh dash ksh fish python3 python node nodejs deno bun perl ruby
-	php lua awk gawk mawk jq base64 base32 xxd od hexdump rev tr env printenv busybox osascript`)
+// lookups are the names searched on PATH to recognize renamed copies: every
+// denied family and every alias of one, built in init so that no denied
+// interpreter can be missing from it, plus names a family goes by on PATH.
+var lookups []string
+
+// pathNames are names on PATH that are neither a family nor an alias.
+var pathNames = strings.Fields(`python3 Rscript`)
 
 func init() {
 	for _, f := range strings.Fields(`sh python node deno bun perl ruby php lua tclsh wish expect
@@ -50,6 +54,25 @@ func init() {
 			aliases[n] = family
 		}
 	}
+	seen := map[string]bool{}
+	for _, set := range [][]string{pathNames, keys(denied), keys(aliases)} {
+		for _, n := range set {
+			if !seen[n] {
+				seen[n] = true
+				lookups = append(lookups, n)
+			}
+		}
+	}
+}
+
+// keys returns m's keys in order, so that lookups does not change from run to run.
+func keys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 var versionSuffix = regexp.MustCompile(`[-_]?[0-9][0-9.]*$`)
@@ -247,12 +270,13 @@ func hashFile(path string) []byte {
 
 // Effective combines the user's allow list with a project's narrowing. Nil
 // means "any program the default policy does not deny"; an empty non-nil
-// slice means nothing is allowed.
+// slice means nothing is allowed, and a project cannot widen that: only a
+// nil side gives way to the other, an empty one intersects to nothing.
 func Effective(user, project []string) []string {
-	if len(project) == 0 {
+	if project == nil {
 		return user
 	}
-	if len(user) == 0 {
+	if user == nil {
 		return project
 	}
 	both := []string{}

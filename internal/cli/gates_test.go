@@ -72,6 +72,7 @@ func TestSetupCommandsRefuseAnAgentAmongAncestors(t *testing.T) {
 		{[]string{"migrate", "mcp", "claude", "legacy", "--apply", "--yes"}, "not from kiro"},
 		{[]string{"uninstall", "--apply"}, "guard kiro sessions"},
 		{[]string{"install", "--apply", "--no-hooks"}, "guard kiro sessions"},
+		{[]string{"install", "--apply", "--force"}, "not from kiro"},
 		{[]string{"agent", "approve"}, "inside kiro"},
 	} {
 		if _, errOut, code := run(t, c.args...); code != ExitNoPerm || !strings.Contains(errOut, c.want) {

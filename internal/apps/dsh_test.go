@@ -115,6 +115,42 @@ func TestInstallCreatesAPatchAndUninstallLeavesOneDSHStarts(t *testing.T) {
 	}
 }
 
+// The plugin path comes from XDG_DATA_HOME or HOME, which whoever runs
+// passess sets: it must not add rows of its own to the user's patch.
+func TestInstallRefusesAPathThatWouldAddRows(t *testing.T) {
+	d := testDSH(t)
+	if err := os.MkdirAll(d.Profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.Patch, []byte(userPatch), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		"/tmp/evil\n    - id: pwn\n      name: /tmp/evil/plugin.mjs\n    #/dsh/index.mjs",
+		"relative/dsh/index.mjs",
+		"/tmp/bell\a/dsh/index.mjs",
+	} {
+		evil := d
+		evil.Plugin = bad
+		if err := evil.Install(); err == nil {
+			t.Fatalf("installed with plugin path %q", bad)
+		}
+		if got, _ := os.ReadFile(d.Patch); string(got) != userPatch {
+			t.Fatalf("plugin path %q changed the patch:\n%s", bad, got)
+		}
+	}
+	// A path with YAML's own characters stays one quoted scalar.
+	odd := d
+	odd.Plugin = filepath.Join(filepath.Dir(d.Plugin), `a "b": #c`, "index.mjs")
+	if err := odd.Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(d.Patch)
+	if want := `name: "` + strings.ReplaceAll(odd.Plugin, `"`, `\"`) + `"`; !strings.Contains(string(got), want) || strings.Count(string(got), "- id:") != strings.Count(userPatch, "- id:")+1 {
+		t.Fatalf("the path did not stay one quoted value (want %s):\n%s", want, got)
+	}
+}
+
 func TestKeys(t *testing.T) {
 	d := testDSH(t)
 	if d.Keys() != nil {

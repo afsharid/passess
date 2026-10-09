@@ -14,6 +14,9 @@ final class VaultModel: ObservableObject {
 
     init(cli: Passess?) {
         self.cli = cli
+        if cli == nil {
+            error = t("This copy of the app has no passess inside it, so it cannot take the token. Run `passess backend bws` in a terminal.")
+        }
     }
 
     var canSave: Bool { !busy && !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && cli != nil }

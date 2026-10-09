@@ -197,6 +197,12 @@ func TestKeychainStoreKeepsValueOffArgv(t *testing.T) {
 	if !strings.Contains(string(got.Stdin), `-w "`+fakeValue+`"`) {
 		t.Fatalf("stdin = %q", got.Stdin)
 	}
+	// Only names that need no quoting reach security(1)'s parser.
+	for _, bad := range []string{`with "quote`, "with space", `back\slash`, "", "tab\there"} {
+		if err := p.Store(context.Background(), "passess", bad, secret.FromString(fakeValue)); err == nil {
+			t.Fatalf("stored under account %q", bad)
+		}
+	}
 	if err := p.Store(context.Background(), "passess", "bad/name", secret.FromString(fakeValue)); err == nil {
 		t.Fatal("a slash in the account was accepted")
 	}

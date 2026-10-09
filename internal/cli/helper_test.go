@@ -69,6 +69,10 @@ clients = ["dsh"]
 ref     = "env://PASSESS_TEST_X_TOKEN"
 allow   = ["gh", "passess-helper"]
 clients = ["dsh"]
+[secrets.LOCKED]
+ref     = "env://PASSESS_TEST_X_TOKEN"
+allow   = []
+clients = ["dsh"]
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -94,6 +98,10 @@ clients = ["dsh"]
 	}
 	if out, errOut, code := run(t, "helper", "NARROWOPTED"); code != 0 || out != execValue+"\n" {
 		t.Fatalf("narrowed, opted in, connected by name: exit %d, %q", code, errOut)
+	}
+	// allow = [] locks a secret to no program: an app is no exception.
+	if out, errOut, code := run(t, "helper", "LOCKED"); code != ExitNoPerm || out != "" || !strings.Contains(errOut, "goes only to no program") {
+		t.Fatalf("locked to no program: exit %d, %q, %q", code, out, errOut)
 	}
 
 	underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "bash"}, dsh)

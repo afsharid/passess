@@ -20,6 +20,9 @@ type listedSecret struct {
 	Backends []string `json:"backends"`
 	Refs     []string `json:"refs"`
 	Allow    []string `json:"allow"`
+	// AllowNone is set for allow = []: no program, where an empty allow
+	// alone would read as no list, any program.
+	AllowNone bool `json:"allow_none,omitempty"`
 	// Clients are the coding agents it is connected to; null means every one.
 	Clients  []string `json:"clients"`
 	Approve  bool     `json:"approve"`
@@ -78,7 +81,7 @@ func runList(st *Streams, args []string) int {
 			refs = append(refs, r.String())
 		}
 		_, needed := proj.NeedsName(name)
-		ls := listedSecret{Name: name, Backends: backends, Refs: refs, Allow: nonNil(s.Allow), Clients: s.Clients,
+		ls := listedSecret{Name: name, Backends: backends, Refs: refs, Allow: nonNil(s.Allow), AllowNone: s.Allow != nil && len(s.Allow) == 0, Clients: s.Clients,
 			Approve: s.Approve, Hosts: nonNil(s.Hosts), Profiles: []string{}, MCP: []string{}, Note: s.Note, Project: needed}
 		for _, p := range sortedKeys(u.Profiles) {
 			if contains(u.Profiles[p].Secrets, name) {
@@ -107,10 +110,7 @@ func runList(st *Streams, args []string) int {
 	w := tabwriter.NewWriter(st.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tBACKEND\tALLOWED\tAGENTS\tNOTE")
 	for _, s := range out.Secrets {
-		allow := "any program except shells and interpreters"
-		if len(s.Allow) > 0 {
-			allow = strings.Join(s.Allow, ", ")
-		}
+		allow := allowedText(u.Secrets[s.Name].Allow, "any program except shells and interpreters")
 		name := s.Name
 		if s.Project {
 			name += " *"
@@ -134,6 +134,18 @@ func writeJSON(st *Streams, v any) int {
 		return failf(st, ExitSoftware, "%v", err)
 	}
 	return ExitOK
+}
+
+// allowedText says in words who an allow list lets through: anyText for no
+// list, "no program" for allow = [], else the programs.
+func allowedText(allow []string, anyText string) string {
+	switch {
+	case allow == nil:
+		return anyText
+	case len(allow) == 0:
+		return "no program"
+	}
+	return strings.Join(allow, ", ")
 }
 
 func nonNil(s []string) []string {

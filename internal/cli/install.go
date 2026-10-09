@@ -169,9 +169,13 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		return ExitUsage
 	}
 	// Taking the hooks away is the user's call: they guard the very session
-	// an agent would run this from. Installing them is not gated.
-	if *apply && (verb == "uninstall" || *noHooks) {
+	// an agent would run this from. Installing them is not gated, but
+	// --force is: it replaces an MCP entry the user put there themselves.
+	if *apply && (verb == "uninstall" || *noHooks || *force) {
 		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			if *force {
+				return failf(st, ExitNoPerm, "passess install --force --apply replaces MCP entries the user wrote; run it yourself in a terminal, not from %s", agents[0])
+			}
 			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, agents[0])
 		}
 	}

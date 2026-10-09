@@ -184,6 +184,26 @@ func (c *Conn) ReadFrame() (Frame, error) {
 	return f, err
 }
 
+// ReadMasked reads the answer to a Redact request. It carries the text back,
+// up to MaxRedact before escaping and MaxMaskGrowth longer, so it gets the
+// request's bound and that much more: one cut at maxFrame would leave the
+// hook with only its patterns.
+func (c *Conn) ReadMasked() (Frame, error) {
+	var f Frame
+	err := c.read(&f, maxRequest+MaxMaskGrowth)
+	return f, err
+}
+
+// MaxMaskGrowth is how much longer than the text the agent's masked answer
+// may be: a marker can be longer than the value it replaces, so a short
+// value seen many times grows the text. Past it the agent answers
+// MaskTooLong instead of the text.
+const MaxMaskGrowth = 512 << 10
+
+// MaskTooLong is the agent's answer to a text whose masked form would grow
+// past MaxMaskGrowth. The text holds values, so the hook must not pass it on.
+const MaskTooLong = "the masked text would be too long to send back"
+
 func (c *Conn) read(v any, limit int) error {
 	var line []byte
 	for {
