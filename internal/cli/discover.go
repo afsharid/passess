@@ -38,8 +38,14 @@ type discovered struct {
 type discoverBackend struct {
 	Scheme string `json:"scheme"`
 	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
+	// State says why it is not OK where the app acts on it: "not-set-up"
+	// when no token is stored anywhere passess looks.
+	State string `json:"state,omitempty"`
+	Error string `json:"error,omitempty"`
 }
+
+// backendNotSetUp is the State of a backend with no credential at all.
+const backendNotSetUp = "not-set-up"
 
 type discoverOutput struct {
 	Backends []discoverBackend `json:"backends"`
@@ -69,21 +75,18 @@ func runDiscover(st *Streams, args []string) int {
 	defer bws.Zero()
 
 	code = ExitOK
-	if bws.Token == nil {
-		out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, Error: "no bws access token is set up"})
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		items, err := bws.Items(ctx)
-		cancel()
-		if err != nil {
-			out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, Error: err.Error()})
-			if !errors.Is(err, errNoBWSToken) { // not set up is a state, not a failure
-				code = resolveExitCode(err)
-			}
-		} else {
-			out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, OK: true})
-			out.Secrets = unreferenced(u.Secrets, items)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	items, err := bws.Items(ctx)
+	cancel()
+	switch {
+	case errors.Is(err, errNoBWSToken): // not set up is a state, not a failure
+		out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, State: backendNotSetUp, Error: err.Error()})
+	case err != nil:
+		out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, Error: err.Error()})
+		code = resolveExitCode(err)
+	default:
+		out.Backends = append(out.Backends, discoverBackend{Scheme: ref.BWS, OK: true})
+		out.Secrets = unreferenced(u.Secrets, items)
 	}
 
 	if *asJSON {

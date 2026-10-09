@@ -45,7 +45,15 @@ public struct Discovery: Decodable, Equatable {
     public struct Backend: Decodable, Equatable {
         public let scheme: String
         public let ok: Bool
+        /// Why it is not OK where the app acts on it: "not-set-up" when no
+        /// token is stored anywhere passess looks.
+        public let state: String?
         public let error: String?
+    }
+
+    /// bws has no machine token yet: the panel offers the vault window.
+    public var bwsNotSetUp: Bool {
+        backends.contains { $0.scheme == "bws" && $0.state == "not-set-up" }
     }
 
     public struct Found: Decodable, Equatable, Identifiable {

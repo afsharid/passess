@@ -105,7 +105,7 @@ final class BarModel: ObservableObject {
     /// machine token. The panel then offers the vault window first.
     var needsVault: Bool {
         if let d = doctor, !d.config.ok { return true }
-        return discovery?.backends.contains { $0.scheme == "bws" && !$0.ok && ($0.error ?? "").contains("no bws access token") } ?? false
+        return discovery?.bwsNotSetUp ?? false
     }
 
     /// The window that takes the bws machine token.
