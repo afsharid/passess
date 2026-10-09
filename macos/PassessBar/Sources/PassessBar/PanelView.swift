@@ -39,6 +39,7 @@ struct PanelView: View {
                 .padding(.vertical, 10)
         }
         .frame(width: 340)
+        .tint(Brand.tint)
         .onAppear(perform: model.panelOpened)
     }
 
@@ -100,24 +101,29 @@ struct SecretsEntry: View {
 
     var body: some View {
         let fresh = model.found.filter(\.isNew)
-        Card(t("Secrets and connections")) {
+        Card(t("Secrets and connections"), highlighted: !fresh.isEmpty) {
             ForEach(fresh.prefix(2)) { row in
                 FoundRowView(row: row, model: model)
                 Divider()
             }
             Button(action: model.openSecrets) {
-                HStack(spacing: 8) {
-                    ToneIcon(symbol: "key.fill", tone: .neutral)
-                    Text(summary)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
+                HStack(spacing: 10) {
+                    Badge(symbol: "key.fill", size: 26)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(t("Secrets"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(summary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: 4)
                     Text(t("Show"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Brand.text)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Brand.text)
                         .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
@@ -157,16 +163,17 @@ extension Tone {
     }
 }
 
-private let cardFill = Color.primary.opacity(0.05)
-
-/// A titled group of rows on a quiet rounded background.
+/// A titled group of rows on a raised surface; highlighted, it carries the
+/// brand's edge, for what wants the user now.
 struct Card<Content: View, Trailing: View>: View {
     let title: String
+    var highlighted = false
     let trailing: Trailing
     let content: Content
 
-    init(_ title: String, @ViewBuilder trailing: () -> Trailing, @ViewBuilder content: () -> Content) {
+    init(_ title: String, highlighted: Bool = false, @ViewBuilder trailing: () -> Trailing, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.highlighted = highlighted
         self.trailing = trailing()
         self.content = content()
     }
@@ -176,18 +183,18 @@ struct Card<Content: View, Trailing: View>: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(highlighted ? Brand.text : .secondary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
                 trailing
             }
-            .padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 8) {
+            .padding(.horizontal, 6)
+            VStack(alignment: .leading, spacing: 9) {
                 content
             }
-            .padding(10)
+            .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(cardFill))
+            .surface(highlighted: highlighted)
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
@@ -195,8 +202,8 @@ struct Card<Content: View, Trailing: View>: View {
 }
 
 extension Card where Trailing == EmptyView {
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.init(title, trailing: { EmptyView() }, content: content)
+    init(_ title: String, highlighted: Bool = false, @ViewBuilder content: () -> Content) {
+        self.init(title, highlighted: highlighted, trailing: { EmptyView() }, content: content)
     }
 }
 
@@ -245,22 +252,16 @@ struct Header: View {
     var body: some View {
         let h = headline(doctor: model.doctor, failure: model.failure)
         HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(h.health.tone.color.opacity(0.16))
-                if model.doctor == nil && model.failure == nil {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: h.health.symbol + ".fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(h.health.tone.color)
-                }
+            if model.doctor == nil && model.failure == nil {
+                ProgressView().controlSize(.small)
+                    .frame(width: 40, height: 40)
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.primary.opacity(0.06)))
+            } else {
+                Badge(symbol: h.health.symbol + ".fill", gradient: h.health.tone.gradient, size: 40)
             }
-            .frame(width: 38, height: 38)
-            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(h.title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 17, weight: .bold))
                 if !h.detail.isEmpty {
                     Text(h.detail)
                         .font(.system(size: 12))
@@ -299,8 +300,11 @@ struct Tile: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 ZStack {
-                    Circle()
-                        .fill(lit ? Color.accentColor : Color.primary.opacity(0.09))
+                    if lit {
+                        Circle().fill(Brand.gradient)
+                    } else {
+                        Circle().fill(Color.primary.opacity(0.08))
+                    }
                     Image(systemName: symbol)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(lit ? Color.white : tint)
@@ -320,7 +324,7 @@ struct Tile: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .surface()
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -417,11 +421,8 @@ struct AgentRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(row.monogram)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)))
+            AgentAvatar(id: row.id, label: row.title, size: 28)
+                .opacity(row.tone == .neutral ? 0.45 : 1) // nothing set up: shown, not stressed
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.title)

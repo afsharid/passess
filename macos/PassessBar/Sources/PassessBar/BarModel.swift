@@ -21,6 +21,8 @@ final class BarModel: ObservableObject {
     @Published private(set) var secretList: SecretList?
     /// `passess discover --json`: what the vault holds that passess does not use.
     @Published private(set) var discovery: Discovery?
+    /// What the Secrets window's filter field holds.
+    @Published var secretsFilter = ""
 
     private let work = DispatchQueue(label: "passess.bar.work")
     private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh

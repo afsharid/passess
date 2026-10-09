@@ -64,6 +64,7 @@ public struct Discovery: Decodable, Equatable {
 /// One secret in the Secrets card.
 public struct SecretRow: Identifiable, Equatable {
     public let id: String // its name
+    public let clients: [String]? // the agents it is connected to; nil: every one
     public let agents: String // who may use it, in words
     public let asks: Bool // every new program and agent waits for an Allow
     public let usedBy: String? // profiles and MCP servers that hand it on
@@ -77,8 +78,8 @@ public func secretRows(_ list: SecretList, check: Check?) -> [SecretRow] {
         if let state = check?.secrets.first(where: { $0.name == s.name })?.state {
             (tone, symbol) = state == "ok" ? (.ok, "checkmark.circle.fill") : (.error, "exclamationmark.circle.fill")
         }
-        return SecretRow(id: s.name, agents: agentsText(s.clients, agents: list.agents ?? []), asks: s.approve ?? false,
-                         usedBy: usedBy(s), tone: tone, symbol: symbol)
+        return SecretRow(id: s.name, clients: s.clients, agents: agentsText(s.clients, agents: list.agents ?? []),
+                         asks: s.approve ?? false, usedBy: usedBy(s), tone: tone, symbol: symbol)
     }
 }
 
@@ -140,6 +141,13 @@ public func sourceText(_ ref: String) -> String {
     let path = ref[range.upperBound...].split(separator: "/")
     if scheme == "bws", path.count == 2 { return t("%@ · %@", scheme, String(path[1])) }
     return scheme
+}
+
+/// Whether a name matches what the user typed to filter by: any part of it,
+/// ignoring case; an empty filter matches everything.
+public func matches(_ name: String, filter: String) -> Bool {
+    let f = filter.trimmingCharacters(in: .whitespaces)
+    return f.isEmpty || name.range(of: f, options: [.caseInsensitive, .diacriticInsensitive]) != nil
 }
 
 /// Why a name cannot be used, or nil.

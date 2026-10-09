@@ -12,19 +12,11 @@ struct AskView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Tone.warning.color.opacity(0.15))
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Tone.warning.color)
-                }
-                .frame(width: 40, height: 40)
-                .accessibilityHidden(true)
+            HStack(alignment: .center, spacing: 14) {
+                Badge(symbol: "key.fill", gradient: Tone.warning.gradient, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(card.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 16, weight: .bold))
                         .fixedSize(horizontal: false, vertical: true)
                     Text(card.program)
                         .font(.system(size: 13))
@@ -37,14 +29,18 @@ struct AskView: View {
                 DetailLine(symbol: "folder", text: card.directory)
                 DetailLine(symbol: "cpu", text: card.caller)
             }
-            .padding(10)
+            .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.05)))
-            Text(card.footnote)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            .surface()
+            Label {
+                Text(card.footnote)
+            } icon: {
+                Image(systemName: "lock.shield.fill").foregroundStyle(Brand.text)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
                 Spacer()
                 Button(t("Deny"), action: onDeny)
                     .keyboardShortcut(.cancelAction)
@@ -52,12 +48,13 @@ struct AskView: View {
                 Button(action: onAllow) {
                     Label(allowTitle, systemImage: allowTitle.contains("Touch ID") ? "touchid" : "lock.open")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(PrimaryButtonStyle())
             }
         }
-        .padding(20)
-        .frame(width: 400)
+        .padding(22)
+        .frame(width: 420)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .tint(Brand.tint)
     }
 }
 

@@ -39,7 +39,10 @@ func renderPreviews(to dir: URL) -> Int32 {
 
 @MainActor
 private func render(_ view: AnyView, appearance: NSAppearance, to url: URL) -> Bool {
-    let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
+    // Drawn as the key window would be: an offscreen window never is one, and
+    // its prominent buttons and switches would come out grey.
+    let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.controlActiveState, .key))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless],
                           backing: .buffered, defer: false)
     window.appearance = appearance

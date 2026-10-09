@@ -82,6 +82,10 @@ final class ConnectModel: ObservableObject {
         if on { picked.insert(id) } else { picked.remove(id) }
     }
 
+    func pickAll() { picked = Set(agents.map(\.id)) }
+
+    func pickNone() { picked = [] }
+
     /// Touch ID first, then passess add or set.
     func save() {
         guard !busy, nameError == nil, let cli = cli else { return }
@@ -144,25 +148,18 @@ struct ConnectView: View {
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.15))
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .frame(width: 40, height: 40)
-                .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                Badge(symbol: model.adding ? "link" : "key.fill", size: 46)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(model.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 17, weight: .bold))
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(model.source)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
@@ -170,61 +167,85 @@ struct ConnectView: View {
             }
 
             if model.adding {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(t("Name agents see"))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                     TextField("", text: Binding(get: { model.name }, set: { model.name = $0 }))
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 13, design: .monospaced))
                         .accessibilityLabel(t("Name agents see"))
                     if let problem = model.nameError {
-                        Text(problem)
+                        Label(problem, systemImage: "exclamationmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(Tone.error.color)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Who may use it?"))
-                    .font(.system(size: 12, weight: .medium))
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
-                          alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(t("Who may use it?"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Button(t("All"), action: model.pickAll)
+                        .buttonStyle(.borderless)
+                    Text("·").foregroundStyle(.tertiary)
+                    Button(t("None"), action: model.pickNone)
+                        .buttonStyle(.borderless)
+                }
+                .font(.system(size: 12))
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                     ForEach(model.agents) { agent in
-                        Toggle(agent.label, isOn: Binding(get: { model.picked.contains(agent.id) },
-                                                          set: { model.setPicked(agent.id, $0) }))
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 13))
+                        let on = model.picked.contains(agent.id)
+                        AgentChoice(agent: agent, picked: on) { model.setPicked(agent.id, !on) }
                     }
                 }
                 if model.picked.isEmpty {
-                    Text(t("Without an agent ticked, no agent can use it; your own terminal still can."))
+                    Label(t("Without an agent ticked, no agent can use it; your own terminal still can."), systemImage: "info.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 12) {
+                Image(systemName: "touchid")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Brand.text)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Brand.tint.opacity(0.12)))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Ask me first"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(t("Each new program and agent waits for your OK: Touch ID or your password."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
                 Toggle(t("Ask me first"), isOn: Binding(get: { model.approve }, set: { model.approve = $0 }))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .font(.system(size: 13))
-                Text(t("Each new program and agent waits for your OK: Touch ID or your password."))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .toggleStyle(BrandSwitchStyle())
+                    .accessibilityLabel(t("Ask me first"))
             }
+            .padding(12)
+            .surface()
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 if !model.users.isEmpty {
                     DetailLine(symbol: "link", text: t("Used by %@", model.users.joined(separator: ", ")))
                 }
-                DetailLine(symbol: "eye.slash", text: t("The value is never shown, here or to any agent."))
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Brand.text)
+                        .frame(width: 14)
+                        .accessibilityHidden(true)
+                    Text(t("The value is never shown, here or to any agent."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.05)))
 
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -234,10 +255,14 @@ struct ConnectView: View {
                     .textSelection(.enabled)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if !model.adding {
-                    Button(t("Remove from passess"), role: .destructive, action: model.remove)
-                        .disabled(model.busy)
+                    Button(role: .destructive, action: model.remove) {
+                        Label(t("Remove from passess"), systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Tone.error.color)
+                    .disabled(model.busy)
                 }
                 Spacer()
                 if model.busy {
@@ -248,15 +273,52 @@ struct ConnectView: View {
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.large)
                 Button(action: model.save) {
-                    Label(model.saveTitle, systemImage: model.saveTitle.contains("Touch ID") ? "touchid" : "lock")
+                    Label(model.saveTitle, systemImage: model.saveTitle.contains("Touch ID") ? "touchid" : "lock.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(PrimaryButtonStyle())
                 .disabled(model.busy || model.nameError != nil)
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .padding(22)
+        .frame(width: 440)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .tint(Brand.tint)
+    }
+}
+
+/// One coding agent to tick: its avatar and name on a tile that lights up
+/// when picked.
+struct AgentChoice: View {
+    let agent: SecretList.Agent
+    let picked: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 9) {
+                AgentAvatar(id: agent.id, label: agent.label, size: 24)
+                Text(agent.label)
+                    .font(.system(size: 13, weight: picked ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(picked ? Brand.text : Color.secondary.opacity(0.55))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(picked ? Brand.tint.opacity(0.11) : Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(picked ? Brand.text.opacity(0.65) : Color.primary.opacity(0.1), lineWidth: picked ? 1.2 : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(agent.label)
+        .accessibilityValue(picked ? t("selected") : t("not selected"))
+        .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
     }
 }
 
