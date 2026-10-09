@@ -118,7 +118,7 @@ terminal is not an agent and keeps what `allow` says.
 ```toml
 [secrets.OPENROUTER_API_KEY]
 ref     = "bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/OPENROUTER_API_KEY"
-clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antigravity, cursor, gemini-cli, zed
+clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antigravity, cursor, gemini-cli, zed, dsh
 ```
 
 ```sh

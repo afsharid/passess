@@ -61,6 +61,7 @@ struct AgentStyle {
         case "cursor": return AgentStyle(color: rgb(0xBE185D), monogram: "Cu")
         case "gemini", "gemini-cli": return AgentStyle(color: rgb(0x4F46E5), monogram: "G")
         case "zed": return AgentStyle(color: rgb(0x0E7490), monogram: "Z")
+        case "dsh": return AgentStyle(color: rgb(0x4D6BFE), monogram: "DS")
         case "vscode": return AgentStyle(color: rgb(0x0B5CAD), monogram: "VS")
         case "windsurf": return AgentStyle(color: rgb(0x0F766E), monogram: "W")
         default: return AgentStyle(color: rgb(0x5F6672), monogram: String(label.prefix(2)))

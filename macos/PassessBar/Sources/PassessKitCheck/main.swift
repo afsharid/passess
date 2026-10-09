@@ -95,7 +95,7 @@ expect(agents[2].tone == .neutral && agents[2].detail == "Nothing set up", "an a
 // secrets screen
 let list = load(SecretList.self, "list.json")
 let known = list.agents ?? []
-expect(known.first == SecretList.Agent(id: "claude-code", label: "Claude Code") && known.count == 8, "agents a secret can be connected to")
+expect(known.first == SecretList.Agent(id: "claude-code", label: "Claude Code") && known.count == 9, "agents a secret can be connected to")
 let rows = secretRows(list, check: nil)
 expect(rows.map(\.id) == ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY", "SUDO_PASSWORD"], "one row per secret: \(rows.map(\.id))")
 expect(rows[0].agents == "Every agent" && !rows[0].asks && rows[0].tone == .neutral, "no clients list: every agent")

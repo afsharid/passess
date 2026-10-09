@@ -112,6 +112,10 @@
     {
       "id": "zed",
       "label": "Zed"
+    },
+    {
+      "id": "dsh",
+      "label": "DeepSeek Harness"
     }
   ]
 }

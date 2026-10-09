@@ -56,6 +56,7 @@ type Agent struct {
 var Agents = []Agent{
 	{"claude-code", "Claude Code"}, {"codex", "Codex"}, {"opencode", "OpenCode"}, {"kiro", "Kiro"},
 	{"antigravity", "Antigravity"}, {"cursor", "Cursor"}, {"gemini-cli", "Gemini CLI"}, {"zed", "Zed"},
+	{"dsh", "DeepSeek Harness"},
 }
 
 // IsAgent reports whether id is one of Agents.
@@ -94,9 +95,13 @@ func IsMarker(name string) bool {
 // programs maps the process names of harness executables, as the kernel
 // keeps them, to harness names. Editors whose terminals people also type in
 // (Zed, VS Code) are left out: their process says nothing about who typed.
+// DeepSeek Harness runs its window, its helpers ("DeepSeek Harness Helper"
+// cut to 16 bytes) and its headless CLI (the same executable as node) under
+// one name, and sets no marker.
 var programs = map[string]string{
 	"claude": "claude-code", "codex": "codex", "opencode": "opencode", "opencode.exe": "opencode",
 	"kiro-cli": "kiro", "kiro-cli-chat": "kiro", "agy": "antigravity", "cursor-agent": "cursor", "gemini": "gemini-cli",
+	"DeepSeek Harness": "dsh",
 }
 
 // Program returns the harness whose executable has this process name, or "".
