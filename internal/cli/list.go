@@ -20,6 +20,9 @@ type listedSecret struct {
 	Backends []string `json:"backends"`
 	Refs     []string `json:"refs"`
 	Allow    []string `json:"allow"`
+	// AllowNone is set for allow = []: no program, where an empty allow
+	// alone would read as no list, any program.
+	AllowNone bool `json:"allow_none,omitempty"`
 	// Clients are the coding agents it is connected to; null means every one.
 	Clients  []string `json:"clients"`
 	Approve  bool     `json:"approve"`
@@ -78,7 +81,7 @@ func runList(st *Streams, args []string) int {
 			refs = append(refs, r.String())
 		}
 		_, needed := proj.NeedsName(name)
-		ls := listedSecret{Name: name, Backends: backends, Refs: refs, Allow: nonNil(s.Allow), Clients: s.Clients,
+		ls := listedSecret{Name: name, Backends: backends, Refs: refs, Allow: nonNil(s.Allow), AllowNone: s.Allow != nil && len(s.Allow) == 0, Clients: s.Clients,
 			Approve: s.Approve, Hosts: nonNil(s.Hosts), Profiles: []string{}, MCP: []string{}, Note: s.Note, Project: needed}
 		for _, p := range sortedKeys(u.Profiles) {
 			if contains(u.Profiles[p].Secrets, name) {

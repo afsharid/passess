@@ -28,6 +28,9 @@ allow = ["gh", "git"]
 note  = "repo:read"
 [secrets.DB_URL]
 ref = ["env://DATABASE_URL", "keychain://passess/db"]
+[secrets.LOCKED]
+ref   = "keychain://passess/locked"
+allow = []
 `)
 	if err := os.WriteFile(filepath.Join(dir, "passess.toml"), []byte("version = 1\n[needs.DB_URL]\n[needs.STRIPE_KEY]\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -40,11 +43,18 @@ ref = ["env://DATABASE_URL", "keychain://passess/db"]
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Secrets) != 2 || got.Secrets[0].Name != "DB_URL" || !got.Secrets[0].Project || got.Secrets[1].Project {
+	if len(got.Secrets) != 3 || got.Secrets[0].Name != "DB_URL" || !got.Secrets[0].Project || got.Secrets[1].Project {
 		t.Fatalf("secrets = %+v", got.Secrets)
 	}
 	if strings.Join(got.Secrets[0].Backends, ",") != "env,keychain" || strings.Join(got.Secrets[1].Allow, ",") != "gh,git" {
 		t.Fatalf("details = %+v", got.Secrets)
+	}
+	// allow = [] is no program; without allow_none it would read as any.
+	if l := got.Secrets[2]; l.Name != "LOCKED" || !l.AllowNone || len(l.Allow) != 0 || got.Secrets[0].AllowNone || got.Secrets[1].AllowNone {
+		t.Fatalf("allow_none = %+v", got.Secrets)
+	}
+	if !strings.Contains(out, `"allow_none": true`) && !strings.Contains(out, `"allow_none":true`) {
+		t.Fatalf("list --json lacks allow_none:\n%s", out)
 	}
 	if len(got.Missing) != 1 || got.Missing[0] != "STRIPE_KEY" {
 		t.Fatalf("missing = %v", got.Missing)
