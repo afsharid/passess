@@ -111,7 +111,7 @@ func runDiscover(st *Streams, args []string) int {
 	for _, d := range out.Secrets {
 		// Whoever can write to the vault chooses these names; an escape
 		// sequence in one must not redraw the table the user reads.
-		fmt.Fprintf(w, "%s\t%s\tpassess add %s --ref %s\n", vaultName(d.Key), vaultName(d.Project), d.Name, d.Ref)
+		fmt.Fprintf(w, "%s\t%s\tpassess add %s --ref %s\n", vaultName(d.Key), vaultName(d.Project), d.Name, vaultName(d.Ref))
 	}
 	_ = w.Flush()
 	fmt.Fprintln(st.Stdout, "\nOr connect them in Passess.app.")

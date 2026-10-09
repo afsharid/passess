@@ -56,6 +56,9 @@ func TestParseInvalid(t *testing.T) {
 		"env://1BAD",
 		"env://A/B",
 		"env://OK\n",
+		"keychain://pass\x1b[2Jess/item", // an escape that would redraw the terminal
+		"keychain://passess/item\x7f",
+		"keychain://passess/item\u0085",
 	} {
 		_, err := Parse(in)
 		if err == nil {

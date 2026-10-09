@@ -41,13 +41,19 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
 }
 
+// isControl reports a C0 or C1 control character or DEL: none belongs in a
+// reference, and an escape among them would redraw the terminal that shows it.
+func isControl(r rune) bool {
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0)
+}
+
 // Parse parses s. The error never contains s itself.
 func Parse(s string) (Ref, error) {
 	scheme, rest, ok := strings.Cut(s, "://")
 	if !ok || !known(scheme) {
 		return Ref{}, invalid("expected <scheme>://…, one of op, bws, bw, vault, keychain, env")
 	}
-	if strings.ContainsAny(rest, "\x00\n\r") {
+	if strings.ContainsFunc(rest, isControl) {
 		return Ref{}, invalid("%s reference contains a control character", scheme)
 	}
 	r := Ref{Scheme: scheme}

@@ -82,21 +82,34 @@ func (b Bitwarden) Resolve(ctx context.Context, r ref.Ref) (secret.Value, error)
 		}
 		return v, nil
 	}
+	// Values stay raw bytes until the one asked for: decoding them all into
+	// strings would leave every custom field of the item, asked for or not,
+	// in memory no Zero reaches.
 	var it struct {
 		Fields []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
+			Name  string          `json:"name"`
+			Value json.RawMessage `json:"value"`
 		} `json:"fields"`
 	}
 	err = json.Unmarshal(res.Stdout, &it)
 	clear(res.Stdout)
+	defer func() {
+		for _, f := range it.Fields {
+			clear(f.Value)
+		}
+	}()
 	if err != nil {
 		return secret.Value{}, &Error{r, errors.New("bw returned output passess cannot read")}
 	}
 	for _, f := range it.Fields {
-		if f.Name == field && f.Value != "" {
-			return secret.FromString(f.Value), nil
+		if f.Name != field {
+			continue
 		}
+		var v string
+		if json.Unmarshal(f.Value, &v) != nil || v == "" {
+			break
+		}
+		return secret.FromString(v), nil
 	}
 	return secret.Value{}, &Error{r, ErrNotFound}
 }
