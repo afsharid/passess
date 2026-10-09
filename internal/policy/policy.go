@@ -247,12 +247,13 @@ func hashFile(path string) []byte {
 
 // Effective combines the user's allow list with a project's narrowing. Nil
 // means "any program the default policy does not deny"; an empty non-nil
-// slice means nothing is allowed.
+// slice means nothing is allowed, and a project cannot widen that: only a
+// nil side gives way to the other, an empty one intersects to nothing.
 func Effective(user, project []string) []string {
-	if len(project) == 0 {
+	if project == nil {
 		return user
 	}
-	if len(user) == 0 {
+	if user == nil {
 		return project
 	}
 	both := []string{}

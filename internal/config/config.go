@@ -154,7 +154,7 @@ type BWS struct {
 type Secret struct {
 	Name  string
 	Refs  []ref.Ref // candidates, first that resolves wins
-	Allow []string  // program families that may receive it; empty means any non-denied program
+	Allow []string  // program families that may receive it; nil means any non-denied program, empty (allow = []) none
 	Note  string
 	// Approve makes every new (program, caller) pair wait for the user's
 	// Allow, given through `passess agent`.

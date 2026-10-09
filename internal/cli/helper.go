@@ -58,10 +58,15 @@ func runHelper(st *Streams, args []string) int {
 		// The app is known by its process name, which any program can take.
 		// A secret any program may receive (no allow list) loses nothing to
 		// that: `passess exec` hands it to such a program anyway. One the user
-		// narrowed to some programs must opt in to passess helper itself.
-		if len(s.Allow) > 0 {
+		// narrowed to some programs, or locked to none (allow = []), must opt
+		// in to passess helper itself.
+		if s.Allow != nil {
+			to := strings.Join(s.Allow, ", ")
+			if to == "" {
+				to = "no program"
+			}
 			return failf(st, ExitNoPerm, "%s goes only to %s, and %s is known by a process name any program can take. To let it read the key anyway, add %q to secrets.%s.allow in %s.",
-				name, strings.Join(s.Allow, ", "), detect.Label(app), HelperFamily, name, u.Path)
+				name, to, detect.Label(app), HelperFamily, name, u.Path)
 		}
 	}
 	self, err := os.Executable()

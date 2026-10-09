@@ -170,6 +170,14 @@ func TestEffective(t *testing.T) {
 	if got := Effective([]string{"gh"}, []string{"curl"}); got == nil || len(got) != 0 {
 		t.Fatalf("disjoint lists must allow nothing, got %v", got)
 	}
+	// allow = [] in the user's config locks a secret to no program; a
+	// project file must not open it.
+	if got := Effective([]string{}, []string{"curl"}); got == nil || len(got) != 0 {
+		t.Fatalf("a project widened a secret locked to no program: %v", got)
+	}
+	if got := Effective([]string{"gh"}, []string{}); got == nil || len(got) != 0 {
+		t.Fatalf("a project that allows nothing must narrow to nothing: %v", got)
+	}
 }
 
 // A caller that restricts PATH to the disguise's own directory must not hide

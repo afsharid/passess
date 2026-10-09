@@ -107,10 +107,7 @@ func runList(st *Streams, args []string) int {
 	w := tabwriter.NewWriter(st.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tBACKEND\tALLOWED\tAGENTS\tNOTE")
 	for _, s := range out.Secrets {
-		allow := "any program except shells and interpreters"
-		if len(s.Allow) > 0 {
-			allow = strings.Join(s.Allow, ", ")
-		}
+		allow := allowedText(u.Secrets[s.Name].Allow, "any program except shells and interpreters")
 		name := s.Name
 		if s.Project {
 			name += " *"
@@ -134,6 +131,18 @@ func writeJSON(st *Streams, v any) int {
 		return failf(st, ExitSoftware, "%v", err)
 	}
 	return ExitOK
+}
+
+// allowedText says in words who an allow list lets through: anyText for no
+// list, "no program" for allow = [], else the programs.
+func allowedText(allow []string, anyText string) string {
+	switch {
+	case allow == nil:
+		return anyText
+	case len(allow) == 0:
+		return "no program"
+	}
+	return strings.Join(allow, ", ")
 }
 
 func nonNil(s []string) []string {
