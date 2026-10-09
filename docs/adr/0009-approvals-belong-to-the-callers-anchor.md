@@ -47,8 +47,9 @@ An approval is keyed on (secret, program family, **anchor**).
   - Passess.app, next.
   - `passess agent approve` on the user's own terminal. It refuses inside a harness and
     without a terminal.
-  - Any other process that connects as one. The agent refuses approvers whose own
-    anchor is a harness executable (`detect.Program`).
+  - Any other process that connects as one. The agent refuses approvers with a harness
+    executable (`detect.Program`) anywhere among their ancestors: a program in between,
+    such as `script` or an interpreter, would be an anchor of its own.
 
 Anchors measured on the maintainer's Mac, 2026-09-26, with a dev agent and no approver,
 reading the name from the refusal:

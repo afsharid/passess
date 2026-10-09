@@ -24,6 +24,9 @@ var binary string // passess built once for tests that need a real process
 var pkgDir string
 
 func TestMain(m *testing.M) {
+	if listen := os.Getenv("PASSESS_TEST_RELAY"); listen != "" { // this binary as dialApprover's relay
+		os.Exit(relay(listen, os.Getenv("PASSESS_TEST_RELAY_TO")))
+	}
 	dir, err := os.MkdirTemp("", "passess-cli-test")
 	if err != nil {
 		panic(err)

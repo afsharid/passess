@@ -311,13 +311,16 @@ func (s *agentServer) serveApprover(c *agent.Conn) {
 	}
 }
 
-// approverGate refuses an approver whose anchor is a harness: an agent must
-// not approve its own requests. One that detaches from the harness first
-// gets through (T6).
+// approverGate refuses an approver with a harness among its ancestors: an
+// agent must not approve its own requests. The whole chain counts, not only
+// the anchor, since any program the agent starts in between (script,
+// timeout, an interpreter) is an anchor of its own. One that detaches from
+// the harness first, a daemonized child whose parent is now launchd, gets
+// through (T6).
 func approverGate(chain []agent.Proc) error {
-	if a, ok := agent.Anchor(chain); ok {
-		if h := agent.HarnessOf(a); h != "" {
-			return fmt.Errorf("refusing an approver started by %s (pid %d): an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own", a.Name, a.PID)
+	for _, p := range chain {
+		if agent.HarnessOf(p) != "" {
+			return fmt.Errorf("refusing an approver started by %s (pid %d): an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own", p.Name, p.PID)
 		}
 	}
 	return nil
