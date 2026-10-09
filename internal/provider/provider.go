@@ -5,15 +5,18 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -124,14 +127,36 @@ func trustedDirs() []string {
 }
 
 // accountHome is the home directory in the account database, "" when the
-// lookup fails. It looks the uid up rather than calling user.Current: without
-// cgo, Current falls back to $HOME and $USER when the uid has no passwd entry
-// (LDAP and SSSD accounts, containers run as an arbitrary uid), and those are
-// the caller's to set. A variable so that tests can point it at a directory
-// of their own.
+// lookup fails. On macOS os/user asks the system (getpwuid_r) even without
+// cgo. Elsewhere, without cgo, user.Current and user.LookupId fall back to
+// $HOME and $USER when the uid has no /etc/passwd entry (LDAP and SSSD
+// accounts, containers run as an arbitrary uid), and those are the caller's
+// to set; so /etc/passwd is read here and nothing else. A variable so that
+// tests can point it at a directory of their own.
 var accountHome = func() string {
-	if u, err := user.LookupId(strconv.Itoa(os.Getuid())); err == nil {
-		return u.HomeDir
+	if runtime.GOOS == "darwin" {
+		if u, err := user.Current(); err == nil {
+			return u.HomeDir
+		}
+		return ""
+	}
+	f, err := os.Open("/etc/passwd")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	return passwdHome(f, strconv.Itoa(os.Getuid()))
+}
+
+// passwdHome is the home directory of uid in an /etc/passwd-style file, ""
+// when no line names it.
+func passwdHome(r io.Reader, uid string) string {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Split(sc.Text(), ":")
+		if len(f) >= 7 && f[2] == uid && filepath.IsAbs(f[5]) {
+			return f[5]
+		}
 	}
 	return ""
 }
