@@ -60,10 +60,8 @@ func runBackend(st *Streams, args []string) int {
 		return failf(st, ExitUsage, "%v", err)
 	}
 	defer token.Zero()
-	kc := provider.Keychain{Runner: backendRunner, Getenv: st.Getenv}
-	if err := kc.Store(context.Background(), defaultBWSToken.Path[0], defaultBWSToken.Path[1], token); err != nil {
-		return failf(st, ExitUnavailable, "storing the bws token failed: %v", err)
-	}
+	// The config first: a token stored with no config to read it is a
+	// half-done setup; an empty config without a token is just a start.
 	if u == nil {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return failf(st, ExitConfig, "%v", err)
@@ -72,6 +70,10 @@ func runBackend(st *Streams, args []string) int {
 			return failf(st, ExitConfig, "%v", err)
 		}
 		fmt.Fprintf(st.Stdout, "passess: started %s\n", path)
+	}
+	kc := provider.Keychain{Runner: backendRunner, Getenv: st.Getenv}
+	if err := kc.Store(context.Background(), defaultBWSToken.Path[0], defaultBWSToken.Path[1], token); err != nil {
+		return failf(st, ExitUnavailable, "storing the bws token failed: %v", err)
 	}
 	fmt.Fprintf(st.Stdout, "passess: the bws machine token is in %s; `passess discover` lists the vault's secrets\n", defaultBWSToken.String())
 	return ExitOK

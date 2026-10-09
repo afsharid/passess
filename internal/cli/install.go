@@ -234,8 +234,8 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 		out.Harnesses = append(out.Harnesses, r)
 	}
-	apps, ok := appReports(st, verb, appNames, len(appNames) == 0 && len(names) == 0, user, *apply)
-	out.Apps, healthy = apps, healthy && ok
+	reports, ok := appReports(st, verb, appNames, len(appNames) == 0 && len(names) == 0, user, *apply)
+	out.Apps, healthy = reports, healthy && ok
 
 	if *asJSON {
 		if code := writeJSON(st, out); code != ExitOK {

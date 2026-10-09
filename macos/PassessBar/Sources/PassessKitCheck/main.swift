@@ -136,7 +136,9 @@ expect(sourceText("bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/HASS_TOKEN") == "b
        && sourceText("keychain://passess/github") == "keychain", "where a secret comes from, short")
 
 let discovery = load(Discovery.self, "discover.json")
-expect(discovery.backends.first?.ok == true, "discover reports its backend")
+expect(discovery.backends.first?.ok == true && !discovery.bwsNotSetUp, "discover reports its backend")
+let notSetUp = try! JSONDecoder().decode(Discovery.self, from: Data(#"{"backends": [{"scheme": "bws", "ok": false, "state": "not-set-up", "error": "no bws access token"}], "secrets": []}"#.utf8))
+expect(notSetUp.bwsNotSetUp, "a vault with no token is not set up")
 expect(discovery.secrets.contains { $0.key == "nvidia-nim" && $0.name == "NVIDIA_NIM" }, "a vault key gets a passess name")
 // NEW_KEY was added to the vault at 2026-10-09T08:15:23Z; the others carry no date.
 let added = ISO8601DateFormatter().date(from: "2026-10-09T08:15:23Z")!

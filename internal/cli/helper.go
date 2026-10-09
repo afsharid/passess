@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/afsharid/passess/internal/agent"
 	"github.com/afsharid/passess/internal/config"
@@ -59,8 +60,8 @@ func runHelper(st *Streams, args []string) int {
 		// that: `passess exec` hands it to such a program anyway. One the user
 		// narrowed to some programs must opt in to passess helper itself.
 		if len(s.Allow) > 0 {
-			return failf(st, ExitNoPerm, "%s goes only to %v, and %s is known by a process name any program can take. To let it read the key anyway, add %q to secrets.%s.allow in %s.",
-				name, s.Allow, detect.Label(app), HelperFamily, name, u.Path)
+			return failf(st, ExitNoPerm, "%s goes only to %s, and %s is known by a process name any program can take. To let it read the key anyway, add %q to secrets.%s.allow in %s.",
+				name, strings.Join(s.Allow, ", "), detect.Label(app), HelperFamily, name, u.Path)
 		}
 	}
 	self, err := os.Executable()

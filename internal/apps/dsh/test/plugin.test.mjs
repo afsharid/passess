@@ -1,6 +1,6 @@
 // Run: node internal/apps/dsh/test/plugin.test.mjs (make dsh-check)
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -60,6 +60,17 @@ await new Promise(r => setTimeout(r, 50))
 writeFileSync(statusFile, '{"pid": 1, "since": "another instance"}\n')
 await Promise.all(effects2.map(dispose => dispose()))
 assert.ok(existsSync(statusFile), "dispose keeps another instance's status file")
+
+// The heartbeat: while loaded the plugin rewrites its file, so it stays fresh.
+rmSync(statusFile, { force: true })
+const effects3 = []
+plugin.apply({ ...ctx, credentials: { ...service }, effect: f => effects3.push(f()) }, { passess: join(here, 'fake-passess'), beatSeconds: 0.05 })
+await new Promise(r => setTimeout(r, 30))
+const first = statSync(statusFile).mtimeMs
+await new Promise(r => setTimeout(r, 200))
+assert.ok(statSync(statusFile).mtimeMs > first, 'the heartbeat rewrites the status file')
+await Promise.all(effects3.map(dispose => dispose()))
+assert.ok(!existsSync(statusFile), 'dispose stops the heartbeat and removes its file')
 rmSync(log, { force: true })
 rmSync(state, { recursive: true, force: true })
 console.log('plugin: all checks passed')

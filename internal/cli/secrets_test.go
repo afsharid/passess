@@ -404,7 +404,7 @@ ref = "env://PASSESS_TEST_LOOSE"
 	if code != 0 {
 		t.Fatalf("no token: exit %d, %q", code, errOut)
 	}
-	if !strings.Contains(out, `"ok": false`) || !strings.Contains(out, "no bws access token") {
+	if !strings.Contains(out, `"ok": false`) || !strings.Contains(out, `"state": "not-set-up"`) || !strings.Contains(out, "no bws access token") {
 		t.Fatalf("without a token discover says so:\n%s", out)
 	}
 
