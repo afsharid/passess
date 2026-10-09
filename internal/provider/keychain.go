@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/afsharid/passess/internal/ref"
