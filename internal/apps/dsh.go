@@ -181,8 +181,10 @@ func (d DSH) Install() error {
 	// Read it back: the file must hold this block and nothing else of ours,
 	// or the user's own file goes back as it was.
 	if d.RowState() != StateOK || strings.Count(doc, BlockStart) != 1 {
-		if len(data) > 0 {
+		if data != nil {
 			_ = writeAtomic(d.Patch, data, 0o600)
+		} else {
+			_ = os.Remove(d.Patch) // there was none
 		}
 		return fmt.Errorf("%s did not read back as written; left as it was", d.Patch)
 	}
