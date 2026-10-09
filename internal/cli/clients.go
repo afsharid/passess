@@ -9,13 +9,20 @@ import (
 	"github.com/afsharid/passess/internal/detect"
 )
 
+// selfChain is this process and its ancestors, nearest first. Tests that act
+// as a person at a terminal replace it: run from inside a coding agent, the
+// real chain names that agent.
+var selfChain = func() []agent.Proc {
+	chain, _ := agent.Ancestry(os.Getpid())
+	return chain
+}
+
 // callerAgents names the coding agents a call comes from: those its
-// environment names and those whose programs are among the ancestors of pid.
-// A command can clear a marker from its environment but cannot choose its
+// environment names and those whose programs are in its process chain. A
+// command can clear a marker from its environment but cannot choose its
 // ancestors; either one seen counts.
-func callerAgents(getenv func(string) string, pid int) []string {
+func callerAgents(getenv func(string) string, chain []agent.Proc) []string {
 	out := detect.Harnesses(getenv)
-	chain, _ := agent.Ancestry(pid)
 	for _, p := range chain {
 		if h := detect.Program(p.Name); h != "" && !slices.Contains(out, h) {
 			out = append(out, h)
@@ -48,8 +55,20 @@ func checkClients(st *Streams, u *config.User, names, agents []string) int {
 // each must be connected to the coding agents the call comes from, and those
 // marked approve need the user's Allow.
 func admit(st *Streams, u *config.User, names, argv []string) int {
-	if code := checkClients(st, u, names, callerAgents(st.Getenv, os.Getpid())); code != 0 {
+	if code := checkClients(st, u, names, callerAgents(st.Getenv, selfChain())); code != 0 {
 		return code
 	}
 	return askApproval(st, u, names, argv)
+}
+
+// refuseUnderAgent keeps a command the user's when a coding agent is seen in
+// the call, the same two ways checkClients sees one: what decides who may use
+// which secret must not be weaker than what it decides. what says what the
+// command does, for the refusal.
+func refuseUnderAgent(st *Streams, command, what string) int {
+	if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+		return failf(st, ExitNoPerm, "passess %s %s; run it yourself in a terminal or use Passess.app, not from %s. Tell the user what you need.",
+			command, what, detect.Label(agents[0]))
+	}
+	return 0
 }

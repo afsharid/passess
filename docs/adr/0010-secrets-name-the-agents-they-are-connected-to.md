@@ -32,9 +32,14 @@ for every secret; nothing said "Codex, but not OpenCode".
 - `passess set` changes a secret's clients, approval and note; `passess remove` forgets
   one, but never one a profile or MCP server uses. Both edit the one `[secrets.NAME]`
   table byte for byte, after a backup, and keep the result only if parsing both versions
-  shows exactly that change. `add` takes `--clients` and `--approve`.
-- `add`, `set`, `remove` and `discover` refuse under a harness, and the hooks refuse
-  them in agent shells: who may use which secret, and what the vault holds, are the
+  shows exactly that change. `add` takes `--clients` and `--approve`. `add`, `set` and
+  `remove` hold a lock file next to the config while they read and write it, so a change
+  from the app and one from a terminal queue up instead of one overwriting the other.
+- `add`, `set`, `remove` and `discover` refuse when a coding agent is seen in the call,
+  by a marker or among the caller's ancestors, as the commands that hand out secrets
+  see one: what decides who may use a secret must not be easier to reach than what it
+  decides (an agent without a marker, Kiro, is seen by its process). The hooks refuse
+  them in agent shells too. Who may use which secret, and what the vault holds, are the
   user's.
 - The menu bar app lists the secrets and the vault's unconnected ones. Connecting or
   changing one opens a window with a checkbox per agent and "ask me first"; Save asks for

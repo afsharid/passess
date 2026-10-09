@@ -3,22 +3,113 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/afsharid/passess/internal/agent"
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/provider"
 )
 
+// underChain makes this process look as if chain were its ancestry, for the
+// rest of the test.
+func underChain(t *testing.T, chain ...agent.Proc) {
+	t.Helper()
+	saved := selfChain
+	t.Cleanup(func() { selfChain = saved })
+	selfChain = func() []agent.Proc { return chain }
+}
+
+func TestCallerAgentsFromAncestry(t *testing.T) {
+	none := func(string) string { return "" }
+	chain := []agent.Proc{{Name: "passess"}, {Name: "zsh"}, {Name: "kiro-cli-chat"}, {Name: "login"}}
+	if got := callerAgents(none, chain); !slices.Equal(got, []string{"kiro"}) {
+		t.Fatalf("kiro has no marker; its process names it: %v", got)
+	}
+	marker := func(k string) string {
+		if k == "CODEX_THREAD_ID" {
+			return "t"
+		}
+		return ""
+	}
+	if got := callerAgents(marker, chain); !slices.Equal(got, []string{"codex", "kiro"}) {
+		t.Fatalf("a marker and an ancestor both count: %v", got)
+	}
+	if got := callerAgents(none, []agent.Proc{{Name: "passess"}, {Name: "zsh"}, {Name: "Terminal"}}); len(got) != 0 {
+		t.Fatalf("a terminal is no agent: %v", got)
+	}
+}
+
+// The commands that decide who may use a secret see an agent the way the
+// commands that hand secrets out do: Kiro sets no marker, and a command
+// cleared of markers still has its ancestors.
+func TestPolicyCommandsRefuseAnAgentAmongAncestors(t *testing.T) {
+	noHarness(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := writeConfig(t, "version = 1\n[secrets.X]\nref = \"env://PASSESS_TEST_X_TOKEN\"\nclients = [\"codex\"]\n")
+	before, _ := os.ReadFile(filepath.Join(dir, "config.toml"))
+	underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "zsh"}, agent.Proc{Name: "kiro-cli-chat"})
+	for _, args := range [][]string{
+		{"set", "X", "--clients", "all"},
+		{"remove", "X"},
+		{"add", "Y", "--ref", "env://PASSESS_TEST_Y_TOKEN", "--clients", "kiro"},
+		{"discover"},
+	} {
+		if _, errOut, code := run(t, args...); code != ExitNoPerm || !strings.Contains(errOut, "not from Kiro") {
+			t.Fatalf("%q from Kiro: exit %d, %q", args, code, errOut)
+		}
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "config.toml")); string(after) != string(before) {
+		t.Fatalf("Kiro changed the config:\n%s", after)
+	}
+}
+
+// Two changes at once both land: the second waits for the first instead of
+// writing over it.
+func TestConcurrentChangesAllLand(t *testing.T) {
+	noHarness(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var body strings.Builder
+	body.WriteString("version = 1\n")
+	const n = 8
+	for i := range n {
+		fmt.Fprintf(&body, "[secrets.S%d]\nref = \"env://PASSESS_TEST_S%d\"\n", i, i)
+	}
+	dir := writeConfig(t, body.String())
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, errOut, code := run(t, "set", fmt.Sprintf("S%d", i), "--note", fmt.Sprintf("note %d", i)); code != 0 {
+				t.Errorf("set S%d: exit %d, %q", i, code, errOut)
+			}
+		}()
+	}
+	wg.Wait()
+	u, err := config.LoadUser(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range n {
+		if got := u.Secrets[fmt.Sprintf("S%d", i)].Note; got != fmt.Sprintf("note %d", i) {
+			t.Errorf("S%d lost its change: note %q", i, got)
+		}
+	}
+}
+
 // inheritedAgents are the coding agents among this test's own ancestors. Run
-// from inside one, every command a test runs is that agent's call, so a
-// clients list has to name it for the call to be allowed.
+// from inside one, a command an agent runs for the test is that agent's
+// call (the agent reads the real chain), so a clients list has to name it.
 func inheritedAgents() []string {
-	return callerAgents(func(string) string { return "" }, os.Getpid())
+	chain, _ := agent.Ancestry(os.Getpid())
+	return callerAgents(func(string) string { return "" }, chain)
 }
 
 // strangerAgent is a coding agent the test does not run under, and the

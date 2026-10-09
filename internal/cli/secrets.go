@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
@@ -60,22 +61,40 @@ func clientsLiteral(v string) (*string, error) {
 	return &lit, nil
 }
 
-// refuseUnderAgent keeps policy changes the user's: they decide which agent
-// may use which secret, so an agent asking for one is told to ask the user.
-func refuseUnderAgent(st *Streams, command string) int {
-	if h := detect.Harness(st.Getenv); h != "" {
-		return failf(st, ExitNoPerm, "passess %s decides who may use which secret; run it yourself in a terminal or use Passess.app, not from %s. Tell the user what you need.", command, h)
+// whoUses is what add, set and remove do, for their refusals.
+const whoUses = "decides who may use which secret"
+
+// lockConfig holds the user config's lock until the returned function runs,
+// so that changes from Passess.app and a terminal queue up instead of one
+// overwriting the other. The lock is a file of its own: the config is
+// replaced by rename, and a lock on the old file would not hold the new one.
+func lockConfig(path string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
 	}
-	return 0
+	f, err := os.OpenFile(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil { //nolint:gosec // G115: a descriptor fits in int
+		_ = f.Close()
+		return nil, err
+	}
+	return func() { _ = f.Close() }, nil // closing releases the lock
 }
 
-// editUserConfig rewrites the user config with edit, after a backup, and keeps
-// the result only if it loads.
+// editUserConfig rewrites the user config with edit, under its lock and after
+// a backup, and keeps the result only if it loads.
 func editUserConfig(st *Streams, edit func([]byte) ([]byte, error)) (string, int) {
 	path, err := config.UserPath(st.Getenv)
 	if err != nil {
 		return "", failf(st, ExitConfig, "%v", err)
 	}
+	unlock, err := lockConfig(path)
+	if err != nil {
+		return "", failf(st, ExitConfig, "locking %s: %v", path, err)
+	}
+	defer unlock()
 	before, err := os.ReadFile(path)
 	if err != nil {
 		return "", failf(st, ExitConfig, "%v", err)
@@ -155,7 +174,7 @@ func runSet(st *Streams, args []string) int {
 		}
 		fields = append(fields, config.Field{Key: "note", Value: lit})
 	}
-	if code := refuseUnderAgent(st, "set"); code != 0 {
+	if code := refuseUnderAgent(st, "set", whoUses); code != 0 {
 		return code
 	}
 	path, code := editUserConfig(st, func(data []byte) ([]byte, error) {
@@ -179,7 +198,7 @@ func runRemove(st *Streams, args []string) int {
 		return ExitUsage
 	}
 	name := args[0]
-	if code := refuseUnderAgent(st, "remove"); code != 0 {
+	if code := refuseUnderAgent(st, "remove", whoUses); code != 0 {
 		return code
 	}
 	path, code := editUserConfig(st, func(data []byte) ([]byte, error) {

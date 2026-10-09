@@ -54,7 +54,11 @@ func golden(t *testing.T, name, got, configDir string) {
 	}
 }
 
+// noHarness makes the test a person at a terminal: no harness markers in its
+// environment, and no coding agent among its ancestors, though it may run
+// inside one.
 func noHarness(t *testing.T) {
+	underChain(t)
 	for _, v := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID", "CODEX_SANDBOX",
 		"CODEX_CI", "CURSOR_TRACE_ID", "CURSOR_AGENT", "CURSOR_CLI", "GEMINI_CLI", "GEMINI_PROJECT_DIR", "OPENCODE",
 		"OPENCODE_PID", "OPENCODE_CLIENT", "OPENCODE_TERMINAL", "ANTIGRAVITY_CLI_ALIAS", "ZED_SESSION_ID",

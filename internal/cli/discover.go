@@ -54,7 +54,7 @@ func runDiscover(st *Streams, args []string) int {
 		return ExitUsage
 	}
 	// The vault's inventory is the user's to see, like its values.
-	if code := refuseUnderAgent(st, "discover"); code != 0 {
+	if code := refuseUnderAgent(st, "discover", "lists what your vault holds"); code != 0 {
 		return code
 	}
 	u, _, code := loadConfig(st)
