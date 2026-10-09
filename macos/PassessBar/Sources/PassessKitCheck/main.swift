@@ -116,18 +116,14 @@ expect(sourceText("bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/HASS_TOKEN") == "b
 let discovery = load(Discovery.self, "discover.json")
 expect(discovery.backends.first?.ok == true, "discover reports its backend")
 expect(discovery.secrets.contains { $0.key == "nvidia-nim" && $0.name == "NVIDIA_NIM" }, "a vault key gets a passess name")
-let start = Date(timeIntervalSince1970: 1_800_000_000)
-let firstLook = noteFirstSeen([:], discovery: discovery, now: start)
-expect(foundRows(discovery, firstSeen: firstLook, now: start).allSatisfy { !$0.isNew }, "the first look marks nothing new")
-let grown = try! AgentJSON.decoder.decode(Discovery.self, from: Data("""
-{"backends": [{"scheme": "bws", "ok": true}],
- "secrets": [{"key": "GITHUB_TOKEN", "project": "ai-stack", "name": "GITHUB_TOKEN", "ref": "bws://p/GITHUB_TOKEN", "name_taken": false}]}
-""".utf8))
-let later = noteFirstSeen(firstLook, discovery: grown, now: start.addingTimeInterval(60))
-let fresh = foundRows(grown, firstSeen: later, now: start.addingTimeInterval(120))
-expect(fresh.count == 1 && fresh[0].isNew && fresh[0].detail == "bws · ai-stack", "what turns up later is new")
-expect(later.count == 1, "what the vault no longer lists is forgotten")
-expect(!foundRows(grown, firstSeen: later, now: start.addingTimeInterval(2 * 86_400))[0].isNew, "new for a day")
+// NEW_KEY was added to the vault at 2026-10-09T08:15:23Z; the others carry no date.
+let added = ISO8601DateFormatter().date(from: "2026-10-09T08:15:23Z")!
+let fresh = foundRows(discovery, now: added.addingTimeInterval(3600))
+expect(fresh.first?.title == "NEW_KEY" && fresh.first?.isNew == true && fresh.first?.detail == "bws · ai-stack",
+       "what was added lately comes first, marked new: \(fresh.map(\.title))")
+expect(fresh.dropFirst().allSatisfy { !$0.isNew }, "a secret without a date is not new")
+expect(fresh.dropFirst().map(\.title) == discovery.secrets.map(\.key).filter { $0 != "NEW_KEY" }, "the rest keep discover's order")
+expect(foundRows(discovery, now: added.addingTimeInterval(4 * 86_400)).allSatisfy { !$0.isNew }, "new for three days")
 
 // Turkish
 L10n.override = .turkish

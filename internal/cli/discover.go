@@ -30,7 +30,8 @@ type discovered struct {
 	Project   string `json:"project"` // the vault project's name, "" for none
 	Name      string `json:"name"`    // a passess name for it
 	Ref       string `json:"ref"`
-	NameTaken bool   `json:"name_taken"` // a passess secret already has that name
+	NameTaken bool   `json:"name_taken"`        // a passess secret already has that name
+	Created   string `json:"created,omitempty"` // when it was added to the vault, RFC 3339
 }
 
 type discoverBackend struct {
@@ -146,6 +147,9 @@ func unreferenced(secrets map[string]config.Secret, items []provider.Item) []dis
 			continue
 		}
 		d := discovered{Key: it.Key, Project: it.Project, Name: suggestName(it.Key), Ref: "bws://" + it.ID}
+		if !it.Created.IsZero() {
+			d.Created = it.Created.UTC().Format(time.RFC3339)
+		}
 		if it.ProjectID != "" && envNameRe.MatchString(it.Key) && count[key] == 1 {
 			d.Ref = "bws://" + it.ProjectID + "/" + it.Key
 		}

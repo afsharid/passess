@@ -271,7 +271,11 @@ func (f discoverFake) Run(_ context.Context, c provider.Cmd) (provider.Result, e
 			if project != "" {
 				p = `"` + project + `"`
 			}
-			return `{"id":"` + id + `","key":"` + key + `","value":"` + discValue + `","projectId":` + p + `}`
+			created := ""
+			if key == "NEW_KEY" {
+				created = `,"creationDate":"2026-10-09T08:15:23.123456Z"`
+			}
+			return `{"id":"` + id + `","key":"` + key + `","value":"` + discValue + `","projectId":` + p + created + `}`
 		}
 		return provider.Result{Stdout: []byte("[" + strings.Join([]string{
 			item("10000000-0000-4000-8000-000000000001", "KNOWN", discProject),
@@ -329,7 +333,7 @@ ref = "env://PASSESS_TEST_LOOSE"
 		{Key: "loose", Name: "LOOSE", Ref: "bws://10000000-0000-4000-8000-000000000007", NameTaken: true},
 		{Key: "DUP", Project: "ai-stack", Name: "DUP", Ref: "bws://10000000-0000-4000-8000-000000000005"},
 		{Key: "DUP", Project: "ai-stack", Name: "DUP", Ref: "bws://10000000-0000-4000-8000-000000000006"},
-		{Key: "NEW_KEY", Project: "ai-stack", Name: "NEW_KEY", Ref: "bws://" + discProject + "/NEW_KEY"},
+		{Key: "NEW_KEY", Project: "ai-stack", Name: "NEW_KEY", Ref: "bws://" + discProject + "/NEW_KEY", Created: "2026-10-09T08:15:23Z"},
 		{Key: "nvidia-nim", Project: "ai-stack", Name: "NVIDIA_NIM", Ref: "bws://10000000-0000-4000-8000-000000000003"},
 	}
 	if !slices.Equal(got.Secrets, want) || len(got.Backends) != 1 || !got.Backends[0].OK {

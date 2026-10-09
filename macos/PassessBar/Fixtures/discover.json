@@ -39,7 +39,8 @@
       "project": "ai-stack",
       "name": "NEW_KEY",
       "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d/NEW_KEY",
-      "name_taken": false
+      "name_taken": false,
+      "created": "2026-10-09T08:15:23Z"
     },
     {
       "key": "OTHER",

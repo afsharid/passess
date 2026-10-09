@@ -21,8 +21,6 @@ final class BarModel: ObservableObject {
     @Published private(set) var secretList: SecretList?
     /// `passess discover --json`: what the vault holds that passess does not use.
     @Published private(set) var discovery: Discovery?
-    /// When each of those first turned up, to mark the new ones.
-    @Published private(set) var firstSeen: [String: Date] = BarModel.loadFirstSeen()
 
     private let work = DispatchQueue(label: "passess.bar.work")
     private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh
@@ -37,10 +35,10 @@ final class BarModel: ObservableObject {
 
     var health: Health { doctor == nil && failure == nil ? .unknown : PassessKit.health(doctor) }
 
-    /// The vault secrets not connected yet, newest first.
+    /// The vault secrets not connected yet, the new ones first.
     var found: [FoundRow] {
         guard secretList?.agents != nil, let d = discovery else { return [] }
-        return foundRows(d, firstSeen: firstSeen).sorted { $0.isNew && !$1.isNew }
+        return foundRows(d)
     }
 
     func start() {
@@ -75,10 +73,6 @@ final class BarModel: ObservableObject {
             DispatchQueue.main.async {
                 self.discovering = false
                 self.discoveredAt = Date()
-                if let found = found, found.backends.contains(where: \.ok) {
-                    self.firstSeen = noteFirstSeen(self.firstSeen, discovery: found)
-                    BarModel.saveFirstSeen(self.firstSeen)
-                }
                 self.discovery = found
             }
         }
@@ -117,16 +111,6 @@ final class BarModel: ObservableObject {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    private static let firstSeenKey = "firstSeenVaultSecrets"
-
-    private static func loadFirstSeen() -> [String: Date] {
-        let raw = UserDefaults.standard.dictionary(forKey: firstSeenKey) as? [String: Double] ?? [:]
-        return raw.mapValues { Date(timeIntervalSince1970: $0) }
-    }
-
-    private static func saveFirstSeen(_ seen: [String: Date]) {
-        UserDefaults.standard.set(seen.mapValues { $0.timeIntervalSince1970 }, forKey: firstSeenKey)
-    }
 
     func refresh() {
         guard !frozen, !refreshing else { return }
@@ -196,7 +180,7 @@ final class BarModel: ObservableObject {
     /// Fixed state for previews: nothing runs.
     func seed(doctor: Doctor?, failure: String? = nil, agent: AgentStatus?, harnesses: HarnessStatus? = nil,
               check: Check? = nil, checkedAt: Date? = nil, approving: Bool = false,
-              secretList: SecretList? = nil, discovery: Discovery? = nil, firstSeen: [String: Date] = [:]) {
+              secretList: SecretList? = nil, discovery: Discovery? = nil) {
         frozen = true
         self.doctor = doctor
         self.failure = failure
@@ -207,7 +191,6 @@ final class BarModel: ObservableObject {
         self.approving = approving
         self.secretList = secretList
         self.discovery = discovery
-        self.firstSeen = firstSeen
         openAtLogin = true
     }
 

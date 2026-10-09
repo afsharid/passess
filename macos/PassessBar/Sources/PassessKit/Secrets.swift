@@ -49,9 +49,10 @@ public struct Discovery: Decodable, Equatable {
         public let name: String // the name passess suggests
         public let ref: String
         public let nameTaken: Bool
+        public let created: String? // when it was added to the vault, RFC 3339
 
         enum CodingKeys: String, CodingKey {
-            case key, project, name, ref
+            case key, project, name, ref, created
             case nameTaken = "name_taken"
         }
     }
@@ -105,25 +106,16 @@ public struct FoundRow: Identifiable, Equatable {
     public let found: Discovery.Found
 }
 
-/// isNew marks what turned up in the vault in the last day.
-public func foundRows(_ d: Discovery, firstSeen: [String: Date], now: Date = Date()) -> [FoundRow] {
-    d.secrets.map { f in
-        let seen = firstSeen[f.ref] ?? now
-        return FoundRow(title: f.key, detail: f.project.isEmpty ? "bws" : t("%@ · %@", "bws", f.project),
-                        isNew: now.timeIntervalSince(seen) < 24 * 3600, found: f)
+/// The vault's unconnected secrets, those added in the last three days
+/// first and marked new; within each group, in the order discover gave.
+public func foundRows(_ d: Discovery, now: Date = Date()) -> [FoundRow] {
+    let parse = ISO8601DateFormatter()
+    let rows = d.secrets.map { f -> FoundRow in
+        let created = f.created.flatMap(parse.date(from:))
+        let fresh = created.map { now.timeIntervalSince($0) < 3 * 86_400 } ?? false
+        return FoundRow(title: f.key, detail: f.project.isEmpty ? "bws" : t("%@ · %@", "bws", f.project), isNew: fresh, found: f)
     }
-}
-
-/// firstSeen after a discovery: a reference seen for the first time gets now,
-/// except on the very first discovery, when everything there is old news.
-/// References no longer listed are forgotten.
-public func noteFirstSeen(_ firstSeen: [String: Date], discovery: Discovery, now: Date = Date()) -> [String: Date] {
-    let first = firstSeen.isEmpty
-    var next: [String: Date] = [:]
-    for f in discovery.secrets {
-        next[f.ref] = firstSeen[f.ref] ?? (first ? .distantPast : now)
-    }
-    return next
+    return rows.filter(\.isNew) + rows.filter { !$0.isNew }
 }
 
 /// The agents ticked when the Connect window opens: a secret every agent may

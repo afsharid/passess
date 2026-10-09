@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
@@ -197,8 +198,9 @@ func (b *BWS) list(ctx context.Context, projectID string) error {
 type Item struct {
 	ID        string
 	Key       string
-	ProjectID string // "" for a secret in no project
-	Project   string // the project's name
+	ProjectID string    // "" for a secret in no project
+	Project   string    // the project's name
+	Created   time.Time // when it was added to the vault; zero if bws did not say
 }
 
 // Items lists every secret the machine account can read, by name. bws puts
@@ -213,6 +215,7 @@ func (b *BWS) Items(ctx context.Context) ([]Item, error) {
 		ID        string `json:"id"`
 		Key       string `json:"key"`
 		ProjectID string `json:"projectId"`
+		Created   string `json:"creationDate"`
 	}
 	err = json.Unmarshal(out, &ss)
 	clear(out)
@@ -242,7 +245,8 @@ func (b *BWS) Items(ctx context.Context) ([]Item, error) {
 	}
 	items := make([]Item, 0, len(ss))
 	for _, s := range ss {
-		items = append(items, Item{ID: s.ID, Key: s.Key, ProjectID: s.ProjectID, Project: names[s.ProjectID]})
+		created, _ := time.Parse(time.RFC3339Nano, s.Created)
+		items = append(items, Item{ID: s.ID, Key: s.Key, ProjectID: s.ProjectID, Project: names[s.ProjectID], Created: created})
 	}
 	return items, nil
 }

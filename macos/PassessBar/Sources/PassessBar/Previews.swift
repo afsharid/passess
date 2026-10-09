@@ -131,14 +131,14 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
       {"name": "TELEGRAM_BOT_TOKEN", "backends": ["bws"], "refs": ["bws://\(project)/TELEGRAM_BOT_TOKEN"], "allow": [],
        "clients": null, "approve": false, "profiles": ["hermes"], "mcp": []}]}
     """)
+    let anHourAgo = ISO8601DateFormatter().string(from: now.addingTimeInterval(-3600))
     let discovery = decode(Discovery.self, """
     {"backends": [{"scheme": "bws", "ok": true}],
      "secrets": [{"key": "GITHUB_TOKEN", "project": "ai-stack", "name": "GITHUB_TOKEN",
-                  "ref": "bws://\(project)/GITHUB_TOKEN", "name_taken": false},
+                  "ref": "bws://\(project)/GITHUB_TOKEN", "name_taken": false, "created": "\(anHourAgo)"},
                  {"key": "slack-bot", "project": "ai-stack", "name": "SLACK_BOT",
-                  "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d", "name_taken": false}]}
+                  "ref": "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d", "name_taken": false, "created": "2026-05-01T09:00:00Z"}]}
     """)
-    let seen = ["bws://\(project)/GITHUB_TOKEN": now, "bws://0b2f6c1e-1d2e-4a5b-9c8d-7e6f5a4b3c2d": Date.distantPast]
     let listCheck = decode(Check.self, """
     {"config": "/Users/you/.config/passess/config.toml", "ok": true,
      "secrets": [{"name": "HASS_TOKEN", "state": "ok"}, {"name": "OPENROUTER_API_KEY", "state": "ok"},
@@ -154,8 +154,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
     }
     func secretsModel() -> BarModel {
         let model = BarModel()
-        model.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: listCheck, secretList: list,
-                   discovery: discovery, firstSeen: seen)
+        model.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: listCheck, secretList: list, discovery: discovery)
         return model
     }
     let allResolve = decode(Check.self, """
@@ -165,7 +164,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
     """)
     return [
         ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
-                                          approving: true, secretList: list, discovery: discovery, firstSeen: seen) }, true),
+                                          approving: true, secretList: list, discovery: discovery) }, true),
         ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }, false),
         ("panel-old-cli", panel { $0.seed(doctor: healthy, agent: nil, harnesses: agents) }, false),
         ("panel-loading", panel { $0.seed(doctor: nil, agent: nil) }, false),
