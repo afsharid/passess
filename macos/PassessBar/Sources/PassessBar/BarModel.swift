@@ -35,6 +35,7 @@ final class BarModel: ObservableObject {
     private var frozen = false // a preview: seeded state, nothing runs
     private var connectPanel: ConnectPanel?
     private var secretsWindow: SecretsWindow?
+    private var vaultPanel: VaultPanel?
     let approver = ApproverController()
 
     var health: Health { doctor == nil && failure == nil ? .unknown : PassessKit.health(doctor) }
@@ -98,6 +99,28 @@ final class BarModel: ObservableObject {
 
     func openEdit(_ secret: SecretList.Secret, tick: String? = nil) {
         show(ConnectModel(mode: .edit(secret), list: secretList, cli: Passess.locate(), tick: tick))
+    }
+
+    /// Whether the vault is not set up: no config yet, or bws without a
+    /// machine token. The panel then offers the vault window first.
+    var needsVault: Bool {
+        if let d = doctor, !d.config.ok { return true }
+        return discovery?.backends.contains { $0.scheme == "bws" && !$0.ok && ($0.error ?? "").contains("no bws access token") } ?? false
+    }
+
+    /// The window that takes the bws machine token.
+    func openVault() {
+        vaultPanel?.close()
+        let model = VaultModel(cli: Passess.locateForAgent())
+        let panel = VaultPanel(model: model) { [weak self] in self?.vaultPanel = nil }
+        model.onDone = { [weak self, weak panel] in
+            panel?.close()
+            self?.refresh()
+            self?.discover(maxAge: 0)
+        }
+        vaultPanel = panel
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
     }
 
     /// Opens the window that connects the key an app asks for to that app:

@@ -103,20 +103,31 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 }
 
 // bwsToken is where the bws machine token comes from: the reference in the
-// config, else BWS_ACCESS_TOKEN; nil when neither is set.
+// config, else BWS_ACCESS_TOKEN, else where `passess backend bws` stores it.
 func bwsToken(st *Streams, u *config.User, boot *resolve.Resolver) func(context.Context) (secret.Value, error) {
-	if r := u.Backends.BWS.AccessToken; r != nil {
-		return func(ctx context.Context) (secret.Value, error) {
-			return boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{*r}})
-		}
-	}
-	if st.Getenv("BWS_ACCESS_TOKEN") != "" {
+	r := u.Backends.BWS.AccessToken
+	if r == nil && st.Getenv("BWS_ACCESS_TOKEN") != "" {
 		return func(context.Context) (secret.Value, error) {
 			return secret.FromString(st.Getenv("BWS_ACCESS_TOKEN")), nil
 		}
 	}
-	return nil
+	if r == nil {
+		return func(ctx context.Context) (secret.Value, error) {
+			v, err := boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{defaultBWSToken}})
+			if err != nil {
+				return secret.Value{}, fmt.Errorf("%w in %s; store it in Passess.app or with `passess backend bws`", errNoBWSToken, defaultBWSToken.String())
+			}
+			return v, nil
+		}
+	}
+	return func(ctx context.Context) (secret.Value, error) {
+		return boot.Secret(ctx, config.Secret{Name: "backends.bws.access_token", Refs: []ref.Ref{*r}})
+	}
 }
+
+// errNoBWSToken is a machine that has not set up bws: nothing in the config,
+// the environment or the keychain.
+var errNoBWSToken = errors.New("no bws access token")
 
 // resolveExitCode maps a resolution failure to an exit code.
 func resolveExitCode(err error) int {

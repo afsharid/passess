@@ -25,9 +25,7 @@ struct PanelView: View {
                 .padding(.bottom, 12)
                 content(d)
             } else if model.doctor != nil {
-                GetStarted(item: Item(id: "start", symbol: "sparkles", tone: .neutral, title: t("Add a first secret in a terminal"),
-                                      detail: "passess add NAME --ref <reference>", action: .copy("passess add NAME --ref <reference>")),
-                           model: model)
+                VaultCard(model: model)
             } else if model.failure == Passess.Failure.notFound.description {
                 GetStarted(item: Item(id: "install", symbol: "shippingbox.fill", tone: .neutral, title: t("Install it in a terminal"),
                                       detail: Passess.installCommand, action: .copy(Passess.installCommand)),
@@ -45,6 +43,9 @@ struct PanelView: View {
 
     @ViewBuilder
     private func content(_ d: Doctor) -> some View {
+        if model.needsVault {
+            VaultCard(model: model)
+        }
         let issues = problems(d)
         if !issues.isEmpty {
             Card(t("Needs attention")) {
@@ -523,6 +524,31 @@ struct BackendsView: View {
             Text(t("No secret uses a vault yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The first step on a new machine: the vault's token, in a window of its own.
+struct VaultCard: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        Card(t("Get started"), highlighted: true) {
+            HStack(spacing: 10) {
+                Badge(symbol: "lock.shield.fill", size: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(t("Connect your vault"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(t("Bitwarden Secrets Manager access token"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button { model.openVault() } label: {
+                    Label(t("Connect"), systemImage: "link")
+                }
+                .buttonStyle(PrimaryButtonStyle(compact: true))
+            }
         }
     }
 }

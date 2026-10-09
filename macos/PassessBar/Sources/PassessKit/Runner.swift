@@ -60,7 +60,7 @@ public struct Passess {
 
     /// Runs passess and keeps everything it said, for the commands that change
     /// the config: their refusals are on stderr.
-    func execute(_ arguments: [String], timeout: TimeInterval) throws -> (status: Int32, stdout: Data, stderr: Data) {
+    func execute(_ arguments: [String], timeout: TimeInterval, stdin: Data? = nil) throws -> (status: Int32, stdout: Data, stderr: Data) {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -73,11 +73,16 @@ public struct Passess {
         let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
+        let input = stdin.map { _ in Pipe() }
+        process.standardInput = input ?? FileHandle.nullDevice
 
         let done = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in done.signal() }
         try process.run()
+        if let input = input, let data = stdin {
+            input.fileHandleForWriting.write(data)
+            try? input.fileHandleForWriting.close()
+        }
         var out = Data(), err = Data()
         let reads = DispatchGroup()
         for (pipe, assign) in [(stdout, { (d: Data) in out = d }), (stderr, { (d: Data) in err = d })] {
@@ -96,8 +101,8 @@ public struct Passess {
     }
 
     /// Runs a command that changes the config; a refusal throws what passess said.
-    private func change(_ arguments: [String]) throws {
-        let r = try execute(arguments, timeout: 30)
+    private func change(_ arguments: [String], stdin: Data? = nil) throws {
+        let r = try execute(arguments, timeout: 30, stdin: stdin)
         guard r.status == 0 else {
             let said = String(decoding: r.stderr, as: UTF8.self)
                 .split(separator: "\n").first.map { String($0) } ?? "passess exited \(r.status)"
@@ -129,6 +134,14 @@ public struct Passess {
     /// instructions, MCP servers, an app's plugin), after a backup.
     public func install(_ id: String) throws {
         try change(["install", id, "--apply"])
+    }
+
+    /// `passess backend bws`: the machine token goes to the keychain on
+    /// stdin, never on a command line; a missing config is started.
+    public func storeBWSToken(_ token: String) throws {
+        var data = Data(token.utf8)
+        defer { data.resetBytes(in: 0..<data.count) }
+        try change(["backend", "bws"], stdin: data)
     }
 
     /// `passess remove`: passess forgets the secret; the vault keeps it.

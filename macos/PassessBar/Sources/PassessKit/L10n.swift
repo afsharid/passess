@@ -223,5 +223,10 @@ let turkish: [String: String] = [
     "Runs %@": "Çalıştırır: %@",
     "Connect %@ to %@": "%@ sırrını %@ ile bağla",
     "Update": "Güncelle",
+    "Connect your vault": "Kasanı bağla",
+    "Bitwarden Secrets Manager access token": "Bitwarden Secrets Manager erişim token'ı",
+    "Paste a machine account's access token. passess keeps it in your keychain and uses it only to read the secrets you connect; agents never see it.": "Bir makine hesabının erişim token'ını yapıştır. passess onu anahtar zincirinde tutar ve yalnız bağladığın sırları okumak için kullanır; ajanlar onu hiç görmez.",
+    "Access token": "Erişim token'ı",
+    "store the token that opens your vault": "kasanı açan token'ı saklamak",
     "Another passess build than yours, which it refuses: start it again": "Seninkinden farklı bir passess sürümü, komutlarını reddediyor: yeniden başlat",
 ]

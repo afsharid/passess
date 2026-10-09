@@ -96,7 +96,7 @@ A reference can point at any of these; give several and the first that resolves 
 | Reference | Backend | passess reaches it with |
 |---|---|---|
 | `op://vault/item/field` | 1Password | the `op` CLI: desktop app sign-in, or `OP_SERVICE_ACCOUNT_TOKEN` |
-| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token kept in the keychain via `backends.bws.access_token` |
+| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token in the keychain: Connect your vault in Passess.app, or `passess backend bws` (another place with `backends.bws.access_token`) |
 | `bw://item/field` | Bitwarden Password Manager | the `bw` CLI with an unlocked session (`BW_SESSION` or `backends.bw.session`) |
 | `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` |
 | `keychain://service/account` | macOS Keychain, Linux Secret Service | `security` / `secret-tool` |
