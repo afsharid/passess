@@ -88,10 +88,13 @@ Linux and Windows polish, signed releases.
   English and Turkish;
 - DeepSeek Harness as an agent and the first app: a secret connected to it by name
   reaches it through `passess helper`, however it is opened
-  ([ADR 11](adr/0011-an-app-reads-the-keys-connected-to-it.md)).
+  ([ADR 11](adr/0011-an-app-reads-the-keys-connected-to-it.md)); `install dsh` sets
+  up its plugin, and the app shows each key DSH asks for, with Connect;
+- in the app, Set up runs `passess install` for a coding agent, an agent's avatar is
+  its installed app's icon, and an agent of another build is started again.
 
-Next, in order: apps as targets (Hermes, OpenClaw, DeepSeek Harness: connecting a secret
-adds it to the app's launch profile), then a client's own API connection through a
+Next, in order: more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
+started with a launch profile), then a client's own API connection through a
 local proxy with a per-client key, so the real key never sits in the client's settings.
 
 **Before the first release without `-alpha`.** The canary matrix: each harness, run for
@@ -104,6 +107,5 @@ through `mcp-exec` and its secrets moved.
 that shows `passess doctor --json`, runs `check` on request and bundles the CLI. From
 slice 6 it asks for Touch ID approval when the daemon needs it. It never receives a
 secret value; the JSON it reads is pinned by fixtures that the Go tests write and the
-app's headless checks decode. Next: after an upgrade it notices an agent of another
-build and replaces it, as `passess agent start` does; until then the Agent tile shows
-such an agent as running while it refuses every command.
+app's headless checks decode. After an upgrade it notices an agent of another build
+(`agent status --json` says `outdated`) and starts it again, which replaces it.
