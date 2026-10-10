@@ -294,6 +294,87 @@ allow   = ["sh"]
 	}
 }
 
+// A secret gets its hosts from add or set, never from a hand edit: set writes
+// them into the secret's own table, even one that is not the last, and an
+// agent may not run it.
+func TestSetHosts(t *testing.T) {
+	noHarness(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := writeConfig(t, `version = 1
+[secrets.X]
+ref = "env://PASSESS_TEST_X_TOKEN"
+clients = ["claude-code"]
+
+[secrets.Z]
+ref = "env://PASSESS_TEST_Z_TOKEN"
+approve = true`) // no newline at the end, as a hand edit leaves it
+	cfg := filepath.Join(dir, "config.toml")
+	hosts := func(name string) []string {
+		t.Helper()
+		u, err := config.LoadUser(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.Secrets[name].Hosts
+	}
+	mustRun := func(args ...string) {
+		t.Helper()
+		if _, errOut, code := run(t, args...); code != 0 {
+			t.Fatalf("%q: exit %d, %q", args, code, errOut)
+		}
+	}
+
+	mustRun("set", "X", "--hosts", "api.example.com")
+	if got := hosts("X"); !slices.Equal(got, []string{"api.example.com"}) {
+		t.Fatalf("set --hosts: %v", got)
+	}
+	mustRun("set", "Z", "--hosts", " a.example.com, *.b.example.com,localhost:8080,a.example.com")
+	if got := hosts("Z"); !slices.Equal(got, []string{"a.example.com", "*.b.example.com", "localhost:8080"}) {
+		t.Fatalf("set --hosts on the last table: %v", got)
+	}
+	u, err := config.LoadUser(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x := u.Secrets["X"]; !slices.Equal(x.Clients, []string{"claude-code"}) || !u.Secrets["Z"].Approve {
+		t.Fatalf("set --hosts changed other keys: %+v %+v", x, u.Secrets["Z"])
+	}
+	if data, _ := os.ReadFile(cfg); strings.Count(string(data), "[secrets.X]") != 1 || strings.Count(string(data), "[secrets.Z]") != 1 {
+		t.Fatalf("a table is defined twice:\n%s", data)
+	}
+	mustRun("set", "X", "--hosts", "none")
+	if data, _ := os.ReadFile(cfg); hosts("X") != nil || strings.Count(string(data), "hosts") != 1 {
+		t.Fatalf("--hosts none leaves the key out:\n%s", data)
+	}
+
+	mustRun("add", "NEW", "--ref", "env://PASSESS_TEST_NEW", "--hosts", "api.github.com")
+	if got := hosts("NEW"); !slices.Equal(got, []string{"api.github.com"}) {
+		t.Fatalf("add --hosts: %v", got)
+	}
+
+	before, _ := os.ReadFile(cfg)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"set", "X", "--hosts", "https://api.example.com"}, "not a host name"},
+		{[]string{"set", "X", "--hosts", "api.example.com/v1"}, "not a host name"},
+		{[]string{"set", "X", "--hosts", " , "}, "name the hosts"},
+		{[]string{"add", "BAD", "--ref", "env://PASSESS_TEST_BAD", "--hosts", "a b"}, "not a host name"},
+	} {
+		if _, errOut, code := run(t, c.args...); code != ExitUsage || !strings.Contains(errOut, c.want) {
+			t.Fatalf("%q: exit %d, %q", c.args, code, errOut)
+		}
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if _, errOut, code := run(t, "set", "X", "--hosts", "evil.example.net"); code != ExitNoPerm || !strings.Contains(errOut, "Passess.app") {
+		t.Fatalf("set --hosts under an agent: exit %d, %q", code, errOut)
+	}
+	if after, _ := os.ReadFile(cfg); string(after) != string(before) {
+		t.Fatalf("a refused change touched the config:\n%s", after)
+	}
+}
+
 func TestListShowsClients(t *testing.T) {
 	noHarness(t)
 	writeConfig(t, `version = 1
