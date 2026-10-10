@@ -66,6 +66,7 @@ func TestShellCommands(t *testing.T) {
 		`tee -a "$HOME/.config/passess/config.toml"`, `sed -i '' s/gh/sh/ "$HOME/.config/passess/config.toml"`,
 		`cp /tmp/x "${XDG_CONFIG_HOME:-$HOME/.config}/passess/config.toml"`, `cd "$HOME/.config/passess" && echo x >> config.toml`,
 		"cat <<'EOF' > \"$HOME/.config/passess/config.toml\"\nversion = 1\nEOF", "$HOME/go/bin/passess agent stop",
+		"cat $HOME/.aws/credentials", `cat "$HOME/.local/state/passess/backups/x/00-.env"`,
 		// around the agent and its approvals
 		"passess agent stop", "/opt/homebrew/bin/passess agent stop", "passess agent approve", "passess agent serve",
 		"passess helper ANTHROPIC_API_KEY", "PASSESS_CONFIG=/tmp/x.toml passess exec -s API_KEY -- gh api user",
