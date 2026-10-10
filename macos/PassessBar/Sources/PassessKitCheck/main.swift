@@ -136,6 +136,14 @@ expect(pickedAgents(nil, agents: known) == Set(coding.map(\.id)) && pickedAgents
        "what opens ticked: every agent is not an app")
 expect(nameProblem("2FA", taken: []) != nil && nameProblem("HASS_TOKEN", taken: list.secrets.map(\.name)) != nil
        && nameProblem("NEW_ONE", taken: list.secrets.map(\.name)) == nil, "names a secret can take")
+expect(list.secrets.first { $0.name == "OPENROUTER_API_KEY" }?.hosts == ["openrouter.ai"]
+       && list.secrets.first { $0.name == "GITHUB_TOKEN" }?.hosts == [], "where passess http may send each secret")
+expect(hostList(" a.example.com, ,*.b.example.com,a.example.com ") == ["a.example.com", "*.b.example.com"], "hosts as typed, each once")
+expect(hostsArgument("  ") == "none" && hostsArgument("api.github.com, localhost:8080") == "api.github.com,localhost:8080",
+       "the --hosts value: none when nothing is typed")
+expect(hostsProblem("") == nil && hostsProblem("api.github.com, *.example.com, localhost:8080") == nil, "hosts the config takes")
+expect(hostsProblem("https://api.github.com") != nil && hostsProblem("api.github.com/v1") != nil && hostsProblem("a b") != nil,
+       "a scheme, a path or a space is no host")
 expect(sourceText("bws://92fe9fe6-c441-4b27-b261-b4b9007117b9/HASS_TOKEN") == "bws · HASS_TOKEN"
        && sourceText("keychain://passess/github") == "keychain", "where a secret comes from, short")
 

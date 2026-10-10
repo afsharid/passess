@@ -129,14 +129,18 @@ public struct Passess {
         try decode(Discovery.self, from: run(["discover", "--json"], timeout: 90))
     }
 
-    /// `passess add`: a vault secret becomes one agents can use.
-    public func add(name: String, ref: String, clients: String, approve: Bool) throws {
-        try change(["add", name, "--ref", ref, "--clients", clients] + (approve ? ["--approve"] : []))
+    /// `passess add`: a vault secret becomes one agents can use. hosts is a
+    /// --hosts value, or nil to name none.
+    public func add(name: String, ref: String, clients: String, approve: Bool, hosts: String? = nil) throws {
+        try change(["add", name, "--ref", ref, "--clients", clients] + (approve ? ["--approve"] : [])
+            + (hosts.map { ["--hosts", $0] } ?? []))
     }
 
-    /// `passess set`: who may use a secret, and whether each use asks.
-    public func set(name: String, clients: String, approve: Bool) throws {
-        try change(["set", name, "--clients", clients, "--approve", approve ? "true" : "false"])
+    /// `passess set`: who may use a secret, whether each use asks, and, when
+    /// hosts is not nil, where `passess http` may send it.
+    public func set(name: String, clients: String, approve: Bool, hosts: String? = nil) throws {
+        try change(["set", name, "--clients", clients, "--approve", approve ? "true" : "false"]
+            + (hosts.map { ["--hosts", $0] } ?? []))
     }
 
     /// `passess install ID --apply`: sets up a coding agent or an app (hooks,

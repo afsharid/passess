@@ -28,6 +28,8 @@ public struct SecretList: Decodable, Equatable {
         /// The coding agents it is connected to; nil means every one.
         public let clients: [String]?
         public let approve: Bool?
+        /// Where `passess http` may send it; empty or nil: nowhere.
+        public let hosts: [String]?
         public let profiles: [String]?
         public let mcp: [String]?
         public let note: String?
@@ -169,6 +171,33 @@ public func matches(_ name: String, filter: String) -> Bool {
 }
 
 /// Why a name cannot be used, or nil.
+/// The hosts typed in the Connect window, one per comma, blanks dropped and
+/// each once, in the order typed.
+public func hostList(_ text: String) -> [String] {
+    var out: [String] = []
+    for h in text.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !h.isEmpty && !out.contains(h) {
+        out.append(h)
+    }
+    return out
+}
+
+/// The --hosts value for what was typed: "none" when nothing was.
+public func hostsArgument(_ text: String) -> String {
+    let hosts = hostList(text)
+    return hosts.isEmpty ? "none" : hosts.joined(separator: ",")
+}
+
+/// Why a typed host cannot stand in a secret's hosts, or nil. The pattern is
+/// hostPattern in internal/config/config.go: a host name, *. for its
+/// subdomains, a port; no scheme, no path.
+public func hostsProblem(_ text: String) -> String? {
+    let pattern = #"^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*(:[0-9]{1,5})?$"#
+    if let bad = hostList(text).first(where: { $0.range(of: pattern, options: .regularExpression) == nil }) {
+        return t("%@ is not a host name such as api.github.com or *.example.com.", bad)
+    }
+    return nil
+}
+
 public func nameProblem(_ name: String, taken: [String]) -> String? {
     if name.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) == nil {
         return t("Use letters, digits and _; start with a letter.")
