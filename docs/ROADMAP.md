@@ -74,7 +74,8 @@ Done:
 **Slice 7 (in progress).** Done:
 - `scan --scrub`, the backed-up, explicitly applied transcript clean-up;
 - `passess http`, requests that take a secret only to the hosts it names, with no child
-  process holding the value.
+  process holding the value; the hosts come from `set --hosts`, `add --hosts` or the
+  app's Connect window, never from a hand edit of the config.
 
 Next: a transparent proxy for programs other than curl, `fnox://`, `passess trust`,
 Linux and Windows polish, signed releases. With signing, from the 2026-10-10 audit:

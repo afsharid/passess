@@ -124,7 +124,7 @@ clients = ["claude-code", "codex"]   # claude-code, codex, opencode, kiro, antig
 ```sh
 passess discover                     # bws secrets passess does not use yet, by name only
 passess add GITHUB_TOKEN --ref bws://<project>/GITHUB_TOKEN --clients claude-code --approve
-passess set GITHUB_TOKEN --clients claude-code,codex --approve false
+passess set GITHUB_TOKEN --clients claude-code,codex --approve false --hosts api.github.com
 passess remove GITHUB_TOKEN          # passess forgets it; the vault keeps it
 ```
 
@@ -245,21 +245,27 @@ profile's JSON:
 A token given to `curl` through `exec` goes wherever the agent points curl. Name the
 hosts a secret belongs to, and let passess send the request:
 
+```sh
+passess set GITHUB_TOKEN --hosts api.github.com   # *.example.com covers subdomains; none removes them
+passess http -s GITHUB_TOKEN -H 'Authorization: Bearer {{GITHUB_TOKEN}}' https://api.github.com/user
+```
+
+`passess add … --hosts` sets them for a new secret, and Passess.app's Secrets window
+does the same. The config then reads:
+
 ```toml
 [secrets.GITHUB_TOKEN]
 ref   = "op://Dev/GitHub PAT/credential"
-hosts = ["api.github.com"]          # *.example.com covers subdomains
-```
-
-```sh
-passess http -s GITHUB_TOKEN -H 'Authorization: Bearer {{GITHUB_TOKEN}}' https://api.github.com/user
+hosts = ["api.github.com"]
 ```
 
 `{{NAME}}` stands for the secret in headers, the body (`-d`, `-d @file`) and the URL.
 The request goes out over https only (plain http only to this machine), to a host
 every secret in it names. Redirects are followed only among those hosts. What comes
 back is redacted. A secret without `hosts` goes nowhere through `passess http`. The
-agents' instructions and the hooks now teach this form.
+agents' instructions and the hooks now teach this form. When a host is refused,
+the refusal names the `passess set` command that would allow it; an agent cannot
+run it, so it asks you.
 
 ## A harness's own API key
 

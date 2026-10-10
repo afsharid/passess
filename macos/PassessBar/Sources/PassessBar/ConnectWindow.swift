@@ -2,8 +2,9 @@ import AppKit
 import PassessKit
 import SwiftUI
 
-/// What the Connect window edits: which coding agents may use a secret and
-/// whether each new use asks the user. Nothing here holds a value. State
+/// What the Connect window edits: which coding agents may use a secret,
+/// whether each new use asks the user, and the hosts `passess http` may send
+/// it to. Nothing here holds a value. State
 /// lives in @Published, not @State: see PanelView.
 final class ConnectModel: ObservableObject {
     enum Mode {
@@ -21,6 +22,8 @@ final class ConnectModel: ObservableObject {
     @Published var name: String
     @Published var picked: Set<String>
     @Published var approve: Bool
+    @Published var hosts: String // comma-separated, as typed
+    private let hostsAtStart: [String]
     @Published private(set) var busy = false
     @Published private(set) var error: String?
 
@@ -31,6 +34,7 @@ final class ConnectModel: ObservableObject {
         agents = list?.agents ?? []
         taken = list?.secrets.map(\.name) ?? []
         self.cli = cli
+        var typed = "" // a new secret goes nowhere through passess http
         switch mode {
         case let .add(found):
             // Nothing ticked: the user says who gets it. Asking every time is
@@ -42,7 +46,10 @@ final class ConnectModel: ObservableObject {
             name = secret.name
             picked = pickedAgents(secret.clients, agents: agents)
             approve = secret.approve ?? false
+            typed = (secret.hosts ?? []).joined(separator: ", ")
         }
+        hosts = typed
+        hostsAtStart = hostList(typed)
         if let tick = tick { picked.insert(tick) }
     }
 
@@ -66,6 +73,14 @@ final class ConnectModel: ObservableObject {
     }
 
     var nameError: String? { adding ? nameProblem(name, taken: taken) : nil }
+
+    var hostsError: String? { hostsProblem(hosts) }
+
+    /// The --hosts value to pass, or nil when the hosts did not change, so
+    /// that a change of only the agents writes nothing else.
+    private var hostsChange: String? {
+        hostList(hosts) == hostsAtStart ? nil : hostsArgument(hosts)
+    }
 
     var users: [String] {
         guard case let .edit(secret) = mode else { return [] }
@@ -91,15 +106,16 @@ final class ConnectModel: ObservableObject {
 
     /// Touch ID first, then passess add or set.
     func save() {
-        guard !busy, nameError == nil, let cli = cli else { return }
+        guard !busy, nameError == nil, hostsError == nil, let cli = cli else { return }
         let name = name, approve = approve, clients = clientsArgument(picked, agents: agents), mode = mode
+        let hosts = hostsChange
         let reason = adding ? t("connect %@ to coding agents", name) : t("change who may use %@", name)
         Authenticator.confirm(reason) { ok in
             guard ok else { return }
             self.perform {
                 switch mode {
-                case let .add(found): try cli.add(name: name, ref: found.ref, clients: clients, approve: approve)
-                case .edit: try cli.set(name: name, clients: clients, approve: approve)
+                case let .add(found): try cli.add(name: name, ref: found.ref, clients: clients, approve: approve, hosts: hosts)
+                case .edit: try cli.set(name: name, clients: clients, approve: approve, hosts: hosts)
                 }
             }
         }
@@ -149,6 +165,7 @@ final class ConnectModel: ObservableObject {
 struct ConnectView: View {
     @ObservedObject var model: ConnectModel
     let onCancel: () -> Void
+    private static let hostsExample = "api.github.com, *.example.com" // a String, so shown as typed
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -234,6 +251,26 @@ struct ConnectView: View {
             .padding(12)
             .surface()
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text(t("Where may it be sent?"))
+                    .font(.system(size: 13, weight: .semibold))
+                TextField(Self.hostsExample, text: Binding(get: { model.hosts }, set: { model.hosts = $0 }))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13, design: .monospaced))
+                    .accessibilityLabel(t("Where may it be sent?"))
+                if let problem = model.hostsError {
+                    Label(problem, systemImage: "exclamationmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tone.error.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(t("passess http sends it only to these hosts. Separate them with commas. Empty: nowhere."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             VStack(alignment: .leading, spacing: 7) {
                 if !model.users.isEmpty {
                     DetailLine(symbol: "link", text: t("Used by %@", model.users.joined(separator: ", ")))
@@ -279,7 +316,7 @@ struct ConnectView: View {
                     Label(model.saveTitle, systemImage: model.saveTitle.contains("Touch ID") ? "touchid" : "lock.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(model.busy || model.nameError != nil)
+                .disabled(model.busy || model.nameError != nil || model.hostsError != nil)
             }
         }
         .padding(22)

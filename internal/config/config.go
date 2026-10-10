@@ -206,6 +206,9 @@ var nameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // with a port: no scheme, no path.
 var hostPattern = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*(:[0-9]{1,5})?$`)
 
+// ValidHost says whether h may stand in a secret's hosts list.
+func ValidHost(h string) bool { return hostPattern.MatchString(h) }
+
 type rawUser struct {
 	Version  int `toml:"version"`
 	Backends struct {
@@ -380,7 +383,7 @@ func ParseUser(path string, data []byte) (*User, error) {
 			return nil, fmt.Errorf("%s: secrets.%s.allow: %w", path, name, err)
 		}
 		for _, h := range s.Hosts {
-			if !hostPattern.MatchString(h) {
+			if !ValidHost(h) {
 				return nil, fmt.Errorf("%s: secrets.%s.hosts: %q is not a host name such as \"api.github.com\" or \"*.example.com\"", path, name, h)
 			}
 		}

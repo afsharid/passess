@@ -193,6 +193,11 @@ let turkish: [String: String] = [
     "The value is never shown, here or to any agent.": "Değer hiçbir yerde görünmez: ne burada ne de bir ajanda.",
     "Without an agent ticked, no agent can use it; your own terminal still can.":
         "Hiçbir ajan seçilmezse hiçbir ajan kullanamaz; kendi terminalin kullanmaya devam eder.",
+    "Where may it be sent?": "Nereye gönderilebilir?",
+    "passess http sends it only to these hosts. Separate them with commas. Empty: nowhere.":
+        "passess http onu yalnız bu adreslere gönderir. Adresleri virgülle ayır. Boş bırakırsan hiçbir yere gitmez.",
+    "%@ is not a host name such as api.github.com or *.example.com.":
+        "%@ bir alan adı değil. Örnek: api.github.com ya da *.example.com.",
     "Cancel": "Vazgeç",
     "Connect with Touch ID": "Touch ID ile bağla",
     "Save with Touch ID": "Touch ID ile kaydet",
