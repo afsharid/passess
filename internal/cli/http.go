@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -116,6 +117,9 @@ func runHTTP(st *Streams, args []string) int {
 			return failf(st, ExitConfig, "%s is not defined; ask the user to run `passess add %s --ref <reference>`", n, n)
 		}
 		if why := hostAllowed(target, s); why != "" {
+			if hint := hostsHint(target, s); hint != "" {
+				why += "; " + hint
+			}
 			return failf(st, ExitNoPerm, "refusing to send %s to %s: %s", n, target.Host, why)
 		}
 	}
@@ -246,7 +250,7 @@ func urlOrigin(raw string) string {
 
 func hostAllowed(u *url.URL, s config.Secret) string {
 	if len(s.Hosts) == 0 {
-		return fmt.Sprintf("it names no hosts; add hosts = [\"%s\"] to secrets.%s in the config if it belongs there", u.Hostname(), s.Name)
+		return "it names no hosts"
 	}
 	host := strings.ToLower(u.Hostname())
 	local := host == "localhost" || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
@@ -278,4 +282,27 @@ func hostAllowed(u *url.URL, s config.Secret) string {
 		}
 	}
 	return fmt.Sprintf("its hosts are %s", strings.Join(s.Hosts, ", "))
+}
+
+// hostsHint says how the user lets s go to u, when only its hosts list
+// stands in the way: in Passess.app, or with passess set, which an agent may
+// not run. A redirect gets no hint.
+func hostsHint(u *url.URL, s config.Secret) string {
+	if hostAllowed(u, s) == "" {
+		return ""
+	}
+	entry := strings.ToLower(u.Hostname())
+	if p := u.Port(); p != "" && p != map[string]string{"https": "443", "http": "80"}[u.Scheme] {
+		entry = net.JoinHostPort(entry, p)
+	}
+	if !config.ValidHost(entry) {
+		return ""
+	}
+	wider := s
+	wider.Hosts = append(slices.Clone(s.Hosts), entry)
+	if hostAllowed(u, wider) != "" {
+		return ""
+	}
+	return fmt.Sprintf("if it belongs there, the user adds it in Passess.app (Secrets) or runs `passess set %s --hosts %s`",
+		s.Name, strings.Join(wider.Hosts, ","))
 }

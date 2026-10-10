@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	commands["set"] = command{"change who may use a secret: the coding agents it is connected to, approvals, its note", runSet}
+	commands["set"] = command{"change who may use a secret: the coding agents it is connected to, approvals, the hosts it may go to, its note", runSet}
 	commands["remove"] = command{"remove a secret from passess (the vault keeps it)", runRemove}
 }
 
@@ -56,6 +56,33 @@ func clientsLiteral(v string) (*string, error) {
 		if slices.Contains(picked, a.ID) {
 			quoted = append(quoted, tomlString(a.ID))
 		}
+	}
+	lit := "[" + strings.Join(quoted, ", ") + "]"
+	return &lit, nil
+}
+
+// hostsLiteral reads --hosts: "none" (nil: no key, so `passess http` sends
+// the secret nowhere) or host names comma-separated, each as the config takes
+// them. It returns the TOML array to write.
+func hostsLiteral(v string) (*string, error) {
+	if strings.TrimSpace(v) == "none" {
+		return nil, nil
+	}
+	var quoted []string
+	for _, h := range strings.Split(v, ",") {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if !config.ValidHost(h) {
+			return nil, fmt.Errorf("--hosts: %q is not a host name such as api.github.com, *.example.com or localhost:8080", h)
+		}
+		if q := tomlString(h); !slices.Contains(quoted, q) {
+			quoted = append(quoted, q)
+		}
+	}
+	if len(quoted) == 0 {
+		return nil, errors.New("--hosts: name the hosts, or say none")
 	}
 	lit := "[" + strings.Join(quoted, ", ") + "]"
 	return &lit, nil
@@ -124,8 +151,9 @@ func runSet(st *Streams, args []string) int {
 	clients := fs.String("clients", "", "coding agents it is connected to: IDs comma-separated (claude-code,codex), all, or none")
 	approve := fs.String("approve", "", "true: every new program and caller waits for your Allow; false: no approval")
 	note := fs.String("note", "", "free-text note (an empty value removes it)")
+	hosts := fs.String("hosts", "", "hosts `passess http` may send it to, comma-separated (api.github.com,*.example.com), or none")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess set NAME [--clients claude-code,codex|all|none] [--approve true|false] [--note TEXT]")
+		fmt.Fprintln(st.Stderr, "Usage: passess set NAME [--clients claude-code,codex|all|none] [--approve true|false] [--hosts HOST,…|none] [--note TEXT]")
 		fs.PrintDefaults()
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -162,6 +190,13 @@ func runSet(st *Streams, args []string) int {
 			lit = &t
 		}
 		fields = append(fields, config.Field{Key: "approve", Value: lit})
+	}
+	if given["hosts"] {
+		lit, err := hostsLiteral(*hosts)
+		if err != nil {
+			return failf(st, ExitUsage, "%v", err)
+		}
+		fields = append(fields, config.Field{Key: "hosts", Value: lit})
 	}
 	if given["note"] {
 		if strings.ContainsAny(*note, "\n\r\x00") {

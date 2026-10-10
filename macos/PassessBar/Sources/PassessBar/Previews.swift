@@ -141,7 +141,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
       {"name": "SUDO_PASSWORD", "backends": ["bws"], "refs": ["bws://\(project)/SUDO_PASSWORD"], "allow": [],
        "clients": [], "approve": true, "profiles": [], "mcp": []},
       {"name": "TELEGRAM_BOT_TOKEN", "backends": ["bws"], "refs": ["bws://\(project)/TELEGRAM_BOT_TOKEN"], "allow": [],
-       "clients": null, "approve": false, "profiles": ["hermes"], "mcp": []}]}
+       "clients": null, "approve": false, "hosts": ["api.telegram.org"], "profiles": ["hermes"], "mcp": []}]}
     """)
     let anHourAgo = ISO8601DateFormatter().string(from: now.addingTimeInterval(-3600))
     let discovery = decode(Discovery.self, """

@@ -40,8 +40,9 @@ func runAdd(st *Streams, args []string) int {
 	keychain := fs.Bool("keychain", false, "prompt for the value in this terminal and store it in the OS keychain")
 	clients := fs.String("clients", "all", "coding agents it is connected to: IDs comma-separated (claude-code,codex), all, or none")
 	approve := fs.Bool("approve", false, "every new program and caller waits for your Allow")
+	hosts := fs.String("hosts", "none", "hosts `passess http` may send it to, comma-separated (api.github.com,*.example.com), or none")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--clients claude-code,codex] [--approve] [--note TEXT]")
+		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--clients claude-code,codex] [--approve] [--hosts api.github.com] [--note TEXT]")
 		fmt.Fprintln(st.Stderr, "       passess add NAME --keychain [--allow …]   (you type the value; it never passes through passess)")
 		fs.PrintDefaults()
 	}
@@ -77,6 +78,10 @@ func runAdd(st *Streams, args []string) int {
 	if err != nil {
 		return failf(st, ExitUsage, "%v", err)
 	}
+	hostsLit, err := hostsLiteral(*hosts)
+	if err != nil {
+		return failf(st, ExitUsage, "%v", err)
+	}
 	if code := refuseUnderAgent(st, "add", whoUses); code != 0 {
 		return code
 	}
@@ -101,7 +106,7 @@ func runAdd(st *Streams, args []string) int {
 			return nil, failf(st, ExitConfig, "%v", err)
 		}
 		if _, ok := u.Secrets[name]; ok {
-			return nil, failf(st, ExitConfig, "%s is already defined; edit it in %s", name, path)
+			return nil, failf(st, ExitConfig, "%s is already defined; change it with `passess set %s` or in Passess.app", name, name)
 		}
 		// A second name for a reference another secret already has would
 		// start with an allow list and approval setting of its own choosing.
@@ -138,6 +143,9 @@ func runAdd(st *Streams, args []string) int {
 	}
 	if *approve {
 		block = append(block, "approve = true\n"...)
+	}
+	if hostsLit != nil {
+		block = append(block, "hosts = "+*hostsLit+"\n"...)
 	}
 	after := before
 	if len(after) == 0 {

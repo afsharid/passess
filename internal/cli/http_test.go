@@ -74,7 +74,10 @@ func TestHTTPRefusals(t *testing.T) {
 		want string
 	}{
 		{[]string{"-s", "X", "https://example.com/"}, ExitNoPerm, "its hosts are"},
+		{[]string{"-s", "X", "https://example.com/"}, ExitNoPerm,
+			"`passess set X --hosts " + strings.TrimPrefix(srv.URL, "https://") + ",example.com`"},
 		{[]string{"-s", "Y", srv.URL + "/"}, ExitNoPerm, "names no hosts"},
+		{[]string{"-s", "Y", srv.URL + "/"}, ExitNoPerm, "`passess set Y --hosts " + strings.TrimPrefix(srv.URL, "https://") + "`"},
 		{[]string{"-s", "X", "http://example.com/"}, ExitNoPerm, "only https"},
 		{[]string{"-s", "X", "-H", "Authorization: {{Z}}", srv.URL + "/"}, ExitUsage, "{{Z}} names a secret not given"},
 		{[]string{"-s", "ALIAS=X", srv.URL + "/"}, ExitUsage, "names secrets by NAME"},
@@ -148,6 +151,26 @@ func TestHostAllowed(t *testing.T) {
 		u, _ := url.Parse(raw)
 		if got := hostAllowed(u, s) == ""; got != ok {
 			t.Errorf("%s: allowed %v, want %v", raw, got, ok)
+		}
+	}
+}
+
+// The hint names the one command that would let the request through, and
+// nothing when the hosts list is not what stands in the way.
+func TestHostsHint(t *testing.T) {
+	s := config.Secret{Name: "T", Hosts: []string{"api.github.com"}}
+	for raw, want := range map[string]string{
+		"https://Uploads.GitHub.com/x":   "--hosts api.github.com,uploads.github.com`",
+		"https://api.github.com:8443/":   "--hosts api.github.com,api.github.com:8443`",
+		"http://localhost:3000/":         "--hosts api.github.com,localhost:3000`",
+		"http://api.example.com/":        "", // plain http stays refused
+		"https://[2001:db8::1]/":         "", // no host name to add
+		"https://api.github.com/already": "",
+	} {
+		u, _ := url.Parse(raw)
+		got := hostsHint(u, s)
+		if want == "" && got != "" || want != "" && !strings.HasSuffix(got, want) {
+			t.Errorf("%s: hint %q, want …%q", raw, got, want)
 		}
 	}
 }

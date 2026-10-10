@@ -159,7 +159,7 @@ func abs(p, cwd, home string) string {
 
 func configReason(p string) string {
 	return "passess: " + p + " is the passess config, which decides which program receives which secret. " +
-		"Changes to it are the user's to make: tell them what you need and let them run `passess add` or edit it themselves."
+		"Changes to it are the user's to make: tell them what you need and let them do it in Passess.app or with `passess add` or `passess set`."
 }
 
 func inConfig(p string, env Env) bool {
