@@ -46,10 +46,21 @@ where the protection stops. Read the last section before relying on it.
   credential to a signed passess binary is planned, and even then T6 stays out of scope.
 - **The agent can edit passess's own config.** It runs as the same user, so it could
   add an allow list entry or an `[mcp.*]` server that hands a secret to a program of
-  its choosing. The hooks refuse agent writes to `~/.config/passess`, through file
-  tools and through shell redirects, `tee`, `sed -i`, `cp` and `mv`. A write the parser
-  cannot see (a script it runs, an interpreter one-liner) still gets through, so this
-  stays part of T5. `passess status` and `doctor` are where a changed config shows up.
+  its choosing. The hooks refuse agent writes to the config directory through file
+  tools. They refuse shell redirects, `tee`, `sed -i`, `cp`, `mv`, `rm` and the like
+  into it when the command spells the path: literally, with `~/`, or with `$HOME`,
+  `$XDG_CONFIG_HOME` or `$PASSESS_CONFIG`. Reading it stays allowed; it holds
+  references, not values. Code the shell hands to another program is not checked: a
+  Python or Node script from a heredoc, `-c` or a file, or a script a shell reads from
+  a heredoc or a pipe (`bash -c` is checked). On 2026-10-10 an agent fixed a broken
+  config that way, with a `python3 -I - <<'EOF'` body that renamed a temporary file
+  over it. That form is common: in 20,000 sampled agent shell commands, one in nine fed
+  an interpreter from a heredoc and one in sixteen used `-c`. Of the 45 in 29,822 that
+  named the config, four were interpreter code: one wrote it, one read it, and two
+  wrote other files and named it only as text. A write need not spell the path either, as the renamed file shows, and a
+  path joined from parts defeats a text match. Telling these apart takes the other
+  language's dataflow, not shell parsing, so the hooks do not try, and this stays part
+  of T5. `passess status` and `doctor` are where a changed config shows up.
 - **Parallel hooks can clobber each other.** In Claude Code, hooks run on the original
   tool output and the last rewrite wins; another plugin that rewrites output can undo a
   redaction. `audit` does not check for this yet.
