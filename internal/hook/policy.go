@@ -243,7 +243,7 @@ func checkShell(cmd, cwd string, env Env) string {
 				reason = checkParam(n.Param.Value, env)
 			}
 		case *syntax.Redirect:
-			p, ok := literal(n.Word)
+			p, ok := literal(n.Word, env)
 			switch {
 			case !ok:
 			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
@@ -256,7 +256,7 @@ func checkShell(cmd, cwd string, env Env) string {
 		case *syntax.CallExpr:
 			var args []string
 			for _, w := range n.Args {
-				s, _ := literal(w) // a non-literal word stays "" and matches nothing
+				s, _ := literal(w, env) // a non-literal word stays "" and matches nothing
 				args = append(args, s)
 			}
 			program := ""
@@ -383,7 +383,7 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 		case a.Naked && a.Name != nil:
 			names = append(names, a.Name.Value)
 		case a.Naked && a.Value != nil:
-			if f, ok := literal(a.Value); ok && strings.HasPrefix(f, "-") {
+			if f, ok := literal(a.Value, env); ok && strings.HasPrefix(f, "-") {
 				flags = append(flags, f)
 			}
 		default:
@@ -411,16 +411,16 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 	return ""
 }
 
-// literal is a word's value when it has no expansion in it.
-func literal(w *syntax.Word) (string, bool) {
+// literal is a word's value when it has no expansion in it but the
+// variables passess finds its config by: "$HOME/.config/passess" names the
+// config as plainly as ~/.config/passess does.
+func literal(w *syntax.Word, env Env) (string, bool) {
 	if w == nil {
 		return "", false
 	}
 	var b strings.Builder
 	for _, part := range w.Parts {
 		switch p := part.(type) {
-		case *syntax.Lit:
-			b.WriteString(p.Value)
 		case *syntax.SglQuoted:
 			if p.Dollar { // $'…' holds escapes the shell decodes, not the text itself
 				return "", false
@@ -428,17 +428,63 @@ func literal(w *syntax.Word) (string, bool) {
 			b.WriteString(p.Value)
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
-				lit, ok := q.(*syntax.Lit)
-				if !ok {
+				if !plain(&b, q, env) {
 					return "", false
 				}
-				b.WriteString(lit.Value)
 			}
 		default:
-			return "", false
+			if !plain(&b, part, env) {
+				return "", false
+			}
 		}
 	}
 	return b.String(), true
+}
+
+// plain writes a literal part, or the value of a locator, to b.
+func plain(b *strings.Builder, part syntax.WordPart, env Env) bool {
+	switch p := part.(type) {
+	case *syntax.Lit:
+		b.WriteString(p.Value)
+		return true
+	case *syntax.ParamExp:
+		v, ok := locator(p, env)
+		b.WriteString(v)
+		return ok
+	}
+	return false
+}
+
+// locator is the value of $HOME, $XDG_CONFIG_HOME or $PASSESS_CONFIG, which
+// is where config.UserPath looks, as the harness has them; a default
+// (${XDG_CONFIG_HOME:-$HOME/.config}) stands in for one that is not set. Any
+// other expansion, or a locator that is not set, is not known here.
+func locator(p *syntax.ParamExp, env Env) (string, bool) {
+	if p.Param == nil || p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil || p.Repl != nil || p.Names != 0 {
+		return "", false
+	}
+	v := ""
+	switch p.Param.Value {
+	case "HOME":
+		v = env.Home
+	case "XDG_CONFIG_HOME", "PASSESS_CONFIG":
+		if env.Getenv != nil {
+			v = env.Getenv(p.Param.Value)
+		}
+	default:
+		return "", false
+	}
+	if p.Exp != nil {
+		switch p.Exp.Op {
+		case syntax.DefaultUnset, syntax.DefaultUnsetOrNull, syntax.AssignUnset, syntax.AssignUnsetOrNull:
+		default:
+			return "", false
+		}
+		if v == "" {
+			return literal(p.Exp.Word, env)
+		}
+	}
+	return v, v != ""
 }
 
 func checkParam(name string, env Env) string {

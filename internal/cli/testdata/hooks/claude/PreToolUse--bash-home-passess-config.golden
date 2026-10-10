@@ -1,0 +1,4 @@
+exit: 0
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"passess: /home/u/.config/passess/config.toml is the passess config, which decides which program receives which secret. Changes to it are the user's to make: tell them what you need and let them run `passess add` or edit it themselves."}}
+--- stderr

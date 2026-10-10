@@ -61,6 +61,11 @@ func TestShellCommands(t *testing.T) {
 		"echo $GITHUB_TOKEN", `curl -H "Authorization: Bearer $API_KEY" https://api.example.com`, "echo ${DATABASE_URL:-none}",
 		"echo 'allow = [\"sh\"]' >> ~/.config/passess/config.toml", "tee -a ~/.config/passess/config.toml",
 		"sed -i '' s/gh/sh/ ~/.config/passess/config.toml", "cp /tmp/x ~/.config/passess/config.toml", "rm ~/.config/passess/config.toml",
+		// The same writes through the variables passess finds its config by.
+		"echo x >> $HOME/.config/passess/config.toml", `echo x >> "${HOME}/.config/passess/config.toml"`,
+		`tee -a "$HOME/.config/passess/config.toml"`, `sed -i '' s/gh/sh/ "$HOME/.config/passess/config.toml"`,
+		`cp /tmp/x "${XDG_CONFIG_HOME:-$HOME/.config}/passess/config.toml"`, `cd "$HOME/.config/passess" && echo x >> config.toml`,
+		"cat <<'EOF' > \"$HOME/.config/passess/config.toml\"\nversion = 1\nEOF", "$HOME/go/bin/passess agent stop",
 		// around the agent and its approvals
 		"passess agent stop", "/opt/homebrew/bin/passess agent stop", "passess agent approve", "passess agent serve",
 		"passess helper ANTHROPIC_API_KEY", "PASSESS_CONFIG=/tmp/x.toml passess exec -s API_KEY -- gh api user",
@@ -80,7 +85,8 @@ func TestShellCommands(t *testing.T) {
 		"security find-generic-password -s x", "export FOO=bar", "export PATH", "declare -p PATH", "local x=1", "echo $HOME $PATH", "passess exec -s GITHUB_TOKEN -- gh api user",
 		"grep -r TODO .", "git status", "set -e", "vault kv list secret/", "gh auth status", "cat ~/.ssh/id_ed25519.pub",
 		`echo "unterminated`, "", "cat ~/.config/passess/config.toml", "sed -n 1p ~/.config/passess/config.toml",
-		"echo hi > /tmp/out.txt",
+		"echo hi > /tmp/out.txt", `cat "$HOME/.config/passess/config.toml"`, "grep -n hosts $HOME/.config/passess/config.toml",
+		`sed -n 1p "${XDG_CONFIG_HOME:-$HOME/.config}/passess/config.toml"`, "ls $HOME/.config/passess", `echo x >> "$HOME/notes.txt"`,
 		"passess agent status", "passess agent start", "passess agent lock", "passess list", "HOME=/tmp ls",
 		"passess migrate env .env", "passess install --apply", "passess uninstall", "env -u FOO gh",
 		"cd /tmp && ls", "cd /tmp && cat README.md", "pushd /tmp && popd && ls",
@@ -104,6 +110,29 @@ func TestShellCommands(t *testing.T) {
 	v := Decide(Event{Kind: Shell, Command: "echo $GITHUB_TOKEN"}, env)
 	if !strings.Contains(v.Reason, "passess exec -s GITHUB_TOKEN --") || !strings.Contains(v.Reason, "passess http -s GITHUB_TOKEN -H") {
 		t.Fatalf("reason does not say what to run instead: %s", v.Reason)
+	}
+}
+
+// With XDG_CONFIG_HOME and PASSESS_CONFIG set, a write through them is a
+// write to the config; a variable that is not a locator stays unknown.
+func TestConfigLocators(t *testing.T) {
+	env := testEnv(t)
+	vars := map[string]string{"XDG_CONFIG_HOME": "/home/u/xdg", "PASSESS_CONFIG": "/home/u/cfg/passess.toml"}
+	env.Getenv = func(k string) string { return vars[k] }
+	env.ConfigDirs = []string{"/home/u/xdg/passess", "/home/u/cfg"}
+	for c, deny := range map[string]bool{
+		"echo x >> $XDG_CONFIG_HOME/passess/config.toml":                  true,
+		`tee "${XDG_CONFIG_HOME:-/nowhere}/passess/config.toml"`:          true,
+		`echo x >> "$PASSESS_CONFIG"`:                                     true,
+		"sed -i '' s/a/b/ $PASSESS_CONFIG":                                true,
+		`echo x >> "${XDG_CONFIG_HOME:-$HOME/.config}/other/config.toml"`: false,
+		"cat $XDG_CONFIG_HOME/passess/config.toml":                        false,
+		`echo x >> "$TMPDIR/passess/config.toml"`:                         false,
+		`echo x >> "${XDG_CONFIG_HOME#/home}/passess/config.toml"`:        false,
+	} {
+		if v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env); v.Deny != deny {
+			t.Errorf("%s: deny = %v (%s)", c, v.Deny, v.Reason)
+		}
 	}
 }
 
