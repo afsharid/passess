@@ -1,0 +1,1 @@
+{"hook_event_name": "PreToolUse", "cwd": "/home/u/proj", "tool_name": "Bash", "tool_input": {"command": "echo 'allow = [\"sh\"]' >> \"$HOME/.config/passess/config.toml\""}}
