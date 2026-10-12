@@ -126,7 +126,7 @@ func TestInstallDSHKey(t *testing.T) {
 	if out, _, code := run(t, "install", "dsh", "--key", "nowhere="+secret, "--apply"); code == 0 || !strings.Contains(out, "configures no provider nowhere") {
 		t.Fatalf("unknown provider: exit %d, %s", code, out)
 	}
-	if out, errOut, code := run(t, "install", "dsh", "--key", "anthropic="+secret, "--apply"); code != 0 || !strings.Contains(out, "name CLAUDE_API_KEY as anthropic's key") {
+	if out, errOut, code := run(t, "install", "dsh", "--key", "anthropic="+secret, "--apply"); code != 0 || !strings.Contains(out, "name CLAUDE_API_KEY as anthropic's key") || !strings.Contains(out, "note: restart") {
 		t.Fatalf("install --key: exit %d, %s %s", code, out, errOut)
 	}
 	data, _ := os.ReadFile(patch)

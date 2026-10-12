@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/afsharid/passess/internal/apps"
@@ -219,6 +220,8 @@ func printApps(st *Streams, verb string, applied bool, reports []appReport) (pen
 		}
 		if applied && r.Plugin != apps.StateMissing && verb == "install" && r.Active == "" {
 			fmt.Fprintf(st.Stdout, "  note: restart %s to load it\n", r.Label)
+		} else if applied && verb == "install" && slices.ContainsFunc(r.Changes, func(c string) bool { return strings.HasPrefix(c, "name ") }) {
+			fmt.Fprintf(st.Stdout, "  note: restart %s to read the key it now asks passess for\n", r.Label)
 		}
 		if r.Backup != "" {
 			fmt.Fprintf(st.Stdout, "  backup: %s\n", r.Backup)
