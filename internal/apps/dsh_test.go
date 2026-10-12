@@ -167,6 +167,96 @@ func TestKeys(t *testing.T) {
 	}
 }
 
+// A patch shaped like a real one: a provider that names its key, one that
+// does not and lists models below it, and one written inline.
+const providersPatch = `- id: llm-pi-ai
+  config:
+    providers:
+      evren:
+        displayName: EVREN
+        apiKeyEnv: EVREN_LLM_API_KEY
+        models:
+          - id: glm-5.3
+      # Claude, from the vault
+      anthropic:
+        models:
+          - id: claude-opus-5-5
+            input:
+              - text
+      inline: { baseURL: https://example.com }
+- id: subagent-model-selection-settings
+  config:
+    allowedModels:
+      - provider: evren
+`
+
+func writePatch(t *testing.T, d DSH, doc string) {
+	t.Helper()
+	if err := os.MkdirAll(d.Profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.Patch, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviders(t *testing.T) {
+	d := testDSH(t)
+	if d.Providers() != nil {
+		t.Fatal("no patch, no providers")
+	}
+	writePatch(t, d, providersPatch)
+	var got []string
+	for _, p := range d.Providers() {
+		got = append(got, p.Name+"="+p.KeyEnv)
+	}
+	if want := []string{"evren=EVREN_LLM_API_KEY", "anthropic="}; !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestSetKeyEnvAddsOneLine(t *testing.T) {
+	d := testDSH(t)
+	writePatch(t, d, providersPatch)
+	if err := d.SetKeyEnv("anthropic", "CLAUDE_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(d.Patch)
+	want := strings.Replace(providersPatch, "      anthropic:\n", "      anthropic:\n        apiKeyEnv: CLAUDE_API_KEY\n", 1)
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	// Again: nothing to do. Another name: that one line changes.
+	if err := d.SetKeyEnv("anthropic", "CLAUDE_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetKeyEnv("anthropic", "ANTHROPIC_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(d.Patch)
+	if want := strings.Replace(want, "apiKeyEnv: CLAUDE_API_KEY", "apiKeyEnv: ANTHROPIC_API_KEY", 1); string(got) != want {
+		t.Fatalf("replaced:\n%s", got)
+	}
+}
+
+func TestSetKeyEnvRefuses(t *testing.T) {
+	d := testDSH(t)
+	writePatch(t, d, providersPatch)
+	for _, c := range []struct{ provider, name string }{
+		{"anthropic", "NOT-A-NAME"},
+		{"anthropic", "A\n- id: evil"},
+		{"missing", "CLAUDE_API_KEY"},
+		{"inline", "CLAUDE_API_KEY"},
+	} {
+		if err := d.SetKeyEnv(c.provider, c.name); err == nil {
+			t.Errorf("%s=%q: no error", c.provider, c.name)
+		}
+	}
+	if got, _ := os.ReadFile(d.Patch); string(got) != providersPatch {
+		t.Fatalf("a refusal changed the patch:\n%s", got)
+	}
+}
+
 func TestActive(t *testing.T) {
 	d := testDSH(t)
 	if d.Active() != "" {
