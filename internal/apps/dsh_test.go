@@ -151,6 +151,25 @@ func TestInstallRefusesAPathThatWouldAddRows(t *testing.T) {
 	}
 }
 
+// DSH saves its patch with a blank line before passess's end marker; the
+// block still loads the plugin, so it is not drift.
+func TestRowStateIgnoresDSHsBlankLine(t *testing.T) {
+	d := testDSH(t)
+	writePatch(t, d, userPatch)
+	if err := d.Install(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(d.Patch)
+	writePatch(t, d, strings.Replace(string(data), BlockEnd, "\n"+BlockEnd, 1))
+	if got := d.RowState(); got != StateOK {
+		t.Fatalf("with DSH's blank line: %s", got)
+	}
+	writePatch(t, d, strings.Replace(string(data), "passess-credentials", "passess-other", 1))
+	if got := d.RowState(); got != StateDrift {
+		t.Fatalf("a changed row: %s", got)
+	}
+}
+
 func TestKeys(t *testing.T) {
 	d := testDSH(t)
 	if d.Keys() != nil {

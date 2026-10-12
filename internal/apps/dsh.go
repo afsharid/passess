@@ -136,10 +136,22 @@ func (d DSH) RowState() string {
 	switch {
 	case !ok:
 		return StateMissing
-	case doc[start:end] != block(d.Plugin):
+	case dropBlank(doc[start:end]) != dropBlank(block(d.Plugin)):
 		return StateDrift
 	}
 	return StateOK
+}
+
+// dropBlank removes blank lines: DSH rewrites its patch when it saves a
+// setting and puts one before the end marker, which changes nothing it reads.
+func dropBlank(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // Install writes the plugin and splices the row that loads it into the
