@@ -149,6 +149,12 @@ public struct Passess {
         try change(["install", id, "--apply"])
     }
 
+    /// `passess install ID --key PROVIDER=NAME --apply`: the app asks passess
+    /// for secret on provider's requests, after a backup of its config.
+    public func nameKey(app id: String, provider: String, secret: String) throws {
+        try change(["install", id, "--key", provider + "=" + secret, "--apply"])
+    }
+
     /// `passess backend bws`: the machine token goes to the keychain on
     /// stdin, never on a command line; a missing config is started.
     public func storeBWSToken(_ token: String) throws {

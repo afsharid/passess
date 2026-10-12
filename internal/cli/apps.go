@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/afsharid/passess/internal/apps"
@@ -39,11 +41,16 @@ const (
 	keyEveryAgent = "every-agent"
 	keyElsewhere  = "elsewhere"
 	keyUndefined  = "undefined"
+	// keyUnnamed is a provider that names no key: DSH never asks passess
+	// for it. `install dsh --key PROVIDER=NAME` names one.
+	keyUnnamed = "unnamed"
 )
 
 type appKey struct {
-	Name  string `json:"name"`
+	Name  string `json:"name"` // "" for an unnamed provider's key
 	State string `json:"state"`
+	// Provider is the provider an unnamed key belongs to.
+	Provider string `json:"provider,omitempty"`
 }
 
 // appIDs are the apps install and status know, beside the harnesses.
@@ -74,28 +81,42 @@ func dshOf(st *Streams) apps.DSH {
 
 // appReports reports, and with apply changes, the named apps, or every
 // installed one when all is set. ok is false when one has errors or, for
-// status, is not set up.
-func appReports(st *Streams, verb string, names []string, all bool, u *config.User, apply bool) (out []appReport, ok bool) {
+// status, is not set up. keys are install's --key: the key each named
+// provider is to ask DSH's credentials service for.
+func appReports(st *Streams, verb string, names []string, all bool, u *config.User, apply bool, keys map[string]string) (out []appReport, ok bool) {
 	ok = true
 	d := dshOf(st)
 	if (!all || !d.Installed()) && !slices.Contains(names, "dsh") {
 		return []appReport{}, ok
 	}
-	r := dshReport(d, verb, u)
-	if apply && len(r.Changes) > 0 {
+	r := dshReport(d, verb, u, keys)
+	if apply && len(r.Changes) > 0 && len(r.Errors) == 0 {
 		backup, err := harness.Backup(filepath.Join(stateDir(st.Getenv), "backups"), []string{d.Patch}, time.Now())
 		if err != nil {
 			r.Errors = append(r.Errors, "backup failed, nothing changed: "+err.Error())
 		} else {
 			change := d.Install
-			if verb == "uninstall" {
+			switch verb {
+			case "uninstall":
 				change = d.Uninstall
+			case "install":
+				change = func() error {
+					if err := d.Install(); err != nil {
+						return err
+					}
+					for _, p := range slices.Sorted(maps.Keys(keys)) {
+						if err := d.SetKeyEnv(p, keys[p]); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
 			}
 			if err := change(); err != nil {
 				r.Errors = append(r.Errors, err.Error())
 			} else {
 				changes := r.Changes
-				r = dshReport(d, verb, u)
+				r = dshReport(d, verb, u, keys)
 				r.Changes, r.Backup = changes, backup
 			}
 		}
@@ -106,8 +127,17 @@ func appReports(st *Streams, verb string, names []string, all bool, u *config.Us
 	return []appReport{r}, ok
 }
 
-func dshReport(d apps.DSH, verb string, u *config.User) appReport {
+func dshReport(d apps.DSH, verb string, u *config.User, keys map[string]string) appReport {
 	r := appReport{ID: "dsh", Label: detect.Label("dsh"), Config: d.Patch, Keys: []appKey{}, Changes: []string{}, Errors: []string{}}
+	known := map[string]bool{}
+	for _, p := range d.Providers() {
+		known[p.Name] = true
+	}
+	for _, p := range slices.Sorted(maps.Keys(keys)) {
+		if !known[p] {
+			r.Errors = append(r.Errors, d.Patch+" configures no provider "+p)
+		}
+	}
 	file, row := d.PluginState(), d.RowState()
 	switch {
 	case file == apps.StateOK && row == apps.StateOK:
@@ -150,6 +180,18 @@ func dshReport(d apps.DSH, verb string, u *config.User) appReport {
 		}
 		r.Keys = append(r.Keys, k)
 	}
+	for _, p := range d.Providers() {
+		if p.KeyEnv == "" {
+			r.Keys = append(r.Keys, appKey{State: keyUnnamed, Provider: p.Name})
+		}
+	}
+	if verb == "install" {
+		for _, p := range d.Providers() {
+			if name, ok := keys[p.Name]; ok && p.KeyEnv != name {
+				r.Changes = append(r.Changes, "name "+name+" as "+p.Name+"'s key in "+d.Patch)
+			}
+		}
+	}
 	return r
 }
 
@@ -162,6 +204,10 @@ func printApps(st *Streams, verb string, applied bool, reports []appReport) (pen
 		}
 		fmt.Fprintf(st.Stdout, "  %-14s %-10s %s\n", "plugin", r.Plugin, active)
 		for _, k := range r.Keys {
+			if k.State == keyUnnamed {
+				fmt.Fprintf(st.Stdout, "  %-14s %-10s names no key, so %s never asks passess for it; connect one: passess install %s --key %s=NAME --apply\n", k.Provider, k.State, r.Label, r.ID, k.Provider)
+				continue
+			}
 			fmt.Fprintf(st.Stdout, "  %-14s %-10s %s\n", k.Name, k.State, keyNote(k.State, r.Label))
 		}
 		for _, c := range r.Changes {
@@ -174,6 +220,8 @@ func printApps(st *Streams, verb string, applied bool, reports []appReport) (pen
 		}
 		if applied && r.Plugin != apps.StateMissing && verb == "install" && r.Active == "" {
 			fmt.Fprintf(st.Stdout, "  note: restart %s to load it\n", r.Label)
+		} else if applied && verb == "install" && slices.ContainsFunc(r.Changes, func(c string) bool { return strings.HasPrefix(c, "name ") }) {
+			fmt.Fprintf(st.Stdout, "  note: restart %s to read the key it now asks passess for\n", r.Label)
 		}
 		if r.Backup != "" {
 			fmt.Fprintf(st.Stdout, "  backup: %s\n", r.Backup)

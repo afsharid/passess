@@ -422,6 +422,43 @@ struct CopyButton: View {
     }
 }
 
+/// The secrets passess has, one to pick: for a provider that names no key.
+struct SecretPicker: View {
+    let title: String
+    let secrets: [SecretList.Secret]
+    let pick: (SecretList.Secret) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            if secrets.isEmpty {
+                Text(t("No secrets in passess yet"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(secrets, id: \.name) { secret in
+                        Button { pick(secret) } label: {
+                            Text(secret.name)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
+        }
+        .padding(12)
+        .frame(width: 240)
+    }
+}
+
 struct AgentRowView: View {
     let row: AgentRow
     @ObservedObject var model: BarModel
@@ -474,11 +511,28 @@ struct AgentRowView: View {
                             .lineLimit(2)
                     }
                     Spacer(minLength: 4)
-                    Button { model.connectKey(key.name, to: row.id) } label: {
-                        Label(t("Connect"), systemImage: "link")
+                    if let provider = key.provider {
+                        Button { model.picking = key.id } label: {
+                            Label(t("Connect"), systemImage: "link")
+                        }
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                        .disabled(model.installing != nil)
+                        .help(t("Pick the secret %@ sends on %@'s requests", row.title, provider))
+                        .popover(isPresented: Binding(get: { model.picking == key.id }, set: { if !$0 { model.picking = nil } }),
+                                 arrowEdge: .trailing) {
+                            SecretPicker(title: t("Pick the secret %@ sends on %@'s requests", row.title, provider),
+                                         secrets: model.secretList?.secrets ?? []) { secret in
+                                model.picking = nil
+                                model.nameKey(provider, secret: secret, for: row.id)
+                            }
+                        }
+                    } else {
+                        Button { model.connectKey(key.name, to: row.id) } label: {
+                            Label(t("Connect"), systemImage: "link")
+                        }
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                        .help(t("Connect %@ to %@", key.name, row.title))
                     }
-                    .buttonStyle(PrimaryButtonStyle(compact: true))
-                    .help(t("Connect %@ to %@", key.name, row.title))
                 }
                 .padding(.leading, 38)
                 .accessibilityElement(children: .combine)

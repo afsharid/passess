@@ -33,8 +33,15 @@ public struct HarnessStatus: Decodable, Equatable {
     /// Mirrors appReport in internal/cli/apps.go.
     public struct App: Decodable, Equatable {
         public struct Key: Decodable, Equatable {
-            public let name: String
-            public let state: String // connected | every-agent | elsewhere | undefined
+            public let name: String // "" for an unnamed provider's key
+            public let state: String // connected | every-agent | elsewhere | undefined | unnamed
+            /// The provider an unnamed key belongs to: one that names no key, so
+            /// the app never asks passess for it.
+            public let provider: String?
+
+            public init(name: String, state: String, provider: String? = nil) {
+                (self.name, self.state, self.provider) = (name, state, provider)
+            }
         }
 
         public let id: String
@@ -60,9 +67,12 @@ public struct HarnessStatus: Decodable, Equatable {
 
 /// A key an app asks for that does not reach it yet.
 public struct KeyNeed: Identifiable, Equatable {
-    public var id: String { name }
+    public var id: String { provider.map { "provider:" + $0 } ?? name }
     public let name: String
     public let note: String
+    /// Set for a provider that names no key: connecting one names a secret
+    /// for it (`passess install ID --key PROVIDER=NAME`), not a key by name.
+    public var provider: String? = nil
 }
 
 /// One coding agent in the panel.
@@ -134,6 +144,9 @@ func appRow(_ a: HarnessStatus.App, running: Bool) -> AgentRow {
     let keys = a.keys ?? []
     let needs = keys.filter { $0.state != "connected" }.map { k -> KeyNeed in
         switch k.state {
+        case "unnamed":
+            let provider = k.provider ?? k.name
+            return KeyNeed(name: provider, note: t("names no key, so it never asks passess"), provider: provider)
         case "every-agent": return KeyNeed(name: k.name, note: t("connected to every agent, not to this app by name"))
         case "elsewhere": return KeyNeed(name: k.name, note: t("not connected to this app"))
         default: return KeyNeed(name: k.name, note: t("not in passess yet"))

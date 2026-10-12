@@ -295,7 +295,11 @@ the value. A secret connected to every agent does not count, and one narrowed to
 programs still needs `passess-helper`, since the app is known by a process name any
 program can take. The app side is a plugin passess carries: Set up in Passess.app, or
 `passess install dsh --apply`, puts it in the app's profile, and `passess status dsh`
-shows each key the app asks for and whether it reaches the app (ADR 11).
+shows each key the app asks for and whether it reaches the app (ADR 11). A DSH
+provider that names no key (no `apiKeyEnv`) never asks passess at all; status lists it
+as `unnamed`, and Connect in Passess.app, or
+`passess install dsh --key anthropic=CLAUDE_API_KEY --apply`, writes that line under
+it (ADR 12).
 
 ## Secrets already in clear
 

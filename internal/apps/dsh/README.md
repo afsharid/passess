@@ -12,7 +12,15 @@ connects it. From a terminal, the same is:
 passess install dsh --apply     # the plugin, and the row in ~/.dsh/profiles/desktop/cordis.patch.yml
 passess status dsh              # plugin state, whether a running DSH loaded it, each key
 passess set NAME --clients dsh  # connect a key by name; connected to every agent does not count
+passess install dsh --key anthropic=NAME --apply  # a provider that names no key: name one
 ```
+
+DSH asks its credentials service, and so this plugin, only for a provider whose profile
+names a key (`apiKeyEnv`). A provider without one, such as `anthropic` with only a
+models list, reads its key from DSH's launch environment alone (as `ANTHROPIC_API_KEY`),
+which a DSH opened from the Dock does not have. `passess status dsh` lists such a
+provider as `unnamed`; `--key` writes the `apiKeyEnv` line under it in place; restart DSH
+after it ([ADR 12](../../../docs/adr/0012-passess-names-the-key-a-dsh-provider-asks-for.md)).
 
 `index.mjs` is embedded in the passess binary; install writes it to
 `~/.local/share/passess/dsh/index.mjs` and adds the row that loads it between

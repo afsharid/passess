@@ -107,7 +107,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         harness("antigravity", "Antigravity", hooks: "ok", instructions: "ok"),
         harness("claude-desktop", "Claude Desktop", hooks: "none", instructions: "none"),
     ].joined(separator: ",") + "], \"apps\": [{\"id\": \"dsh\", \"label\": \"DeepSeek Harness\", \"plugin\": \"ok\", "
-        + "\"active\": \"2026-10-09T20:00:00.000Z\", \"keys\": [{\"name\": \"EVREN_LLM_API_KEY\", \"state\": \"every-agent\"}], \"errors\": []}]}")
+        + "\"active\": \"2026-10-09T20:00:00.000Z\", \"keys\": [{\"name\": \"EVREN_LLM_API_KEY\", \"state\": \"every-agent\"}, {\"name\": \"\", \"state\": \"unnamed\", \"provider\": \"anthropic\"}], \"errors\": []}]}")
     let agentsNeedSetup = decode(HarnessStatus.self, "{\"applied\": false, \"harnesses\": [" + [
         harness("claude", "Claude Code", hooks: "ok", instructions: "ok"),
         harness("codex", "Codex", hooks: "missing", instructions: "ok", actions: 1),

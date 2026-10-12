@@ -156,9 +156,18 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 	if verb != "status" {
 		apply = fs.Bool("apply", false, "make the changes (without it, only show them)")
 	}
+	keys := map[string]string{}
 	if verb == "install" {
 		force = fs.Bool("force", false, "replace entries of the same name that do not run passess")
 		noHooks = fs.Bool("no-hooks", false, "do not register passess's hook handler")
+		fs.Func("key", "dsh: the secret a provider's requests ask passess for, PROVIDER=NAME (anthropic=CLAUDE_API_KEY); repeatable", func(v string) error {
+			p, name, ok := strings.Cut(v, "=")
+			if !ok || p == "" || !envNameRe.MatchString(name) {
+				return fmt.Errorf("%q is not PROVIDER=NAME, such as anthropic=CLAUDE_API_KEY", v)
+			}
+			keys[p] = name
+			return nil
+		})
 	}
 	fs.Usage = func() {
 		fmt.Fprintf(st.Stderr, "Usage: passess %s [flags] [HARNESS...]   (%s; apps: %s)\n", verb, knownHarnesses(st), strings.Join(appIDs, ", "))
@@ -179,8 +188,18 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, agents[0])
 		}
 	}
+	// Which secret a DSH provider sends to its endpoint is the user's call,
+	// as connecting it is (ADR 12).
+	if *apply && len(keys) > 0 {
+		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			return failf(st, ExitNoPerm, "passess install --key --apply decides which secret DeepSeek Harness sends where; run it yourself in a terminal or in Passess.app, not from %s", agents[0])
+		}
+	}
 	augmentPath(st.Getenv)
 	appNames, names := splitApps(names)
+	if len(keys) > 0 && !slices.Contains(appNames, "dsh") {
+		return failf(st, ExitUsage, "--key names a DeepSeek Harness provider's key: passess install dsh --key PROVIDER=NAME")
+	}
 	var targets []harness.Adapter
 	if len(names) > 0 || len(appNames) == 0 {
 		if targets, err = selectAdapters(st, names); err != nil {
@@ -238,7 +257,7 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 		out.Harnesses = append(out.Harnesses, r)
 	}
-	reports, ok := appReports(st, verb, appNames, len(appNames) == 0 && len(names) == 0, user, *apply)
+	reports, ok := appReports(st, verb, appNames, len(appNames) == 0 && len(names) == 0, user, *apply, keys)
 	out.Apps, healthy = reports, healthy && ok
 
 	if *asJSON {
@@ -600,6 +619,6 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 		}
 	}
 	if !out.Applied && pending && verb != "status" {
-		fmt.Fprintf(st.Stdout, "\nDry run: nothing changed. Run `passess %s --apply` to make these changes.\n", verb)
+		fmt.Fprintln(st.Stdout, "\nDry run: nothing changed. Run the same command with --apply to make these changes.")
 	}
 }

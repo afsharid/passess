@@ -18,6 +18,7 @@ final class BarModel: ObservableObject {
     @Published private(set) var copied: String? // id of the item whose text was just copied
     @Published private(set) var installing: String? // the agent `passess install` is setting up
     @Published private(set) var installFailure: [String: String] = [:] // by agent: what passess said
+    @Published var picking: String? // the provider whose secret list is open (KeyNeed.id)
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
     /// `passess list --json`: the secrets and who may use each.
     @Published private(set) var secretList: SecretList?
@@ -133,6 +134,27 @@ final class BarModel: ObservableObject {
         } else {
             secretsFilter = name
             openSecrets()
+        }
+    }
+
+    /// Names secret as the key an app's provider asks passess for, then opens
+    /// the secret's window with the app ticked when it is not connected to
+    /// it yet by name (every agent does not count for an app, ADR 11): the
+    /// provider would ask for a key it may not have.
+    func nameKey(_ provider: String, secret: SecretList.Secret, for app: String) {
+        guard !frozen, installing == nil, let cli = Passess.locateForAgent() else { return }
+        installing = app
+        work.async {
+            var failure: String?
+            do { try cli.nameKey(app: app, provider: provider, secret: secret.name) } catch { failure = String(describing: error) }
+            DispatchQueue.main.async {
+                self.installing = nil
+                self.installFailure[app] = failure
+                self.refresh()
+                if failure == nil, !(secret.clients ?? []).contains(app) {
+                    self.openEdit(secret, tick: app)
+                }
+            }
         }
     }
 

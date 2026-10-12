@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -135,10 +136,22 @@ func (d DSH) RowState() string {
 	switch {
 	case !ok:
 		return StateMissing
-	case doc[start:end] != block(d.Plugin):
+	case dropBlank(doc[start:end]) != dropBlank(block(d.Plugin)):
 		return StateDrift
 	}
 	return StateOK
+}
+
+// dropBlank removes blank lines: DSH rewrites its patch when it saves a
+// setting and puts one before the end marker, which changes nothing it reads.
+func dropBlank(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // Install writes the plugin and splices the row that loads it into the
@@ -243,6 +256,127 @@ func (d DSH) Keys() []string {
 		}
 	}
 	return out
+}
+
+// Provider is one model provider under a `providers:` mapping in the patch.
+// A provider that names no key (apiKeyEnv) is never asked of DSH's
+// credentials service, so not of passess either: DSH looks for its key only
+// in its own launch environment, which a DSH opened from the Dock lacks.
+type Provider struct {
+	Name   string // the route id, such as anthropic
+	KeyEnv string // its apiKeyEnv, "" when it names none
+	at     int    // the line that opens it
+	key    int    // its apiKeyEnv line, -1 when none
+	indent string // its keys' indentation, "" when none is on its own line
+}
+
+var (
+	providersLine = regexp.MustCompile(`^(\s*)providers:\s*(#.*)?$`)
+	providerLine  = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+):\s*(#.*)?$`)
+	envNameRe     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
+
+// providers reads the providers mappings from the patch's lines: a line scan
+// that follows indentation, the way DSH's patch writes them.
+func providers(lines []string) []Provider {
+	var out []Provider
+	for i := 0; i < len(lines); i++ {
+		m := providersLine.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		top, level, cur := len(m[1]), -1, -1
+		for i++; i < len(lines); i++ {
+			t := strings.TrimSpace(lines[i])
+			if t == "" || strings.HasPrefix(t, "#") {
+				continue
+			}
+			n := indentOf(lines[i])
+			if n <= top {
+				break
+			}
+			if level < 0 {
+				level = n
+			}
+			switch {
+			case n == level:
+				cur = -1 // a provider written some other way: nothing to name a key in
+				if pm := providerLine.FindStringSubmatch(lines[i]); pm != nil {
+					out = append(out, Provider{Name: pm[1], at: i, key: -1})
+					cur = len(out) - 1
+				}
+			case cur >= 0:
+				p := &out[cur]
+				if p.indent == "" {
+					p.indent = lines[i][:n]
+				}
+				if n == len(p.indent) {
+					if km := keyLine.FindStringSubmatch(lines[i]); km != nil {
+						p.KeyEnv, p.key = km[1], i
+					}
+				}
+			}
+		}
+		i-- // the line that ended the block may open another
+	}
+	return out
+}
+
+// Providers lists the model providers the patch configures, in its order.
+func (d DSH) Providers() []Provider {
+	data, err := os.ReadFile(d.Patch)
+	if err != nil {
+		return nil
+	}
+	return providers(strings.Split(string(data), "\n"))
+}
+
+// SetKeyEnv names the key DSH asks its credentials service for on provider's
+// requests: the apiKeyEnv line under it, added or replaced in place, every
+// other byte of the user's patch as it was. Read back, the patch must show
+// the provider with that key, or it goes back as it was.
+func (d DSH) SetKeyEnv(provider, name string) error {
+	if !envNameRe.MatchString(name) {
+		return fmt.Errorf("%q must look like an environment variable name", name)
+	}
+	data, err := os.ReadFile(d.Patch)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	var p *Provider
+	for _, q := range providers(lines) {
+		if q.Name == provider {
+			p = &q
+			break
+		}
+	}
+	switch {
+	case p == nil:
+		return fmt.Errorf("%s configures no provider %s", d.Patch, provider)
+	case p.KeyEnv == name:
+		return nil
+	case p.indent == "":
+		return fmt.Errorf("%s: provider %s has no keys on their own lines to put apiKeyEnv beside", d.Patch, provider)
+	}
+	row := p.indent + "apiKeyEnv: " + name
+	if p.key >= 0 {
+		lines[p.key] = row
+	} else {
+		lines = slices.Insert(lines, p.at+1, row)
+	}
+	if err := writeAtomic(d.Patch, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		return err
+	}
+	for _, q := range d.Providers() {
+		if q.Name == provider && q.KeyEnv == name {
+			return nil
+		}
+	}
+	_ = writeAtomic(d.Patch, data, 0o600)
+	return fmt.Errorf("%s did not read back as written; left as it was", d.Patch)
 }
 
 // beatFresh is how long a status file counts after the plugin last wrote it:

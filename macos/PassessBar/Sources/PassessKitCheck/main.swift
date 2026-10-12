@@ -109,6 +109,12 @@ let waiting = HarnessStatus(harnesses: [], apps: [HarnessStatus.App(id: "dsh", l
                                                                    active: nil, keys: [], errors: nil)])
 expect(codingAgents(waiting, running: { _ in true })[0].detail == "restart it to load the plugin", "an open app without the plugin loaded")
 expect(codingAgents(waiting)[0].tone == .ok && codingAgents(waiting)[0].detail == "plugin ready", "a closed app with the plugin ready")
+// a provider that names no key: shown by provider, with its own way to connect
+let unnamed = HarnessStatus(harnesses: [], apps: [HarnessStatus.App(id: "dsh", label: "DeepSeek Harness", plugin: "ok", active: "now",
+                                                                    keys: [.init(name: "", state: "unnamed", provider: "anthropic")], errors: nil)])
+let need = codingAgents(unnamed)[0].keys
+expect(need.count == 1 && need[0].name == "anthropic" && need[0].provider == "anthropic" && need[0].id == "provider:anthropic"
+       && codingAgents(unnamed)[0].tone == .warning, "an unnamed provider's key: \(need)")
 let unset = HarnessStatus(harnesses: [], apps: [HarnessStatus.App(id: "dsh", label: "DeepSeek Harness", plugin: "missing",
                                                                    active: nil, keys: nil, errors: nil)])
 expect(codingAgents(unset)[0].install == "dsh" && codingAgents(unset)[0].fix == "passess install dsh --apply", "an app to set up")
