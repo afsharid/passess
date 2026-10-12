@@ -619,6 +619,6 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 		}
 	}
 	if !out.Applied && pending && verb != "status" {
-		fmt.Fprintf(st.Stdout, "\nDry run: nothing changed. Run `passess %s --apply` to make these changes.\n", verb)
+		fmt.Fprintln(st.Stdout, "\nDry run: nothing changed. Run the same command with --apply to make these changes.")
 	}
 }

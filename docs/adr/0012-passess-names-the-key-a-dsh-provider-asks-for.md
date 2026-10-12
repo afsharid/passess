@@ -45,7 +45,7 @@ never asks. It was dropped.
 - The line goes outside passess's marked block, into the user's own rows.
   `uninstall` does not take it out: it names a secret, and works the same with the
   key typed into DSH's Models page under that name.
-- The scan follows indentation, not YAML. A provider written inline
+- The scan follows indentation, not YAML. A provider under a quoted key or written inline
   (`anthropic: { ... }`) is not listed, and `--key` refuses it.
 - A provider DSH uses but the patch does not list (only `provider: anthropic` in the
   default model) is not covered. The Models page adds it to the patch.
