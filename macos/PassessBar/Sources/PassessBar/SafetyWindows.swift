@@ -5,8 +5,7 @@ import UniformTypeIdentifiers
 
 // MARK: exposed secrets
 
-/// After 1Password's developer Watchtower: where a credential sits in clear
-/// on this Mac, and a button that moves it. `passess scan` finds them; a .env
+/// Where a credential sits in clear on this Mac, and a button that moves it. `passess scan` finds them; a .env
 /// file moves to the keychain with `passess migrate env`, a transcript is
 /// cleaned with `passess scan --scrub`. Every move shows passess's dry run
 /// first and takes Touch ID.

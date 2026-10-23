@@ -2,10 +2,9 @@ import AppKit
 import PassessKit
 import SwiftUI
 
-/// The first run, after 1Password's "Set up your developer tools": five
-/// steps, each one a button, none a command to copy. Each step reads its
-/// state from what the panel already knows (doctor, list, status), so the
-/// window can be opened again later and shows what is left.
+/// The first run: five steps, each one a button, none a command to copy.
+/// Each step reads its state from what the panel already knows (doctor, list,
+/// status), so the window can be opened again later and shows what is left.
 struct OnboardingView: View {
     @ObservedObject var model: BarModel
     let onClose: () -> Void
