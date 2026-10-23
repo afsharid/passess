@@ -106,6 +106,40 @@ func TestHooksRoundTrip(t *testing.T) {
 	}
 }
 
+// A hook installed by an older passess, whose matcher misses the MCP tools,
+// reads as drift, and installing again brings the matcher up to date.
+func TestHooksOldMatcherIsDrift(t *testing.T) {
+	spec := HookSpecs()[0] // claude
+	h := Hooks{Spec: spec, Home: t.TempDir()}
+	if err := os.MkdirAll(filepath.Dir(h.Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := h.Edit(nil, self, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(cur), `|mcp__.*"`, `"`, 1)
+	if old == string(cur) {
+		t.Fatal("the current matcher does not cover MCP tools")
+	}
+	if err := os.WriteFile(h.Path(), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := h.State(self); st != StateDrift {
+		t.Fatalf("old matcher state = %s, want drift", st)
+	}
+	fixed, err := h.Edit([]byte(old), self, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.Path(), fixed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := h.State(self); st != StateOK {
+		t.Fatalf("state after reinstall = %s:\n%s", st, fixed)
+	}
+}
+
 func TestIsPassessCommand(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"passess hook claude PreToolUse": true, "/opt/homebrew/bin/passess hook codex X": true,

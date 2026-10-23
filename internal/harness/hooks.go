@@ -51,7 +51,7 @@ var openCodePlugin string
 // HookSpecs are the harnesses passess registers its hook handler with.
 // Kiro keeps hooks inside agent profiles and is left to the user.
 func HookSpecs() []HookSpec {
-	tools := "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit"
+	tools := "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit|mcp__.*"
 	return []HookSpec{
 		{ID: "claude", Harness: "claude", Path: ".claude/settings.json", Style: HookGroups, Create: true, Events: []HookEvent{
 			{"PreToolUse", tools}, {"PostToolUse", "*"}, {"UserPromptSubmit", ""}, {"SessionStart", ""}},
@@ -207,7 +207,11 @@ func (h Hooks) State(self string) (string, error) {
 			if isPassessElement(self)(el) {
 				mine++
 				found++
-				if slices.Contains(commandsIn(el), command(self, h.Spec.Harness, e.Name)) {
+				// A matcher from an older passess misses tools added since,
+				// such as MCP tools.
+				m, _ := el.(map[string]any)
+				matcher, _ := m["matcher"].(string)
+				if slices.Contains(commandsIn(el), command(self, h.Spec.Harness, e.Name)) && matcher == e.Matcher {
 					exact++
 				}
 			}

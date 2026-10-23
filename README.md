@@ -193,6 +193,10 @@ refuses the actions that would put a secret value into the conversation:
   harness sign-ins);
 - vault reads that print a value: `op read`, `bws secret get`, `bw get`, `vault kv get`,
   `security … -w`, `gh auth token`;
+- the 1Password Environments MCP tools that hand values to the agent:
+  `create_local_env_file` (a mounted `.env` any process can read) and `append_variables`
+  (the agent supplies the values). Claude Code passes MCP calls to the hook; run
+  `passess install` again so an older hook config picks them up;
 - `$TOKEN` in a command line for a credential;
 - a prompt with a pasted credential in it;
 - an agent rewriting the passess config;

@@ -194,6 +194,29 @@ func TestPromptResultAndStart(t *testing.T) {
 	}
 }
 
+// 1Password's MCP tools that hand values to the agent are refused, under any
+// name a harness gives them; the rest of that server, and other servers'
+// tools of the same name, are not.
+func TestMCPTools(t *testing.T) {
+	env := testEnv(t)
+	for _, tool := range []string{
+		"mcp__plugin_1password_1password__create_local_env_file", "mcp__1password__append_variables",
+		"mcp__onepassword-mcp__create_local_env_file", "1Password__append_variables", "create_local_env_file",
+	} {
+		if v := Decide(Event{Kind: MCP, Tool: tool}, env); !v.Deny || !strings.Contains(v.Reason, "passess add") {
+			t.Errorf("%s allowed: %+v", tool, v)
+		}
+	}
+	for _, tool := range []string{
+		"mcp__plugin_1password_1password__list_variables", "mcp__1password__list_environments",
+		"mcp__other__create_local_env_file", "mcp__github__append_variables",
+	} {
+		if v := Decide(Event{Kind: MCP, Tool: tool}, env); v.Deny {
+			t.Errorf("%s denied: %s", tool, v.Reason)
+		}
+	}
+}
+
 // A running agent masks the values it holds before the hook's own
 // redaction, for a plain output and for a shaped one alike.
 func TestResultMaskedByTheAgent(t *testing.T) {

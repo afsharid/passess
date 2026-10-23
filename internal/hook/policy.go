@@ -29,6 +29,7 @@ const (
 	Shell  Kind = "shell"  // a shell command is about to run
 	Read   Kind = "read"   // a file is about to be read
 	Write  Kind = "write"  // a file is about to be written
+	MCP    Kind = "mcp"    // an MCP tool is about to be called
 	Prompt Kind = "prompt" // the user submitted a prompt
 	Result Kind = "result" // a tool returned output
 	Start  Kind = "start"  // a session started
@@ -97,6 +98,10 @@ func Decide(ev Event, env Env) Verdict {
 				return Verdict{Deny: true, Reason: configReason(p)}
 			}
 		}
+	case MCP:
+		if r := checkMCP(ev.Tool); r != "" {
+			return Verdict{Deny: true, Reason: r}
+		}
 	case Prompt:
 		if r := pasted(ev.Text, env); r != "" {
 			return Verdict{Deny: true, Reason: r}
@@ -125,6 +130,29 @@ func Decide(ev Event, env Env) Verdict {
 }
 
 const useInstead = "Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names."
+
+// --- MCP tools ---
+
+// onePasswordMCP are the tools of 1Password's Environments MCP server that put
+// values where the agent reaches them: a mounted .env file any process can
+// read, and variables whose values the agent itself supplies.
+var onePasswordMCP = map[string]string{
+	"create_local_env_file": "mounts a .env file holding the Environment's values, which the agent can then read",
+	"append_variables":      "takes the values from the agent, so they pass through the conversation",
+}
+
+// checkMCP refuses the 1Password tools above. Harnesses name an MCP tool
+// mcp__<server>__<tool>, or by the bare tool name when that is unambiguous.
+func checkMCP(tool string) string {
+	parts := strings.Split(tool, "__")
+	name, server := parts[len(parts)-1], strings.ToLower(strings.Join(parts[:len(parts)-1], "__"))
+	why, ok := onePasswordMCP[name]
+	if !ok || (server != "" && !strings.Contains(server, "1password") && !strings.Contains(server, "onepassword")) {
+		return ""
+	}
+	return fmt.Sprintf("passess refused the 1Password MCP tool %s: it %s. "+
+		"Ask the user to connect the variable in Passess.app or with `passess add NAME --ref op://…`. %s", name, why, useInstead)
+}
 
 // --- files ---
 
