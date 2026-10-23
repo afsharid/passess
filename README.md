@@ -128,8 +128,17 @@ passess set GITHUB_TOKEN --clients claude-code,codex --approve false --hosts api
 passess remove GITHUB_TOKEN          # passess forgets it; the vault keeps it
 ```
 
-`add`, `set`, `remove` and `discover` are yours to run: they refuse inside an agent, and
-the hooks refuse them in agent shells. Passess.app does the same in a few clicks.
+```sh
+passess browse op                    # 1Password vaults; --vault V for items, --item I for fields
+passess browse keychain              # passess's keychain items, by account
+passess add GITHUB_TOKEN --keychain --value-stdin < file   # the value on stdin, never argv
+passess set GITHUB_TOKEN --ref op://Private/GitHub/credential --allow gh,git
+```
+
+`add`, `set`, `remove`, `browse` and `discover` are yours to run: they refuse inside an
+agent, and the hooks refuse them in agent shells. Passess.app does the same in a few
+clicks, and changes settings only through these commands
+([ADR 13](docs/adr/0013-passess-app-changes-settings-only-through-cli-commands.md)).
 
 ## MCP servers without tokens in harness configs
 
@@ -408,6 +417,14 @@ the vault's secrets passess does not use yet. Connect, or a click on a secret, o
 window with a checkbox per agent and "ask me first"; Save asks for Touch ID or your
 password, then runs `passess add` or `set`. No terminal, no config file.
 
+Add, in the Secrets window, takes a secret from any backend: a 1Password vault, item and
+field picked by name (`passess browse op`), a value for the keychain typed into a secure
+field and sent to the app's own CLI on stdin, or a reference typed as it is (Vault,
+`bw`, `bws`). On first run a setup window walks through five steps, each a button: put
+passess on your PATH (a `~/.local/bin` link to the CLI inside the app), find your
+password managers, add the first secret, set up the coding agents, and start the agent
+at login. A config that does not load is shown with its line, and Config opens it.
+
 When an agent needs your approval, a window asks who wants which secret for which
 command, and Allow takes Touch ID. The app never receives a value. It follows the Mac's
 language: English, or Turkish.
@@ -440,7 +457,8 @@ make macos-previews   # the panel and the windows in sample states, as PNG files
 ```
 
 It bundles its own copy of the CLI, and starts the agent with the `passess` on your
-PATH, which is the one your harnesses run. The build is ad-hoc signed, so the first
+PATH, which is the one your harnesses run. "Start the agent at login" registers a
+LaunchAgent inside the app that runs the bundled CLI's `passess agent serve`. The build is ad-hoc signed, so the first
 launch of a copy downloaded from elsewhere needs right-click → Open.
 
 ## What it protects against — and what it does not

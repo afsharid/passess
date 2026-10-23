@@ -96,8 +96,18 @@ passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a 
   up its plugin, and the app shows each key DSH asks for, with Connect;
 - in the app, Set up runs `passess install` for a coding agent, an agent's avatar is
   its installed app's icon, and an agent of another build is started again.
+- the app changes settings only through CLI commands, values on stdin
+  ([ADR 13](adr/0013-passess-app-changes-settings-only-through-cli-commands.md));
+- `browse op` and `browse keychain` list what a backend holds by name; `add --keychain
+  --value-stdin`; `set --ref`, `--allow`;
+- in the app, an Add tab: a 1Password vault, item and field picked by name, a keychain
+  value typed into a secure field, or a typed reference (Vault, bw, bws);
+- in the app, a first-run setup window (the CLI linked to `~/.local/bin`, backends,
+  first secret, coding agents, agent at login), the agent started at login by
+  `SMAppService`, and a config that does not load shown with its line.
 
-Next, in order: more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
+Next, in order: backend settings, MCP servers, profiles and agent settings as CLI
+commands with app pages (ADR 13); more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
 started with a launch profile), then a client's own API connection through a
 local proxy with a per-client key, so the real key never sits in the client's settings.
 
