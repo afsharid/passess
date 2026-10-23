@@ -28,10 +28,14 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, " ") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
-// pairs parses KEY=VALUE items into a map; sep is "=".
+// pairs parses KEY=VALUE items into a map. An empty item adds nothing, so
+// `--env ""` empties the table.
 func pairs(items []string, what string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, it := range items {
+		if it == "" {
+			continue
+		}
 		k, v, ok := strings.Cut(it, "=")
 		if k = strings.TrimSpace(k); !ok || k == "" {
 			return nil, fmt.Errorf("--%s takes KEY=VALUE, not %q", what, it)

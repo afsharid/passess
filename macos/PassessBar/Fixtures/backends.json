@@ -1,0 +1,18 @@
+{
+  "op": {
+    "account": "my.1password.com"
+  },
+  "vault": {
+    "address": "https://vault.example.com:8200",
+    "namespace": "",
+    "ca_cert": "",
+    "token": "keychain://passess/vault"
+  },
+  "bw": {
+    "session": ""
+  },
+  "bws": {
+    "server_url": "",
+    "access_token": ""
+  }
+}

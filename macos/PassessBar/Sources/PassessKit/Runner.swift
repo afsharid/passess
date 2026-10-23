@@ -110,13 +110,13 @@ public struct Passess {
     }
 
     /// Runs a command that changes the config; a refusal throws what passess said.
-    private func change(_ arguments: [String], stdin: Data? = nil) throws {
+    func change(_ arguments: [String], stdin: Data? = nil) throws {
         let r = try execute(arguments, timeout: 30, stdin: stdin)
         guard r.status == 0 else { throw Failure.refused(said(r.stderr, status: r.status)) }
     }
 
     /// The first line passess wrote on stderr, without its "passess: ".
-    private func said(_ stderr: Data, status: Int32) -> String {
+    func said(_ stderr: Data, status: Int32) -> String {
         let line = String(decoding: stderr, as: UTF8.self)
             .split(separator: "\n").first.map { String($0) } ?? "passess exited \(status)"
         return line.hasPrefix("passess: ") ? String(line.dropFirst(9)) : line
@@ -269,7 +269,7 @@ public struct Passess {
         try decode(Check.self, from: run(["check", "--json"], timeout: 120))
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {

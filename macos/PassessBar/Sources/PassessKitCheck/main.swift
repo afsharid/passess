@@ -38,7 +38,32 @@ expect(health(broken) == .error, "doctor with an error problem should be .error"
 expect(headline(doctor: broken, failure: nil).title == "1 problem", "problem headline")
 let issue = problems(broken).first
 expect(issue?.tone == .error && issue?.symbol == "xmark.octagon.fill", "an error problem looks like one")
-if case .copy = issue?.action {} else { expect(false, "a problem with a fix can be copied") }
+if case let .fix(action, target) = issue?.action {
+    expect(action == "backend-settings" && target == "vault" && fixLabel(action) == "Settings", "a backend problem opens its settings")
+} else { expect(false, "a problem doctor names an action for gets a button: \(String(describing: issue?.action))") }
+if case .fix(action: "start-config", _) = problems(load(Doctor.self, "doctor-no-config.json")).first?.action {} else {
+    expect(false, "no config: the button starts the setup")
+}
+expect(fixLabel("something-new") == nil, "an action the app does not know has no button")
+
+// settings
+let backendSettings = load(BackendSettings.self, "backends.json")
+expect(backendSettings.op.account == "my.1password.com" && backendSettings.vault.token == "keychain://passess/vault"
+       && backendSettings.bw.session.isEmpty, "backends: \(backendSettings)")
+let servers = load([MCPServer].self, "mcp-list.json")
+expect(servers.map(\.name) == ["copilot", "github"] && servers[0].isRemote && !servers[1].isRemote
+       && servers[1].env?["GITHUB_PERSONAL_ACCESS_TOKEN"] == "GITHUB_TOKEN", "mcp servers: \(servers)")
+let form = MCPForm(servers[1])
+expect(form.arguments == ["--command", "npx", "--command", "-y", "--command", "@modelcontextprotocol/server-github",
+                          "--env", "GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN", "--harnesses", "claude", "--redact=true"],
+       "a server's form gives back its flags: \(form.arguments)")
+let remoteForm = MCPForm(servers[0])
+expect(remoteForm.arguments.prefix(4) == ["--url", "https://api.githubcopilot.com/mcp/", "--header", "Authorization=Bearer {{GITHUB_TOKEN}}"]
+       && remoteForm.arguments.contains("all"), "a remote server's form: \(remoteForm.arguments)")
+let profileList = load([Profile].self, "profile-list.json")
+expect(profileList.first?.run == "passess run web -- COMMAND" && profileList.first?.env?["NODE_ENV"] == "development", "profiles: \(profileList)")
+let agentSettings = load(AgentConfig.self, "agent-config.json")
+expect(agentSettings.cacheTTL == "5m0s" && agentSettings.approvalTTL == "8h0m0s", "agent config: \(agentSettings)")
 expect(backends(broken).first?.tone == .warning && backends(broken).first?.title == "vault", "an unusable backend is flagged")
 
 let missing = load(Doctor.self, "doctor-no-config.json")

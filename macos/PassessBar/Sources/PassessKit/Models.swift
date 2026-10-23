@@ -18,6 +18,11 @@ public struct Doctor: Decodable, Equatable {
         public let severity: String
         public let message: String
         public let fix: String?
+        /// What the app can do about it with one button (start-config,
+        /// open-config, fix-permissions, add-secret, install-tool,
+        /// open-1password, backend-settings), and what that acts on.
+        public let action: String?
+        public let target: String?
     }
 
     public let version: String

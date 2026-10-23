@@ -183,3 +183,51 @@ allow   = ["node"]
 	}
 	golden(t, "discover.json", out, dir)
 }
+
+// TestMenuBarSettingsFixtures pins what the Settings window reads: `backend
+// --json`, `mcp list --json`, `profile list --json` and `agent config
+// --json`. References and names only.
+func TestMenuBarSettingsFixtures(t *testing.T) {
+	noHarness(t)
+	dir := writeConfig(t, `version = 1
+
+[backends.op]
+account = "my.1password.com"
+
+[backends.vault]
+address = "https://vault.example.com:8200"
+token = "keychain://passess/vault"
+
+[secrets.GITHUB_TOKEN]
+ref = "keychain://passess/github"
+
+[mcp.github]
+command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "GITHUB_TOKEN" }
+harnesses = ["claude"]
+
+[mcp.copilot]
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer {{GITHUB_TOKEN}}" }
+
+[profiles.web]
+secrets = ["GITHUB_TOKEN"]
+allow = ["node"]
+env = { NODE_ENV = "development" }
+
+[agent]
+cache_ttl = "5m"
+`)
+	for name, args := range map[string][]string{
+		"backends.json":     {"backend", "--json"},
+		"mcp-list.json":     {"mcp", "list", "--json"},
+		"profile-list.json": {"profile", "list", "--json"},
+		"agent-config.json": {"agent", "config", "--json"},
+	} {
+		out, errOut, code := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d, %s", args, code, errOut)
+		}
+		golden(t, name, out, dir)
+	}
+}

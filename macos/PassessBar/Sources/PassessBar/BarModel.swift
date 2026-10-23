@@ -44,6 +44,8 @@ final class BarModel: ObservableObject {
     private var secretsWindow: SecretsWindow?
     private var vaultPanel: VaultPanel?
     private var onboardingWindow: OnboardingWindow?
+    private var settingsWindow: SettingsWindow?
+    private var settingsModel: SettingsModel?
     private static let onboardedKey = "onboarded"
     let approver = ApproverController()
 
@@ -107,6 +109,93 @@ final class BarModel: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         onboardingWindow?.makeKeyAndOrderFront(nil)
         refresh()
+    }
+
+    /// Backends, MCP servers, profiles and the agent's timings: the rest of
+    /// the config, without editing it.
+    func openSettings(_ tab: SettingsModel.Tab = .backends) {
+        if let window = settingsWindow, let model = settingsModel {
+            model.tab = tab
+            model.load()
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let model = SettingsModel(tab: tab)
+        model.onChange = { [weak self] in self?.refresh() }
+        settingsModel = model
+        settingsWindow = SettingsWindow(model: model) { [weak self] in
+            self?.settingsWindow = nil
+            self?.settingsModel = nil
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// What a problem's button does: the action doctor named for it.
+    func performFix(_ action: String, target: String?) {
+        guard !frozen else { return }
+        switch action {
+        case "start-config":
+            openOnboarding()
+        case "open-config":
+            if let path = target { open(URL(fileURLWithPath: path)) }
+        case "fix-permissions":
+            if let path = target {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+            }
+            refresh()
+        case "add-secret":
+            openAdd()
+        case "install-tool":
+            if let tool = target { installTool(tool) }
+        case "open-1password":
+            if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.1password.1password") {
+                NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+            } else {
+                open(URL(string: "https://1password.com/downloads/mac")!)
+            }
+        case "backend-settings":
+            openSettings(.backends)
+        default:
+            break
+        }
+    }
+
+    /// Installs the CLI a backend needs with Homebrew, when there is one;
+    /// else opens where to get it.
+    private func installTool(_ tool: String) {
+        let formula = ["op": ["--cask", "1password-cli"], "bw": ["bitwarden-cli"]][tool]
+        let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let args = formula, let brew = brew, installing == nil else {
+            let pages = ["op": "https://developer.1password.com/docs/cli/get-started/",
+                         "bw": "https://bitwarden.com/help/cli/",
+                         "bws": "https://bitwarden.com/help/secrets-manager-cli/"]
+            open(URL(string: pages[tool] ?? "https://github.com/afsharid/passess#readme")!)
+            return
+        }
+        installing = "tool:" + tool
+        work.async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: brew)
+            p.arguments = ["install"] + args
+            p.environment = ["HOME": NSHomeDirectory(), "PATH": Passess.searchPath().joined(separator: ":"), "HOMEBREW_NO_AUTO_UPDATE": "1"]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            var failure: String?
+            do {
+                try p.run()
+                p.waitUntilExit()
+                if p.terminationStatus != 0 { failure = t("Homebrew could not install %@.", tool) }
+            } catch {
+                failure = String(describing: error)
+            }
+            DispatchQueue.main.async {
+                self.installing = nil
+                self.installFailure["tool:" + tool] = failure
+                self.refresh()
+            }
+        }
     }
 
     var cliOnPath: Bool { cliPath != nil }

@@ -360,6 +360,12 @@ struct AgentTile: View {
             }
             .help(card.running ? t("%@. Click to stop: the agent forgets every value and approval.", card.status)
                 : t("Start the agent: cached values, approvals"))
+            .contextMenu {
+                if card.running {
+                    Button(t("Lock: forget values and approvals, keep running")) { model.agentCommand("lock") }
+                }
+                Button(t("Agent settings…")) { model.openSettings(.agent) }
+            }
         } else {
             Tile(symbol: "bolt.slash", title: t("Agent"), detail: t("Update passess"), enabled: false) {}
                 .help(t("The passess on your PATH has no agent yet: brew upgrade passess"))
@@ -419,8 +425,19 @@ struct ProblemRow: View {
                     if case let .copy(text) = item.action {
                         CopyButton(copied: model.copied == item.id) { model.copy(text, from: item.id) }
                     }
+                    if case let .fix(action, target) = item.action, let label = fixLabel(action) {
+                        Button(model.installing == "tool:" + (target ?? "") ? t("Installing…") : label) {
+                            model.performFix(action, target: target)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                        .disabled(model.installing != nil)
+                    }
                 }
-                if let fix = item.detail {
+                if case let .fix(_, target) = item.action, let failed = model.installFailure["tool:" + (target ?? "")] {
+                    Text(failed)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tone.error.color)
+                } else if let fix = item.detail {
                     Text(fix)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -710,6 +727,10 @@ struct Footer: View {
                     .font(.system(size: 12))
                     .help(t("Set up passess"))
             }
+            Button(t("Settings")) { model.openSettings() }
+                .buttonStyle(.borderless)
+                .font(.system(size: 12))
+                .help(t("Backends, MCP servers, profiles and the agent"))
             if let config = model.doctor?.config, config.ok || config.error != "not found" {
                 Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)

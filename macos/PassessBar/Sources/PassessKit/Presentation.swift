@@ -44,6 +44,23 @@ public enum ItemAction: Equatable {
     case none
     case copy(String)
     case open(URL)
+    /// A button that fixes it in the app: a doctor action and its target.
+    case fix(action: String, target: String?)
+}
+
+/// The button text for a doctor action; nil for one the app does not know,
+/// which then falls back to copying the fix.
+public func fixLabel(_ action: String) -> String? {
+    switch action {
+    case "start-config": return t("Set up")
+    case "open-config": return t("Open the config")
+    case "fix-permissions": return t("Make it private")
+    case "add-secret": return t("Add it")
+    case "install-tool": return t("Install")
+    case "open-1password": return t("Open 1Password")
+    case "backend-settings": return t("Settings")
+    default: return nil
+    }
 }
 
 /// One line of the panel.
@@ -124,7 +141,8 @@ public func problems(_ d: Doctor) -> [Item] {
         let error = p.severity == "error"
         return Item(id: "problem-\(i)", symbol: error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill",
                     tone: error ? .error : .warning, title: p.message, detail: p.fix,
-                    action: p.fix.map { .copy($0) } ?? .none)
+                    action: p.action.flatMap { fixLabel($0) != nil ? .fix(action: $0, target: p.target) : nil }
+                        ?? p.fix.map { .copy($0) } ?? .none)
     }
 }
 
