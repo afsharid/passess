@@ -116,8 +116,9 @@ passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a 
   back; `activity` reads the agent's log; in the app, Take back per Allow, a Secrets in
   clear window (`scan --dir`, `.env` files moved to the keychain or dropped on it,
   transcripts cleaned) and an Activity window.
+- `needs list | add | remove` for a project's `passess.toml`, and Settings → Project.
 
-Next, in order: a project file's `needs` from the app; more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
+Next, in order: more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
 started with a launch profile), then a client's own API connection through a
 local proxy with a per-client key, so the real key never sits in the client's settings.
 

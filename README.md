@@ -140,6 +140,21 @@ agent, and the hooks refuse them in agent shells. Passess.app does the same in a
 clicks, and changes settings only through these commands
 ([ADR 13](docs/adr/0013-passess-app-changes-settings-only-through-cli-commands.md)).
 
+### What a project needs
+
+A project can say which secrets it uses in a `passess.toml` that is committed with it.
+It holds names, never references or values; your user config maps each name
+([ADR 3](docs/adr/0003-project-file-names-only.md)):
+
+```sh
+passess needs add GITHUB_TOKEN --note "release notes" --allow gh   # starts passess.toml here
+passess needs list                                                 # which names your config defines
+passess needs remove GITHUB_TOKEN
+```
+
+`passess doctor` warns about a name the project needs and your config lacks. In
+Passess.app, Settings → Project does the same for a folder you choose.
+
 ## MCP servers without tokens in harness configs
 
 Define each server once, in passess config:
