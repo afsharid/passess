@@ -212,7 +212,7 @@ func opVaults(ctx context.Context, st *Streams, u *config.User) ([]opEntry, erro
 	defer clear(raw)
 	var vaults []opVault
 	if err := json.Unmarshal(raw, &vaults); err != nil {
-		return nil, fmt.Errorf("reading op vault list: %v", err)
+		return nil, fmt.Errorf("reading op vault list: %w", err)
 	}
 	out := make([]opEntry, 0, len(vaults))
 	for _, v := range vaults {
@@ -229,7 +229,7 @@ func opItems(ctx context.Context, st *Streams, u *config.User, vault string) ([]
 	defer clear(raw)
 	var items []opItem
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, fmt.Errorf("reading op item list: %v", err)
+		return nil, fmt.Errorf("reading op item list: %w", err)
 	}
 	out := make([]opEntry, 0, len(items))
 	for _, it := range items {
@@ -248,7 +248,7 @@ func opFields(ctx context.Context, st *Streams, u *config.User, vault, item stri
 	defer clear(raw)
 	var it opItem
 	if err := json.Unmarshal(raw, &it); err != nil {
-		return nil, fmt.Errorf("reading op item get: %v", err)
+		return nil, fmt.Errorf("reading op item get: %w", err)
 	}
 	used := usedRefs(u)
 	out := make([]opEntry, 0, len(it.Fields))
@@ -355,13 +355,15 @@ func keychainItems(dump []byte, service string) []keychainEntry {
 	return out
 }
 
+const keychainAccountChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+
 // keychainAccountOK is an account a keychain:// reference can name.
 func keychainAccountOK(a string) bool {
 	if len(a) == 0 || len(a) > 128 {
 		return false
 	}
 	for _, c := range a {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+		if !strings.ContainsRune(keychainAccountChars, c) {
 			return false
 		}
 	}

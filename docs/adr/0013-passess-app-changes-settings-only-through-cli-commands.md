@@ -43,8 +43,8 @@ The app could write `config.toml` itself. It does not, for three reasons:
 
 ## Consequences
 
-- The CLI grows a command per setting. Dilim 2 of the plan (backend settings, MCP
-  servers, profiles, agent settings) follows the same rule.
+- The CLI grows a command per setting. The settings still left to a hand edit
+  (backend settings, MCP servers, profiles, agent settings) follow the same rule.
 - The app needs the CLI to change anything; a dev build from `swift run` has no bundled
   CLI and cannot store a keychain value or register the login agent.
 - The login agent is the bundled build. When the CLI on the PATH is a different build,

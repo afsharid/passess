@@ -116,7 +116,7 @@ func stablePath(exe string, look func(string) (string, error), home string) stri
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "passess"))
 	}
 	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && os.SameFile(st, self) {
+		if st, err := os.Stat(c); err == nil && os.SameFile(st, self) { //nolint:gosec // G703: PATH's passess and ~/.local/bin's, only compared
 			if abs, err := filepath.Abs(c); err == nil {
 				return abs
 			}

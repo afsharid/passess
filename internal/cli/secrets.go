@@ -188,7 +188,7 @@ func runSet(st *Streams, args []string) int {
 	}
 	if given["allow"] {
 		var lit *string // none, or an empty list: no allow key
-		if !(len(allow) == 1 && allow[0] == "none") && len(allow) > 0 {
+		if len(allow) > 0 && (len(allow) != 1 || allow[0] != "none") {
 			for _, a := range allow {
 				if strings.ContainsAny(a, "/ \t") {
 					return failf(st, ExitUsage, "--allow takes program names, not paths")
