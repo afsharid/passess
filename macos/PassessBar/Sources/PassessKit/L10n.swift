@@ -387,4 +387,11 @@ let turkish: [String: String] = [
     "Take it out": "Çıkar",
     "set up a coding agent without passess's hooks": "bir ajanı passess'in hook'ları olmadan kurmak",
     "take passess out of a coding agent": "passess'i bir ajandan çıkarmak",
+    "required": "zorunlu",
+    "The program does not start without it.": "Program bu olmadan başlamaz.",
+    "Passed through": "Aktarılanlar",
+    "Variables of yours the program also gets, comma-separated (NODE_OPTIONS).":
+        "Programın ayrıca aldığı kendi değişkenlerin, virgülle ayrılmış (NODE_OPTIONS).",
+    "Variables of the coding agent's the server also gets, one per line.":
+        "Sunucunun ajandan ayrıca aldığı değişkenler, satır başına bir tane.",
 ]

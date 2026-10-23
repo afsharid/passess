@@ -713,7 +713,7 @@ struct Footer: View {
     @ObservedObject var model: BarModel
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Toggle(t("Open at Login"), isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
                 .toggleStyle(.checkbox)
                 .font(.system(size: 12))
@@ -732,16 +732,20 @@ struct Footer: View {
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))
                     .help(t("Set up passess"))
+                    .fixedSize()
             }
-            Button(t("Settings")) { model.openSettings() }
-                .buttonStyle(.borderless)
-                .font(.system(size: 12))
-                .help(t("Backends, MCP servers, profiles and the agent"))
+            Button { model.openSettings() } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help(t("Backends, MCP servers, profiles and the agent"))
+            .accessibilityLabel(t("Settings"))
             if let config = model.doctor?.config, config.ok || config.error != "not found" {
                 Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))
                     .help(config.path)
+                    .fixedSize()
             }
             Button {
                 model.open(URL(string: "https://github.com/afsharid/passess#readme")!)
@@ -755,6 +759,7 @@ struct Footer: View {
                 .buttonStyle(.borderless)
                 .font(.system(size: 12))
                 .keyboardShortcut("q")
+                .fixedSize()
         }
     }
 }

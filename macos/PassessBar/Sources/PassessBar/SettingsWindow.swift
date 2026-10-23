@@ -44,6 +44,8 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var profiles: [Profile] = []
     @Published var profileName = ""
     @Published var profileSecrets: Set<String> = []
+    @Published var profileRequired: Set<String> = []
+    @Published var profileInherit = ""
     @Published var profileAllow = ""
     @Published var profileEnv = ""
     @Published var profileTTY = false
@@ -62,6 +64,22 @@ final class SettingsModel: ObservableObject {
     init(tab: Tab = .backends) {
         self.tab = tab
         load()
+    }
+
+    /// Fixed state for previews: nothing runs.
+    init(previewing tab: Tab, backends: BackendSettings, servers: [MCPServer], profiles: [Profile],
+         agent: AgentConfig, secretNames: [String]) {
+        self.tab = tab
+        self.backends = backends
+        opAccount = backends.op.account
+        vaultAddress = backends.vault.address
+        vaultNamespace = backends.vault.namespace
+        vaultCACert = backends.vault.caCert
+        bwsServerURL = backends.bws.serverURL
+        self.servers = servers
+        self.profiles = profiles
+        agentConfig = agent
+        self.secretNames = secretNames
     }
 
     func load() {
@@ -189,6 +207,8 @@ final class SettingsModel: ObservableObject {
         profileEditing = ""
         profileName = ""
         profileSecrets = []
+        profileRequired = []
+        profileInherit = ""
         profileAllow = ""
         profileEnv = ""
         profileTTY = false
@@ -198,6 +218,8 @@ final class SettingsModel: ObservableObject {
         profileEditing = p.name
         profileName = p.name
         profileSecrets = Set(p.secrets)
+        profileRequired = Set(p.required ?? [])
+        profileInherit = (p.inherit ?? []).joined(separator: ", ")
         profileAllow = (p.allow ?? []).joined(separator: ", ")
         profileEnv = (p.env ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
         profileTTY = p.tty
@@ -207,11 +229,15 @@ final class SettingsModel: ObservableObject {
         let adding = profileEditing == ""
         let name = profileName.trimmingCharacters(in: .whitespaces)
         let secrets = profileSecrets.sorted()
-        let allow = profileAllow.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let required = profileRequired.intersection(profileSecrets).sorted()
+        let commaList = { (s: String) in s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+        let allow = commaList(profileAllow)
+        let inherit = commaList(profileInherit)
         let env = profileEnv.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let tty = profileTTY
         confirmAndRun(t("change which secrets a program gets"), done: t("Profile saved.")) { cli in
-            try cli.saveProfile(name: name, secrets: secrets, allow: allow, env: env, tty: tty, adding: adding)
+            try cli.saveProfile(name: name, secrets: secrets, required: required, allow: allow, inherit: inherit,
+                                env: env, tty: tty, adding: adding)
         }
         profileEditing = nil
     }
@@ -397,6 +423,9 @@ private struct MCPFormView: View {
                 Field(title: t("Plain variables"), help: t("One per line, VARIABLE=VALUE. Not for secrets.")) {
                     TextEditor(text: form.vars).font(.system(size: 12, design: .monospaced)).frame(height: 40).surface()
                 }
+                Field(title: t("Passed through"), help: t("Variables of the coding agent's the server also gets, one per line.")) {
+                    TextEditor(text: form.inherit).font(.system(size: 12, design: .monospaced)).frame(height: 32).surface()
+                }
             }
             Field(title: t("Coding agents"), help: t("Their IDs, comma-separated (claude, codex). Empty: every one set up.")) {
                 TextField("claude, codex", text: form.harnesses).textFieldStyle(.roundedBorder)
@@ -426,9 +455,18 @@ private struct ProfilesPane: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(model.secretNames, id: \.self) { name in
-                                Toggle(name, isOn: Binding(get: { model.profileSecrets.contains(name) },
-                                                           set: { on in if on { model.profileSecrets.insert(name) } else { model.profileSecrets.remove(name) } }))
-                                    .toggleStyle(.checkbox).font(.system(size: 12, design: .monospaced))
+                                HStack {
+                                    Toggle(name, isOn: Binding(get: { model.profileSecrets.contains(name) },
+                                                               set: { on in if on { model.profileSecrets.insert(name) } else { model.profileSecrets.remove(name) } }))
+                                        .toggleStyle(.checkbox).font(.system(size: 12, design: .monospaced))
+                                    Spacer()
+                                    if model.profileSecrets.contains(name) {
+                                        Toggle(t("required"), isOn: Binding(get: { model.profileRequired.contains(name) },
+                                                                            set: { on in if on { model.profileRequired.insert(name) } else { model.profileRequired.remove(name) } }))
+                                            .toggleStyle(.checkbox).font(.system(size: 11))
+                                            .help(t("The program does not start without it."))
+                                    }
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -439,6 +477,9 @@ private struct ProfilesPane: View {
                 }
                 Field(title: t("Programs"), help: t("The programs that may run under it, comma-separated (node, npm).")) {
                     TextField("node, npm", text: $model.profileAllow).textFieldStyle(.roundedBorder)
+                }
+                Field(title: t("Passed through"), help: t("Variables of yours the program also gets, comma-separated (NODE_OPTIONS).")) {
+                    TextField("NODE_OPTIONS", text: $model.profileInherit).textFieldStyle(.roundedBorder)
                 }
                 Field(title: t("Plain variables"), help: t("One per line, VARIABLE=VALUE. Not for secrets.")) {
                     TextEditor(text: $model.profileEnv).font(.system(size: 12, design: .monospaced)).frame(height: 40).surface()

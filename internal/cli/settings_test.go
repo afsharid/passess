@@ -72,6 +72,13 @@ func TestMCPCommands(t *testing.T) {
 	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), pat) {
 		t.Fatal("the credential reached the config")
 	}
+	// An empty value empties a list or table, as the app sends for a cleared field.
+	must("mcp", "add", "local", "--command", "srv", "--env", "T=GITHUB_TOKEN", "--inherit", "HOME")
+	must("mcp", "set", "local", "--env", "", "--var", "", "--inherit", "")
+	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "GITHUB_TOKEN\" }") || strings.Contains(string(data), "inherit") {
+		t.Fatalf("lists not emptied:\n%s", data)
+	}
+	must("mcp", "remove", "local")
 	must("mcp", "remove", "github")
 	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "mcp") {
 		t.Fatalf("after remove:\n%s", data)

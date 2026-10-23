@@ -28,6 +28,17 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, " ") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
+// items drops the empty values: `--inherit ""` empties the list.
+func (m multiFlag) items() []string {
+	out := []string{}
+	for _, v := range m {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // pairs parses KEY=VALUE items into a map. An empty item adds nothing, so
 // `--env ""` empties the table.
 func pairs(items []string, what string) (map[string]string, error) {
@@ -246,7 +257,7 @@ func editMCP(st *Streams, sub string, args []string) int {
 		fields = append(fields, field(f.key, inlineTable(m), len(m) > 0))
 	}
 	if given["inherit"] {
-		fields = append(fields, field("inherit", arrayLiteral(inherit), len(inherit) > 0))
+		fields = append(fields, field("inherit", arrayLiteral(inherit.items()), len(inherit.items()) > 0))
 	}
 	if given["harnesses"] {
 		var ids listFlag
@@ -418,7 +429,7 @@ func editProfile(st *Streams, sub string, args []string) int {
 	for _, l := range []struct {
 		key   string
 		items []string
-	}{{"secrets", secrets}, {"required", required}, {"allow", allow}, {"inherit", inherit}} {
+	}{{"secrets", secrets}, {"required", required}, {"allow", allow}, {"inherit", inherit.items()}} {
 		if given[l.key] {
 			fields = append(fields, field(l.key, arrayLiteral(l.items), len(l.items) > 0))
 		}

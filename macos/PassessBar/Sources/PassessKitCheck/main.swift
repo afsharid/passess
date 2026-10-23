@@ -55,7 +55,8 @@ expect(servers.map(\.name) == ["copilot", "github"] && servers[0].isRemote && !s
        && servers[1].env?["GITHUB_PERSONAL_ACCESS_TOKEN"] == "GITHUB_TOKEN", "mcp servers: \(servers)")
 let form = MCPForm(servers[1])
 expect(form.arguments == ["--command", "npx", "--command", "-y", "--command", "@modelcontextprotocol/server-github",
-                          "--env", "GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN", "--harnesses", "claude", "--redact=true"],
+                          "--env", "GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN", "--var", "", "--inherit", "",
+                          "--harnesses", "claude", "--redact=true"],
        "a server's form gives back its flags: \(form.arguments)")
 let remoteForm = MCPForm(servers[0])
 expect(remoteForm.arguments.prefix(4) == ["--url", "https://api.githubcopilot.com/mcp/", "--header", "Authorization=Bearer {{GITHUB_TOKEN}}"]

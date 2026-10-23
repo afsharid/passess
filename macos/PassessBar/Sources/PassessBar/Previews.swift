@@ -77,7 +77,8 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "backends": [{"scheme": "vault", "ok": false, "detail": "no vault address; set backends.vault.address or VAULT_ADDR"},
                   {"scheme": "keychain", "ok": true}],
      "problems": [{"severity": "error", "message": "vault:// is not usable",
-                   "fix": "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"},
+                   "fix": "set the address and token in Passess.app, or with `passess backend vault --address URL --token`",
+                   "action": "backend-settings", "target": "vault"},
                   {"severity": "warning", "message": "~/.config/opencode/opencode.jsonc can be read by other users",
                    "fix": "chmod 600 ~/.config/opencode/opencode.jsonc"}]}
     """)
@@ -197,7 +198,36 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "error": "/Users/you/.config/passess/config.toml:4:14: invalid TOML"}, "secrets": 0, "profiles": 0, "backends": [],
      "problems": [{"severity": "error", "message": "the config file does not load", "fix": "fix the reported line in /Users/you/.config/passess/config.toml"}]}
     """)
+    let settingsBackends = decode(BackendSettings.self, """
+    {"op": {"account": "my.1password.com"},
+     "vault": {"address": "https://vault.example.com:8200", "namespace": "", "ca_cert": "", "token": "keychain://passess/vault"},
+     "bw": {"session": ""}, "bws": {"server_url": "", "access_token": "keychain://passess/bws"}}
+    """)
+    let settingsServers = decode([MCPServer].self, """
+    [{"name": "github", "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"}, "harnesses": ["claude"], "redact": true, "secrets": ["GITHUB_TOKEN"]},
+     {"name": "copilot", "url": "https://api.githubcopilot.com/mcp/", "headers": {"Authorization": "Bearer {{GITHUB_TOKEN}}"},
+      "harnesses": [], "redact": true, "secrets": ["GITHUB_TOKEN"]}]
+    """)
+    let settingsProfiles = decode([Profile].self, """
+    [{"name": "web", "secrets": ["OPENROUTER_API_KEY", "HASS_TOKEN"], "required": ["OPENROUTER_API_KEY"], "allow": ["node", "npm"],
+      "env": {"NODE_ENV": "development"}, "tty": false, "run": "passess run web -- COMMAND"}]
+    """)
+    func settings(_ tab: SettingsModel.Tab, _ prepare: @escaping (SettingsModel) -> Void = { _ in }) -> () -> AnyView {
+        {
+            let model = SettingsModel(previewing: tab, backends: settingsBackends, servers: settingsServers, profiles: settingsProfiles,
+                                      agent: AgentConfig(cacheTTL: "10m0s", approvalTTL: "8h0m0s", approvalTimeout: "1m0s"),
+                                      secretNames: ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY"])
+            prepare(model)
+            return AnyView(SettingsView(model: model))
+        }
+    }
     return [
+        ("settings-backends", settings(.backends), true),
+        ("settings-mcp", settings(.mcp), false),
+        ("settings-mcp-edit", settings(.mcp) { $0.edit(settingsServers[0]) }, true),
+        ("settings-profile-edit", settings(.profiles) { $0.edit(settingsProfiles[0]) }, false),
+        ("settings-agent", settings(.agent), false),
         ("onboarding", {
             let model = BarModel()
             model.seed(doctor: healthy, agent: agentOn, harnesses: agentsNeedSetup, secretList: list)

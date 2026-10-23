@@ -103,6 +103,7 @@ public struct MCPForm: Equatable {
     public var env = "" // VAR=SECRET, one per line
     public var vars = "" // VAR=VALUE, one per line
     public var headers = "" // Name=Template, one per line
+    public var inherit = "" // caller variables, one per line
     public var harnesses = "" // comma-separated; empty for all
     public var redact = true
 
@@ -116,6 +117,7 @@ public struct MCPForm: Equatable {
         env = MCPForm.lines(s.env)
         vars = MCPForm.lines(s.vars)
         headers = MCPForm.lines(s.headers)
+        inherit = (s.inherit ?? []).joined(separator: "\n")
         harnesses = s.harnesses.joined(separator: ",")
         redact = s.redact
     }
@@ -138,8 +140,11 @@ public struct MCPForm: Equatable {
             if MCPForm.items(headers).isEmpty { args += ["--header", ""] }
         } else {
             args += MCPForm.items(command).flatMap { ["--command", $0] }
-            args += MCPForm.items(env).flatMap { ["--env", $0] }
-            args += MCPForm.items(vars).flatMap { ["--var", $0] }
+            // An emptied list is sent as "", which empties it in the config.
+            for (flag, list) in [("--env", env), ("--var", vars), ("--inherit", inherit)] {
+                let items = MCPForm.items(list)
+                args += items.isEmpty ? [flag, ""] : items.flatMap { [flag, $0] }
+            }
         }
         let ids = harnesses.trimmingCharacters(in: .whitespaces)
         args += ["--harnesses", ids.isEmpty ? "all" : ids]
@@ -189,9 +194,11 @@ public extension Passess {
     }
 
     /// `passess profile add` or `set`, with every list given.
-    func saveProfile(name: String, secrets: [String], allow: [String], env: [String], tty: Bool, adding: Bool) throws {
-        var args = ["profile", adding ? "add" : "set", name,
-                    "--secrets", secrets.joined(separator: ","), "--allow", allow.joined(separator: ",")]
+    func saveProfile(name: String, secrets: [String], required: [String], allow: [String], inherit: [String],
+                     env: [String], tty: Bool, adding: Bool) throws {
+        var args = ["profile", adding ? "add" : "set", name, "--secrets", secrets.joined(separator: ","),
+                    "--required", required.joined(separator: ","), "--allow", allow.joined(separator: ",")]
+        args += inherit.isEmpty ? ["--inherit", ""] : inherit.flatMap { ["--inherit", $0] }
         args += env.isEmpty ? ["--env", ""] : env.flatMap { ["--env", $0] }
         args += ["--tty=\(tty)"]
         try change(args)
