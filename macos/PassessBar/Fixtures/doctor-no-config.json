@@ -13,7 +13,9 @@
     {
       "severity": "error",
       "message": "no config file",
-      "fix": "passess add NAME --ref \u003creference\u003e, or create /Users/you/.config/passess/config.toml with version = 1"
+      "fix": "set up in Passess.app, or passess add NAME --ref \u003creference\u003e, or create /Users/you/.config/passess/config.toml with version = 1",
+      "action": "start-config",
+      "target": "/Users/you/.config/passess/config.toml"
     }
   ]
 }

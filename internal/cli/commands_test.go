@@ -176,3 +176,30 @@ ref = "env://PASSESS_TEST_A"
 		t.Fatalf("no config: exit %d: %s", code, out)
 	}
 }
+
+// Each problem the app can fix with a button names the action and what it
+// acts on, so Passess.app offers the button instead of a command to copy.
+func TestDoctorActions(t *testing.T) {
+	problems := func() []problem {
+		t.Helper()
+		out, _, _ := run(t, "doctor", "--json")
+		var got doctorOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Problems
+	}
+	t.Setenv("PASSESS_CONFIG", filepath.Join(t.TempDir(), "none.toml"))
+	if p := problems(); len(p) != 1 || p[0].Action != "start-config" {
+		t.Fatalf("no config: %+v", p)
+	}
+	writeConfig(t, "version = 1\n[secrets.A\n")
+	if p := problems(); len(p) != 1 || p[0].Action != "open-config" || p[0].Target == "" {
+		t.Fatalf("broken config: %+v", p)
+	}
+	t.Setenv("PATH", t.TempDir()) // no op on it
+	writeConfig(t, "version = 1\n[secrets.B]\nref = \"op://Dev/item/field\"\n")
+	if p := problems(); len(p) != 1 || p[0].Action != "install-tool" || p[0].Target != "op" {
+		t.Fatalf("op missing: %+v", p)
+	}
+}

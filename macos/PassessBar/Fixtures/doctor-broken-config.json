@@ -13,7 +13,9 @@
     {
       "severity": "error",
       "message": "the config file does not load",
-      "fix": "fix the reported line in /Users/you/.config/passess/config.toml"
+      "fix": "fix the reported line in /Users/you/.config/passess/config.toml",
+      "action": "open-config",
+      "target": "/Users/you/.config/passess/config.toml"
     }
   ]
 }
