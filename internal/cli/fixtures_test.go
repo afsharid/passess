@@ -230,6 +230,23 @@ func TestMenuBarSafetyFixtures(t *testing.T) {
 	golden(t, "activity.json", out, "/nonexistent")
 }
 
+// TestMenuBarNeedsFixture pins `needs list --json`, as the Settings
+// window's Project tab reads it.
+func TestMenuBarNeedsFixture(t *testing.T) {
+	noHarness(t)
+	writeConfig(t, "version = 1\n[secrets.GITHUB_TOKEN]\nref = \"env://GH\"\n")
+	proj := t.TempDir()
+	body := "version = 1\n\n[needs.GITHUB_TOKEN]\nnote = \"release notes\"\nallow = [\"gh\"]\n\n[needs.OPENAI_API_KEY]\n"
+	if err := os.WriteFile(filepath.Join(proj, "passess.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, "needs", "list", "--json", "--dir", proj)
+	if code != 0 {
+		t.Fatalf("exit %d, %s", code, errOut)
+	}
+	golden(t, "needs-list.json", strings.ReplaceAll(out, proj, "/Users/you/Projects/web"), "/nonexistent")
+}
+
 // TestMenuBarSettingsFixtures pins what the Settings window reads: `backend
 // --json`, `mcp list --json`, `profile list --json` and `agent config
 // --json`. References and names only.

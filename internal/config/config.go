@@ -571,6 +571,11 @@ func LoadProject(path string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseProject(path, data)
+}
+
+// ParseProject parses a project file's contents; path is for messages.
+func ParseProject(path string, data []byte) (*Project, error) {
 	var raw rawProject
 	if err := decode(path, data, &raw); err != nil {
 		return nil, err
