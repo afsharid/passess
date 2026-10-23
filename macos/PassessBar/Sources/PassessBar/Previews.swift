@@ -174,7 +174,38 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "secrets": [{"name": "HASS_TOKEN", "state": "ok"}, {"name": "OPENROUTER_API_KEY", "state": "ok"},
                  {"name": "SUDO_PASSWORD", "state": "ok"}, {"name": "TELEGRAM_BOT_TOKEN", "state": "ok"}]}
     """)
+    let opVaults = decode(OPBrowse.self, #"{"vaults": [{"id": "v1abc", "name": "Private"}, {"id": "v2def", "name": "Work"}]}"#)
+    let opItems = decode(OPBrowse.self, """
+    {"vault": "Private", "items": [{"id": "i1abc", "name": "GitHub", "category": "API_CREDENTIAL"},
+     {"id": "i2def", "name": "OpenRouter", "category": "LOGIN"}, {"id": "i3ghi", "name": "Home Assistant", "category": "PASSWORD"}]}
+    """)
+    let opFields = decode(OPBrowse.self, """
+    {"vault": "Private", "item": "GitHub", "fields": [
+     {"id": "credential", "name": "credential", "type": "CONCEALED", "ref": "op://Private/GitHub/credential", "used_by": "GITHUB_TOKEN"},
+     {"id": "f2", "name": "read token", "section": "Tokens", "type": "CONCEALED", "ref": "op://Private/GitHub/Tokens/read token"},
+     {"id": "notesPlain", "name": "notesPlain", "type": "STRING", "ref": "op://Private/GitHub/notesPlain"}]}
+    """)
+    func adding(_ source: ConnectModel.Source) -> () -> AnyView {
+        {
+            let model = ConnectModel(mode: .create, list: list, cli: nil, source: source)
+            if source == .onePassword { model.seedBrowse(opVaults, items: opItems, fields: opFields) }
+            return AnyView(ConnectView(model: model, onCancel: {}))
+        }
+    }
+    let brokenConfig = decode(Doctor.self, """
+    {"version": "v0.9.0", "ok": false, "config": {"path": "/Users/you/.config/passess/config.toml", "ok": false,
+     "error": "/Users/you/.config/passess/config.toml:4:14: invalid TOML"}, "secrets": 0, "profiles": 0, "backends": [],
+     "problems": [{"severity": "error", "message": "the config file does not load", "fix": "fix the reported line in /Users/you/.config/passess/config.toml"}]}
+    """)
     return [
+        ("onboarding", {
+            let model = BarModel()
+            model.seed(doctor: healthy, agent: agentOn, harnesses: agentsNeedSetup, secretList: list)
+            return AnyView(OnboardingView(model: model, onClose: {}))
+        }, true),
+        ("panel-broken-config", panel { $0.seed(doctor: brokenConfig, agent: agentOff) }, true),
+        ("connect-add-1password", adding(.onePassword), true),
+        ("connect-add-keychain", adding(.keychain), false),
         ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
                                           approving: true, secretList: list, discovery: discovery) }, true),
         ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }, false),

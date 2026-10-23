@@ -45,6 +45,13 @@ let missing = load(Doctor.self, "doctor-no-config.json")
 expect(health(missing) == .error, "missing config should be .error")
 expect(headline(doctor: missing, failure: nil).title == "No config yet", "missing config headline")
 
+let brokenConfigReport = load(Doctor.self, "doctor-broken-config.json")
+let brokenFile = brokenConfig(brokenConfigReport)
+expect(brokenFile?.line == 4 && brokenFile?.message == "invalid TOML", "a config that does not load names its line: \(String(describing: brokenFile))")
+expect(headline(doctor: brokenConfigReport, failure: nil).title == "The config does not load"
+       && headline(doctor: brokenConfigReport, failure: nil).detail == "Line 4", "a broken config is not a missing one")
+expect(brokenConfig(missing) == nil && brokenConfig(healthy) == nil, "a missing or healthy config is not broken")
+
 expect(headline(doctor: nil, failure: nil).title == "Checking…", "no report yet is shown as checking")
 expect(headline(doctor: nil, failure: "boom").detail == "boom", "a failure is shown when there is no report")
 expect(health(nil) == .unknown, "no report is .unknown")
@@ -166,6 +173,47 @@ expect(fresh.first?.title == "NEW_KEY" && fresh.first?.isNew == true && fresh.fi
 expect(fresh.dropFirst().allSatisfy { !$0.isNew }, "a secret without a date is not new")
 expect(fresh.dropFirst().map(\.title) == discovery.secrets.map(\.key).filter { $0 != "NEW_KEY" }, "the rest keep discover's order")
 expect(foundRows(discovery, now: added.addingTimeInterval(4 * 86_400)).allSatisfy { !$0.isNew }, "new for three days")
+
+// browse
+let vaults = load(OPBrowse.self, "browse-op-vaults.json")
+expect(vaults.vaults?.map(\.name) == ["Private", "Work"] && vaults.items == nil, "browse op lists vaults")
+let opItems = load(OPBrowse.self, "browse-op-items.json")
+expect(opItems.vault == "Private" && opItems.items?.first?.category == "API_CREDENTIAL", "browse op --vault lists items")
+let opFields = load(OPBrowse.self, "browse-op-fields.json")
+let fields = orderedFields(opFields.fields ?? [])
+expect(fields.first?.usedBy == "GITHUB_TOKEN" && fields.map(\.type).prefix(2) == ["CONCEALED", "CONCEALED"], "concealed fields first")
+expect(fields.last?.name == "notesPlain" || fields.last?.type == "OTP", "notes and one-time codes last: \(fields.map(\.name))")
+expect(fieldText(fields[1]).detail == "Tokens · concealed", "a field's section and type: \(fieldText(fields[1]))")
+expect(fieldText(fields[0]).detail == "concealed · used by GITHUB_TOKEN", "a field passess has: \(fieldText(fields[0]))")
+let keychain = load(KeychainBrowse.self, "browse-keychain.json")
+expect(keychain.service == "passess" && keychain.items.map(\.account) == ["GITHUB_TOKEN", "bws"] && keychain.items[0].usedBy == "GH_LOCAL"
+       && keychain.items[1].backend == "bws" && keychain.items[1].usedBy == nil,
+       "browse keychain lists passess's items")
+expect(suggestedName(item: "GitHub", field: "credential") == "GITHUB" && suggestedName(item: "Open Router", field: "read token") == "OPEN_ROUTER_READ_TOKEN"
+       && suggestedName(item: "1Password", field: nil) == "SECRET_1PASSWORD", "a name from an item and a field")
+expect(referenceProblem("op://Private/GitHub/credential") == nil && referenceProblem("vault://secret/app#token") == nil, "references the config takes")
+expect(referenceProblem("ghp_abc") != nil && referenceProblem("op://") != nil && referenceProblem("https://x") != nil, "a value or a URL is no reference")
+
+// the CLI on the search path
+do {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("passess-link-\(getpid())")
+    let app = home.appendingPathComponent("Passess.app/Contents/Resources")
+    try fm.createDirectory(at: app, withIntermediateDirectories: true)
+    let cli = app.appendingPathComponent("passess")
+    fm.createFile(atPath: cli.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let link = try Passess.linkBundled(Passess(executable: cli), home: home.path)
+    expect(link.path == home.path + "/.local/bin/passess" && (try? fm.destinationOfSymbolicLink(atPath: link.path)) == cli.path, "the link points into the app")
+    expect(Passess.onSearchPath(home: home.path)?.executable.path == link.path, "a linked passess is on the search path")
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) != nil, "linking again is fine")
+    try fm.removeItem(at: link)
+    fm.createFile(atPath: link.path, contents: Data("mine".utf8))
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) == nil
+           && (try? String(contentsOf: link, encoding: .utf8)) == "mine", "a file of the user's is left alone")
+    try? fm.removeItem(at: home)
+} catch {
+    expect(false, "link check: \(error)")
+}
 
 // Turkish
 L10n.override = .turkish

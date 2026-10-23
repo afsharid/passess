@@ -63,7 +63,7 @@ func runList(st *Streams, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
-	u, proj, code := loadConfig(st)
+	u, proj, code := loadConfigOrEmpty(st)
 	if code != 0 {
 		return code
 	}

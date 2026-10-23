@@ -53,6 +53,8 @@ macos-app: build
 	cp bin/passess $(APP)/Contents/Resources/passess
 	cp $(BAR)/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	cp $(BAR)/Info.plist $(APP)/Contents/Info.plist
+	mkdir -p $(APP)/Contents/Library/LaunchAgents
+	cp $(BAR)/io.github.afsharid.passess.agent.plist $(APP)/Contents/Library/LaunchAgents/
 	plutil -replace CFBundleShortVersionString -string '$(APP_VERSION)' $(APP)/Contents/Info.plist
 	codesign --force --sign - --timestamp=none $(APP)/Contents/Resources/passess
 	codesign --force --sign - --timestamp=none $(APP)

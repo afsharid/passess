@@ -65,6 +65,24 @@ func loadConfig(st *Streams) (*config.User, *config.Project, int) {
 	return u, p, 0
 }
 
+// loadConfigOrEmpty is loadConfig, except that a user config not written yet
+// reads as one with nothing in it: what list and browse show Passess.app
+// before the first secret is added.
+func loadConfigOrEmpty(st *Streams) (*config.User, *config.Project, int) {
+	path, err := config.UserPath(st.Getenv)
+	if err != nil {
+		return nil, nil, failf(st, ExitConfig, "%v", err)
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		u, err := config.ParseUser(path, []byte("version = 1\n"))
+		if err != nil {
+			return nil, nil, failf(st, ExitSoftware, "%v", err)
+		}
+		return u, nil, 0
+	}
+	return loadConfig(st)
+}
+
 // newBootProviders are the providers that need no credential of their own;
 // backend credentials are resolved through them.
 func newBootProviders(st *Streams) []provider.Provider {

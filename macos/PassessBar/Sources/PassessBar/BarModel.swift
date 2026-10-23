@@ -20,12 +20,18 @@ final class BarModel: ObservableObject {
     @Published private(set) var installFailure: [String: String] = [:] // by agent: what passess said
     @Published var picking: String? // the provider whose secret list is open (KeyNeed.id)
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    /// The agent started at login by launchd, from the plist inside the app
+    /// (Contents/Library/LaunchAgents): "ask first" secrets work after a
+    /// restart without opening the panel.
+    @Published private(set) var agentAtLogin = BarModel.loginAgent.status
     /// `passess list --json`: the secrets and who may use each.
     @Published private(set) var secretList: SecretList?
     /// `passess discover --json`: what the vault holds that passess does not use.
     @Published private(set) var discovery: Discovery?
     /// What the Secrets window's filter field holds.
     @Published var secretsFilter = ""
+    /// The passess on the search path, which harnesses and shells find.
+    @Published private(set) var cliPath = Passess.onSearchPath()?.executable.path
 
     private let work = DispatchQueue(label: "passess.bar.work")
     private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh
@@ -37,6 +43,8 @@ final class BarModel: ObservableObject {
     private var connectPanel: ConnectPanel?
     private var secretsWindow: SecretsWindow?
     private var vaultPanel: VaultPanel?
+    private var onboardingWindow: OnboardingWindow?
+    private static let onboardedKey = "onboarded"
     let approver = ApproverController()
 
     var health: Health { doctor == nil && failure == nil ? .unknown : PassessKit.health(doctor) }
@@ -56,6 +64,10 @@ final class BarModel: ObservableObject {
         approver.start()
         refresh()
         discover(maxAge: 0)
+        // First run, or a setup left half done: the setup window, once.
+        if !UserDefaults.standard.bool(forKey: BarModel.onboardedKey) && (cliPath == nil || !agentStartsAtLogin) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.openOnboarding() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()
             self?.discover(maxAge: 30 * 60)
@@ -64,6 +76,7 @@ final class BarModel: ObservableObject {
 
     /// The panel opened: what it shows should be current.
     func panelOpened() {
+        if !frozen { agentAtLogin = BarModel.loginAgent.status } // approved in System Settings meanwhile
         refresh()
         discover(maxAge: 120)
     }
@@ -84,6 +97,42 @@ final class BarModel: ObservableObject {
         }
     }
 
+    func openOnboarding() {
+        if onboardingWindow == nil {
+            onboardingWindow = OnboardingWindow(model: self) { [weak self] in
+                self?.onboardingWindow = nil
+                UserDefaults.standard.set(true, forKey: BarModel.onboardedKey)
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        refresh()
+    }
+
+    var cliOnPath: Bool { cliPath != nil }
+
+    /// Whether a setup step is left: the footer then offers the window.
+    var setupLeft: Bool { !cliOnPath || !agentStartsAtLogin || (secretList?.secrets.isEmpty ?? true) }
+
+    /// Whether this app carries a passess to link.
+    var canLinkCLI: Bool { Passess.bundled() != nil }
+
+    /// Links ~/.local/bin/passess to the copy inside the app: harness
+    /// configs then name a path that outlives an update of the app.
+    func linkCLI() {
+        guard !frozen, let bundled = Passess.bundled() else { return }
+        do {
+            try Passess.linkBundled(bundled)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = t("Could not put passess on your PATH")
+            alert.informativeText = String(describing: error)
+            alert.runModal()
+        }
+        cliPath = Passess.onSearchPath()?.executable.path
+        refresh()
+    }
+
     func openSecrets() {
         if secretsWindow == nil {
             secretsWindow = SecretsWindow(model: self) { [weak self] in self?.secretsWindow = nil }
@@ -96,6 +145,14 @@ final class BarModel: ObservableObject {
 
     func openConnect(_ found: Discovery.Found, tick: String? = nil) {
         show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate(), tick: tick))
+    }
+
+    /// The Add tab: a new secret from 1Password, the keychain or a typed
+    /// reference. 1Password first when doctor finds it usable.
+    func openAdd() {
+        let op = doctor?.backends.first { $0.scheme == "op" }?.ok == true
+        show(ConnectModel(mode: .create, list: secretList, cli: Passess.locate(), valueCLI: Passess.bundled(),
+                          source: op ? .onePassword : .keychain))
     }
 
     func openEdit(_ secret: SecretList.Secret, tick: String? = nil) {
@@ -214,8 +271,10 @@ final class BarModel: ObservableObject {
             let agent = try? onPath.agentStatus()
             let harnesses = try? onPath.harnesses()
             let list = try? cli.list()
+            let onSearchPath = Passess.onSearchPath()?.executable.path
             DispatchQueue.main.async {
                 self.refreshing = false
+                self.cliPath = onSearchPath
                 self.doctor = doctor
                 self.failure = failure
                 self.agent = agent
@@ -290,6 +349,30 @@ final class BarModel: ObservableObject {
         self.secretList = secretList
         self.discovery = discovery
         openAtLogin = true
+        agentAtLogin = .enabled
+        cliPath = nil
+    }
+
+    static let loginAgent = SMAppService.agent(plistName: "io.github.afsharid.passess.agent.plist")
+
+    /// Whether the agent starts at login: on, waiting for the user's OK in
+    /// System Settings, or off.
+    var agentStartsAtLogin: Bool { agentAtLogin == .enabled || agentAtLogin == .requiresApproval }
+
+    func setAgentAtLogin(_ on: Bool) {
+        guard !frozen else { return }
+        do {
+            if on { try BarModel.loginAgent.register() } else { try BarModel.loginAgent.unregister() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = t("Could not change Start at Login")
+            alert.informativeText = "\(error.localizedDescription)\n\n"
+                + t("Move Passess.app to /Applications and try again. A copy built with swift run has no agent to register.")
+            alert.runModal()
+        }
+        agentAtLogin = BarModel.loginAgent.status
+        if agentAtLogin == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        refresh()
     }
 
     func setOpenAtLogin(_ on: Bool) {

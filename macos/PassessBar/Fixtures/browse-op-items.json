@@ -1,0 +1,15 @@
+{
+  "vault": "Private",
+  "items": [
+    {
+      "id": "i1abc",
+      "name": "GitHub",
+      "category": "API_CREDENTIAL"
+    },
+    {
+      "id": "i2def",
+      "name": "OpenRouter",
+      "category": "LOGIN"
+    }
+  ]
+}
