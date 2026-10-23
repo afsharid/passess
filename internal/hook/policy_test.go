@@ -199,13 +199,14 @@ func TestPromptResultAndStart(t *testing.T) {
 }
 
 // 1Password's MCP tools that hand values to the agent are refused, under any
-// name a harness gives them; the rest of that server, and other servers'
-// tools of the same name, are not.
+// server name the user gave it and any form a harness names them in; the
+// rest of that server is not.
 func TestMCPTools(t *testing.T) {
 	env := testEnv(t)
 	for _, tool := range []string{
 		"mcp__plugin_1password_1password__create_local_env_file", "mcp__1password__append_variables",
 		"mcp__onepassword-mcp__create_local_env_file", "1Password__append_variables", "create_local_env_file",
+		"mcp__op__create_local_env_file", "mcp__1p__append_variables",
 	} {
 		if v := Decide(Event{Kind: MCP, Tool: tool}, env); !v.Deny || !strings.Contains(v.Reason, "passess add") {
 			t.Errorf("%s allowed: %+v", tool, v)
@@ -213,7 +214,7 @@ func TestMCPTools(t *testing.T) {
 	}
 	for _, tool := range []string{
 		"mcp__plugin_1password_1password__list_variables", "mcp__1password__list_environments",
-		"mcp__other__create_local_env_file", "mcp__github__append_variables",
+		"mcp__op__list_local_env_files", "mcp__github__create_issue",
 	} {
 		if v := Decide(Event{Kind: MCP, Tool: tool}, env); v.Deny {
 			t.Errorf("%s denied: %s", tool, v.Reason)

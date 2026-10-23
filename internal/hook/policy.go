@@ -143,11 +143,13 @@ var onePasswordMCP = map[string]string{
 
 // checkMCP refuses the 1Password tools above. Harnesses name an MCP tool
 // mcp__<server>__<tool>, or by the bare tool name when that is unambiguous.
+// The server part is the user's to choose (op, 1p, …), so only the tool
+// name counts: these two names are 1Password's.
 func checkMCP(tool string) string {
 	parts := strings.Split(tool, "__")
-	name, server := parts[len(parts)-1], strings.ToLower(strings.Join(parts[:len(parts)-1], "__"))
+	name := parts[len(parts)-1]
 	why, ok := onePasswordMCP[name]
-	if !ok || (server != "" && !strings.Contains(server, "1password") && !strings.Contains(server, "onepassword")) {
+	if !ok {
 		return ""
 	}
 	return fmt.Sprintf("passess refused the 1Password MCP tool %s: it %s. "+
