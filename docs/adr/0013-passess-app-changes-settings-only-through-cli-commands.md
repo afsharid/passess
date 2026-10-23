@@ -43,8 +43,15 @@ The app could write `config.toml` itself. It does not, for three reasons:
 
 ## Consequences
 
-- The CLI grows a command per setting. The settings still left to a hand edit
-  (backend settings, MCP servers, profiles, agent settings) follow the same rule.
+- The CLI grows a command per setting. The rest followed the same rule: `backend op |
+  vault | bw | bws`, `mcp add | set | remove | list`, `profile add | set | remove | list`
+  and `agent config` write `[backends.NAME]`, `[mcp.NAME]`, `[profiles.NAME]` and
+  `[agent]` with the same checked splice (`config.SetTableFields`, which can create a
+  table the file does not have yet). The Vault token and the `bw` session go to the
+  keychain on stdin, as the bws token does. A plain value that looks like a credential
+  (an MCP server's vars, a header's text, a profile's env) is refused. The app shows
+  these in a Settings window, and `doctor --json` names an action per problem so the
+  app offers a button instead of a command to copy. No setting needs a hand edit.
 - The app needs the CLI to change anything; a dev build from `swift run` has no bundled
   CLI and cannot store a keychain value or register the login agent.
 - The login agent is the bundled build. When the CLI on the PATH is a different build,

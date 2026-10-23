@@ -156,7 +156,20 @@ harnesses = ["codex"]                         # only there; without it, every ha
 ```
 
 `passess migrate mcp` sets `harnesses` to the harness a server came from, so moving it
-into passess does not spread it anywhere else.
+into passess does not spread it anywhere else. Or write none of this by hand:
+
+```sh
+passess mcp add github --command github-mcp-server --command stdio \
+  --env GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
+passess mcp set tracker --url https://mcp.example.com/mcp \
+  --header 'Authorization=Bearer {{TRACKER_TOKEN}}' --harnesses codex
+passess mcp list
+```
+
+`profile add | set | remove | list` does the same for profiles, `agent config` for the
+agent's timings, and `backend op | vault | bw | bws` for each backend's settings (a
+credential such as the Vault token is read from stdin and kept in the keychain).
+Passess.app's Settings window runs these.
 
 Then let passess register them with your harnesses:
 
@@ -407,7 +420,8 @@ value, in `agent-audit.jsonl` next to its socket.
 ## macOS menu bar app
 
 `Passess.app` puts passess in the menu bar. Its panel shows:
-- whether everything is fine, and every problem with its fix, copyable;
+- whether everything is fine, and every problem with its fix: a button where the app
+  can do it (open 1Password, install `op`, open the settings), else copyable;
 - two tiles: the agent, which you switch on and off here, and the secrets, whose
   check shows which resolve (names and sources only);
 - secrets that turned up in your vault and are not connected yet, each with Connect,
@@ -428,6 +442,13 @@ field and sent to the app's own CLI on stdin, or a reference typed as it is (Vau
 passess on your PATH (a `~/.local/bin` link to the CLI inside the app), find your
 password managers, add the first secret, set up the coding agents, and start the agent
 at login. A config that does not load is shown with its line, and Config opens it.
+
+Settings, in the panel's footer, holds the rest of the config: each backend's settings
+(the 1Password account, the Vault address and token, the `bw` session, a self-hosted
+Bitwarden server), the MCP servers, the profiles, and how long the agent keeps values
+and approvals. Each Save takes Touch ID and runs the matching command. A coding agent's
+row has a menu to set it up again replacing entries you wrote, without hooks, or to
+take passess out of it; the agent tile's menu locks the agent.
 
 When an agent needs your approval, a window asks who wants which secret for which
 command, and Allow takes Touch ID. The app never receives a value. It follows the Mac's

@@ -105,9 +105,16 @@ passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a 
 - in the app, a first-run setup window (the CLI linked to `~/.local/bin`, backends,
   first secret, coding agents, agent at login), the agent started at login by
   `SMAppService`, and a config that does not load shown with its line.
+- `backend op | vault | bw | bws`, `mcp`, `profile` and `agent config`: every setting in
+  the config has a command, and Passess.app a Settings window for them; a doctor
+  problem gets a button (open 1Password, install `op`, settings); a coding agent can be
+  set up again with `--force` or without hooks, or have passess taken out;
+- hooks refuse 1Password's Environments MCP tools that hand values to the agent
+  (`create_local_env_file`, `append_variables`), and an older hook matcher counts as
+  drift.
 
-Next, in order: backend settings, MCP servers, profiles and agent settings as CLI
-commands with app pages (ADR 13); more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
+Next, in order: expiring approvals bound to a secret's settings, an "exposed secrets"
+page for `scan` and `migrate`, an activity log; more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
 started with a launch profile), then a client's own API connection through a
 local proxy with a per-client key, so the real key never sits in the client's settings.
 
