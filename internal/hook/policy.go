@@ -615,8 +615,11 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "add", sub(1) == "set", sub(1) == "remove":
 			return "passess: `passess " + sub(1) + "` decides who may use which secret; it is the user's to run, or to do in Passess.app. " +
 				"Tell the user the name and reference you need."
-		case sub(1) == "discover":
-			return "passess: `passess discover` lists what the user's vault holds; that inventory is the user's to see, " +
+		case sub(1) == "backend" && !slices.Contains(args, "--json"):
+			return "passess: `passess backend` sets how passess reaches the user's vault and stores its credentials; it is the user's " +
+				"to run, or to do in Passess.app. Tell the user which setting you need."
+		case sub(1) == "discover", sub(1) == "browse":
+			return "passess: `passess " + sub(1) + "` lists what the user's vault holds; that inventory is the user's to see, " +
 				"in Passess.app or a terminal of their own. Ask the user for the secret you need."
 		case sub(1) == "migrate" && slices.Contains(args, "--apply"):
 			return "passess: `passess migrate --apply` moves values out of the user's files; it is the user's to run. " +

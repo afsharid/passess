@@ -85,6 +85,116 @@ func TestBackendBWS(t *testing.T) {
 	}
 }
 
+// itemKeychainFake records which keychain item each value went to, and
+// fails a test that finds the value in argv.
+type itemKeychainFake struct {
+	t     *testing.T
+	items map[string]string // "service/account" → value
+}
+
+func (f itemKeychainFake) Run(_ context.Context, c provider.Cmd) (provider.Result, error) {
+	for _, a := range c.Args {
+		if strings.Contains(a, backendToken) {
+			f.t.Fatalf("the value is in argv: %v", c.Args)
+		}
+	}
+	switch {
+	case len(c.Args) == 1 && c.Args[0] == "-i":
+		line := string(c.Stdin)
+		for _, item := range []string{"passess/vault", "passess/bw-session"} {
+			svc, acct, _ := strings.Cut(item, "/")
+			if strings.Contains(line, `-s "`+svc+`" -a "`+acct+`"`) {
+				f.items[item] = backendToken
+				return provider.Result{}, nil
+			}
+		}
+		f.t.Errorf("stored under an unexpected item: %q", line)
+		return provider.Result{}, nil
+	case len(c.Args) >= 5 && c.Args[0] == "find-generic-password": // the read-back after storing
+		return provider.Result{Stdout: []byte(f.items[c.Args[2]+"/"+c.Args[4]] + "\n")}, nil
+	case len(c.Args) > 0 && c.Args[0] == "store": // secret-tool: attributes in argv, value on stdin
+		f.items[c.Args[len(c.Args)-3]+"/"+c.Args[len(c.Args)-1]] = string(c.Stdin)
+		return provider.Result{}, nil
+	}
+	f.t.Fatalf("unexpected command %v", c.Args)
+	return provider.Result{}, nil
+}
+
+// Each backend's settings are set without editing the config: into
+// [backends.NAME], a credential into the keychain with the config naming it,
+// and an empty value back to the default.
+func TestBackendSettings(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the fake speaks security(1)")
+	}
+	noHarness(t)
+	cfg := filepath.Join(t.TempDir(), "passess", "config.toml")
+	t.Setenv("PASSESS_CONFIG", cfg)
+	saved := backendRunner
+	t.Cleanup(func() { backendRunner = saved })
+	kc := itemKeychainFake{t, map[string]string{}}
+	backendRunner = kc
+	run := func(stdin string, args ...string) (string, string, int) {
+		t.Helper()
+		var out, errb strings.Builder
+		code := Main(args, strings.NewReader(stdin), &out, &errb)
+		return out.String(), errb.String(), code
+	}
+	mustRun := func(stdin string, args ...string) {
+		t.Helper()
+		if out, errOut, code := run(stdin, args...); code != 0 {
+			t.Fatalf("%v: exit %d, %q %q", args, code, out, errOut)
+		}
+	}
+	if out, _, code := run("", "backend", "--json"); code != 0 || !strings.Contains(out, `"account": ""`) {
+		t.Fatalf("no config yet: exit %d, %s", code, out)
+	}
+	mustRun("", "backend", "op", "--account", "my.1password.com")
+	mustRun("", "backend", "vault", "--address", "https://vault.example.com:8200", "--namespace", "team")
+	mustRun(backendToken+"\n", "backend", "vault", "--token")
+	mustRun(backendToken+"\n", "backend", "bw", "--session")
+	mustRun("", "backend", "bws", "--server-url", "https://vault.bitwarden.eu")
+	if kc.items["passess/vault"] != backendToken || kc.items["passess/bw-session"] != backendToken {
+		t.Fatalf("keychain: %v", kc.items)
+	}
+	data, _ := os.ReadFile(cfg)
+	for _, want := range []string{
+		"[backends.op]\naccount = \"my.1password.com\"\n",
+		"[backends.vault]\naddress = \"https://vault.example.com:8200\"\nnamespace = \"team\"\ntoken = \"keychain://passess/vault\"\n",
+		"[backends.bw]\nsession = \"keychain://passess/bw-session\"\n",
+		"[backends.bws]\nserver_url = \"https://vault.bitwarden.eu\"\n",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("config lacks %q:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), backendToken) {
+		t.Fatal("a credential value is in the config")
+	}
+	out, _, _ := run("", "backend", "--json")
+	if !strings.Contains(out, `"token": "keychain://passess/vault"`) || strings.Contains(out, backendToken) {
+		t.Fatalf("--json: %s", out)
+	}
+	// An empty value goes back to the default.
+	mustRun("", "backend", "op", "--account", "")
+	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "my.1password.com") {
+		t.Fatalf("the account stayed:\n%s", data)
+	}
+	if _, errOut, code := run("", "backend", "vault", "--address", "vault.example.com"); code != ExitUsage || !strings.Contains(errOut, "URL") {
+		t.Fatalf("a bare host: exit %d, %q", code, errOut)
+	}
+	if _, _, code := run("", "backend", "op"); code != ExitUsage {
+		t.Fatalf("no flags: exit %d", code)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if _, _, code := run("", "backend", "op", "--account", "x"); code != ExitNoPerm {
+		t.Fatalf("under an agent: exit %d", code)
+	}
+	if _, _, code := run("", "backend", "--json"); code != 0 {
+		t.Fatalf("--json under an agent: exit %d", code)
+	}
+}
+
 // addKeychainFake is a keychain for add --value-stdin: the value arrives on
 // security(1)'s stdin, under service passess and the secret's name.
 type addKeychainFake struct {

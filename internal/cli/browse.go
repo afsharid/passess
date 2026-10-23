@@ -275,7 +275,7 @@ func opFields(ctx context.Context, st *Streams, u *config.User, vault, item stri
 // backendCredentials maps the references a backend reads its own
 // credential from to the backend's scheme.
 func backendCredentials(u *config.User) map[string]string {
-	out := map[string]string{defaultBWSToken.String(): ref.BWS}
+	out := map[string]string{defaultBWSToken.String(): ref.BWS, defaultVaultToken.String(): ref.Vault, defaultBWSession.String(): ref.Bitwarden}
 	for scheme, r := range map[string]*ref.Ref{ref.BWS: u.Backends.BWS.AccessToken, ref.Vault: u.Backends.Vault.Token, ref.Bitwarden: u.Backends.BW.Session} {
 		if r != nil {
 			out[r.String()] = scheme
