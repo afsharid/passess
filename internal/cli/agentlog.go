@@ -46,6 +46,9 @@ func (l *auditLog) write(e auditEntry) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if fi, err := os.Stat(l.path); err == nil && fi.Size() >= auditMax {
+		_ = os.Rename(l.path, l.path+".1") // the previous log; the one before it goes
+	}
 	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err == nil {
 		_, err = f.Write(append(b, '\n'))
