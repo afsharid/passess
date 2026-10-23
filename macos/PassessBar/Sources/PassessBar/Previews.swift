@@ -213,11 +213,17 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
     [{"name": "web", "secrets": ["OPENROUTER_API_KEY", "HASS_TOKEN"], "required": ["OPENROUTER_API_KEY"], "allow": ["node", "npm"],
       "env": {"NODE_ENV": "development"}, "tty": false, "run": "passess run web -- COMMAND"}]
     """)
+    let projectNeeds = decode(ProjectNeeds.self, """
+    {"path": "\(NSHomeDirectory())/Projects/web/passess.toml",
+     "needs": [{"name": "GITHUB_TOKEN", "note": "release notes", "allow": ["gh"], "defined": true},
+               {"name": "OPENAI_API_KEY", "defined": false}]}
+    """)
     func settings(_ tab: SettingsModel.Tab, _ prepare: @escaping (SettingsModel) -> Void = { _ in }) -> () -> AnyView {
         {
             let model = SettingsModel(previewing: tab, backends: settingsBackends, servers: settingsServers, profiles: settingsProfiles,
                                       agent: AgentConfig(cacheTTL: "10m0s", approvalTTL: "8h0m0s", approvalTimeout: "1m0s"),
-                                      secretNames: ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY"])
+                                      secretNames: ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY"],
+                                      project: (NSHomeDirectory() + "/Projects/web", projectNeeds))
             prepare(model)
             return AnyView(SettingsView(model: model))
         }
@@ -244,6 +250,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         ("settings-mcp-edit", settings(.mcp) { $0.edit(settingsServers[0]) }, true),
         ("settings-profile-edit", settings(.profiles) { $0.edit(settingsProfiles[0]) }, false),
         ("settings-agent", settings(.agent), false),
+        ("settings-project", settings(.project), true),
         ("onboarding", {
             let model = BarModel()
             model.seed(doctor: healthy, agent: agentOn, harnesses: agentsNeedSetup, secretList: list)

@@ -75,6 +75,9 @@ expect(remoteForm.arguments.prefix(4) == ["--url", "https://api.githubcopilot.co
        && remoteForm.arguments.contains("all"), "a remote server's form: \(remoteForm.arguments)")
 let profileList = load([Profile].self, "profile-list.json")
 expect(profileList.first?.run == "passess run web -- COMMAND" && profileList.first?.env?["NODE_ENV"] == "development", "profiles: \(profileList)")
+let needs = load(ProjectNeeds.self, "needs-list.json")
+expect(needs.path.hasSuffix("/passess.toml") && needs.needs.map(\.name) == ["GITHUB_TOKEN", "OPENAI_API_KEY"]
+       && needs.needs[0].defined && !needs.needs[1].defined && needs.needs[0].allow == ["gh"], "needs: \(needs)")
 let agentSettings = load(AgentConfig.self, "agent-config.json")
 expect(agentSettings.cacheTTL == "5m0s" && agentSettings.approvalTTL == "8h0m0s", "agent config: \(agentSettings)")
 expect(backends(broken).first?.tone == .warning && backends(broken).first?.title == "vault", "an unusable backend is flagged")

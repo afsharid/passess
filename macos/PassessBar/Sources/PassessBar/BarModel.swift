@@ -126,6 +126,7 @@ final class BarModel: ObservableObject {
         }
         let model = SettingsModel(tab: tab)
         model.onChange = { [weak self] in self?.refresh() }
+        model.onAddSecret = { [weak self] in self?.openAdd() }
         settingsModel = model
         settingsWindow = SettingsWindow(model: model) { [weak self] in
             self?.settingsWindow = nil

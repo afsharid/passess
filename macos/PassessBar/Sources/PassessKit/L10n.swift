@@ -449,4 +449,20 @@ let turkish: [String: String] = [
     "no one to ask": "soracak kimse yok",
     "cancelled": "iptal edildi",
     "taken back": "geri alındı",
+
+    // Settings → Project
+    "Project": "Proje",
+    "A project's passess.toml names the secrets it uses, never where they come from, so it can be committed. Your config maps each name.":
+        "Projenin passess.toml dosyası kullandığı sırların yalnız adını taşır, nereden geldiklerini değil; bu yüzden depoya eklenebilir. Her adı senin ayar dosyan eşler.",
+    "No project chosen": "Proje seçilmedi",
+    "Choose a project…": "Proje seç…",
+    "No passess.toml yet; adding a name starts one here.": "Henüz passess.toml yok; bir ad eklemek burada bir tane başlatır.",
+    "In your config": "Ayar dosyanda var",
+    "Not in your config yet": "Henüz ayar dosyanda yok",
+    "Add the secret…": "Sırrı ekle…",
+    "Secret name": "Sır adı",
+    "What for (optional)": "Ne için (isteğe bağlı)",
+    "Programs (optional)": "Programlar (isteğe bağlı)",
+    "The project now names %@.": "Proje artık %@ adını taşıyor.",
+    "The project no longer names %@.": "Proje artık %@ adını taşımıyor.",
 ]

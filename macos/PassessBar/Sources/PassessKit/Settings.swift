@@ -93,6 +93,22 @@ public struct AgentConfig: Decodable, Equatable {
     }
 }
 
+/// Output of `passess needs list --json`: the secrets a project's
+/// passess.toml names, and whether the user config defines each.
+public struct ProjectNeeds: Decodable, Equatable {
+    public struct Need: Decodable, Equatable, Identifiable {
+        public let name: String
+        public let note: String?
+        public let allow: [String]?
+        public let defined: Bool
+
+        public var id: String { name }
+    }
+
+    public let path: String // "" when the project has no passess.toml yet
+    public let needs: [Need]
+}
+
 /// What the Settings window asks of an MCP server: the form's fields, each
 /// one a flag of `passess mcp add` or `set`.
 public struct MCPForm: Equatable {
@@ -206,6 +222,23 @@ public extension Passess {
 
     func removeProfile(_ name: String) throws {
         try change(["profile", "remove", name])
+    }
+
+    /// `passess needs list --json --dir DIR`.
+    func needs(dir: String) throws -> ProjectNeeds {
+        let r = try execute(["needs", "list", "--json", "--dir", dir], timeout: 30)
+        guard r.status == 0 else { throw Failure.refused(said(r.stderr, status: r.status)) }
+        return try decode(ProjectNeeds.self, from: r.stdout)
+    }
+
+    /// `passess needs add NAME --dir DIR`, with a note and programs when given.
+    func addNeed(_ name: String, dir: String, note: String, allow: [String]) throws {
+        try change(["needs", "add", name, "--dir", dir] + (note.isEmpty ? [] : ["--note", note])
+            + (allow.isEmpty ? [] : ["--allow", allow.joined(separator: ",")]))
+    }
+
+    func removeNeed(_ name: String, dir: String) throws {
+        try change(["needs", "remove", name, "--dir", dir])
     }
 
     /// `passess agent config --json`.

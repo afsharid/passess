@@ -8,13 +8,14 @@ import SwiftUI
 /// and keeps it only if the config still loads.
 final class SettingsModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case backends, mcp, profiles, agent
+        case backends, mcp, profiles, project, agent
         var id: String { rawValue }
         var title: String {
             switch self {
             case .backends: return t("Backends")
             case .mcp: return t("MCP servers")
             case .profiles: return t("Profiles")
+            case .project: return t("Project")
             case .agent: return t("Agent")
             }
         }
@@ -51,6 +52,13 @@ final class SettingsModel: ObservableObject {
     @Published var profileTTY = false
     @Published var profileEditing: String? // the profile in the form; "" for a new one
 
+    // Project: a passess.toml names secrets only, so its changes need no Touch ID
+    @Published private(set) var projectFolder: String?
+    @Published private(set) var projectNeeds: ProjectNeeds?
+    @Published var needName = ""
+    @Published var needNote = ""
+    @Published var needAllow = ""
+
     // Agent
     @Published var agentConfig: AgentConfig?
 
@@ -58,6 +66,8 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var secretNames: [String] = []
 
     var onChange: (() -> Void)?
+    /// Opens the Add tab, for a name the project needs and the config lacks.
+    var onAddSecret: (() -> Void)?
     private let cli = Passess.locate()
     private let work = DispatchQueue(label: "passess.settings")
 
@@ -68,8 +78,11 @@ final class SettingsModel: ObservableObject {
 
     /// Fixed state for previews: nothing runs.
     init(previewing tab: Tab, backends: BackendSettings, servers: [MCPServer], profiles: [Profile],
-         agent: AgentConfig, secretNames: [String]) {
+         agent: AgentConfig, secretNames: [String], project: (folder: String, needs: ProjectNeeds)? = nil) {
         self.tab = tab
+        projectFolder = project?.folder
+        projectNeeds = project?.needs
+        if project != nil { onAddSecret = {} }
         self.backends = backends
         opAccount = backends.op.account
         vaultAddress = backends.vault.address
@@ -246,6 +259,65 @@ final class SettingsModel: ObservableObject {
         confirmAndRun(t("remove a profile"), done: t("Profile removed.")) { cli in try cli.removeProfile(name) }
     }
 
+    // MARK: project
+
+    func chooseProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = t("Choose")
+        if let folder = projectFolder { panel.directoryURL = URL(fileURLWithPath: folder) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        projectFolder = url.path
+        loadNeeds()
+    }
+
+    func loadNeeds() {
+        guard let cli = cli, let folder = projectFolder else { return }
+        work.async {
+            var got: ProjectNeeds?
+            var failure: String?
+            do { got = try cli.needs(dir: folder) } catch { failure = String(describing: error) }
+            DispatchQueue.main.async {
+                self.projectNeeds = got
+                self.error = failure
+            }
+        }
+    }
+
+    /// Runs a change that hands nothing to anyone, so without Touch ID.
+    private func runNames(_ message: String, _ change: @escaping (Passess) throws -> Void) {
+        guard let cli = cli, !busy else { return }
+        busy = true
+        error = nil
+        saved = nil
+        work.async {
+            var failure: String?
+            do { try change(cli) } catch { failure = String(describing: error) }
+            DispatchQueue.main.async {
+                self.busy = false
+                if let failure = failure { self.error = failure } else { self.saved = message }
+                self.loadNeeds()
+            }
+        }
+    }
+
+    func addNeed() {
+        guard let folder = projectFolder else { return }
+        let name = needName.trimmingCharacters(in: .whitespaces)
+        let note = needNote.trimmingCharacters(in: .whitespaces)
+        let allow = needAllow.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        runNames(t("The project now names %@.", name)) { cli in try cli.addNeed(name, dir: folder, note: note, allow: allow) }
+        needName = ""
+        needNote = ""
+        needAllow = ""
+    }
+
+    func removeNeed(_ name: String) {
+        guard let folder = projectFolder else { return }
+        runNames(t("The project no longer names %@.", name)) { cli in try cli.removeNeed(name, dir: folder) }
+    }
+
     // MARK: agent
 
     func saveAgent() {
@@ -270,6 +342,7 @@ struct SettingsView: View {
                 case .backends: BackendsPane(model: model)
                 case .mcp: MCPPane(model: model)
                 case .profiles: ProfilesPane(model: model)
+                case .project: ProjectPane(model: model)
                 case .agent: AgentPane(model: model)
                 }
             }
@@ -517,6 +590,59 @@ private struct ProfilesPane: View {
                 HStack {
                     Spacer()
                     Button(t("Add a profile"), action: model.newProfile).buttonStyle(PrimaryButtonStyle())
+                }
+            }
+        }
+    }
+}
+
+private struct ProjectPane: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(t("A project's passess.toml names the secrets it uses, never where they come from, so it can be committed. Your config maps each name."))
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text(model.projectFolder.map { $0.replacingOccurrences(of: NSHomeDirectory(), with: "~") } ?? t("No project chosen"))
+                    .font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Button(t("Choose a project…"), action: model.chooseProject).buttonStyle(PrimaryButtonStyle(compact: true))
+            }
+            if let p = model.projectNeeds {
+                Text(p.path.isEmpty ? t("No passess.toml yet; adding a name starts one here.")
+                    : p.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                ForEach(p.needs) { n in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(n.name).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            let detail = [n.note, n.allow.map { t("for %@", $0.joined(separator: ", ")) }].compactMap { $0 }
+                            if !detail.isEmpty {
+                                Text(detail.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                            Label(n.defined ? t("In your config") : t("Not in your config yet"),
+                                  systemImage: n.defined ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.system(size: 11)).foregroundStyle(n.defined ? Tone.ok.color : Tone.warning.color)
+                        }
+                        Spacer()
+                        if !n.defined, let add = model.onAddSecret {
+                            Button(t("Add the secret…"), action: add).buttonStyle(.borderless)
+                        }
+                        Button(t("Remove")) { model.removeNeed(n.name) }.buttonStyle(.borderless)
+                    }
+                    .padding(10)
+                    .surface()
+                }
+                HStack {
+                    TextField(t("Secret name"), text: $model.needName).textFieldStyle(.roundedBorder)
+                    Button(t("Add"), action: model.addNeed)
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                        .disabled(model.needName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                HStack {
+                    TextField(t("What for (optional)"), text: $model.needNote).textFieldStyle(.roundedBorder)
+                    TextField(t("Programs (optional)"), text: $model.needAllow).textFieldStyle(.roundedBorder)
                 }
             }
         }
