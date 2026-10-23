@@ -1,4 +1,5 @@
 import PassessKit
+import ServiceManagement
 import SwiftUI
 
 // No @State in these views: the SDK's @State is a macro, and the Command Line
@@ -22,7 +23,10 @@ struct PanelView: View {
                     SecretsTile(model: model)
                 }
                 .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.bottom, 6)
+                AgentAtLogin(model: model)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
                 content(d)
             } else if let d = model.doctor, let broken = brokenConfig(d) {
                 BrokenConfigCard(path: d.config.path, message: broken.message, line: broken.line, model: model)
@@ -359,6 +363,27 @@ struct AgentTile: View {
         } else {
             Tile(symbol: "bolt.slash", title: t("Agent"), detail: t("Update passess"), enabled: false) {}
                 .help(t("The passess on your PATH has no agent yet: brew upgrade passess"))
+        }
+    }
+}
+
+/// Under the agent tile: whether launchd starts the agent at login.
+struct AgentAtLogin: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Toggle(t("Start the agent at login"), isOn: Binding(get: { model.agentStartsAtLogin }, set: { model.setAgentAtLogin($0) }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .fixedSize()
+                .help(t("After a restart, secrets that ask first still work: the agent is there to ask."))
+            if model.agentAtLogin == .requiresApproval {
+                Button(t("Allow in System Settings")) { SMAppService.openSystemSettingsLoginItems() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+            }
+            Spacer(minLength: 0)
         }
     }
 }

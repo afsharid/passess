@@ -20,6 +20,10 @@ final class BarModel: ObservableObject {
     @Published private(set) var installFailure: [String: String] = [:] // by agent: what passess said
     @Published var picking: String? // the provider whose secret list is open (KeyNeed.id)
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    /// The agent started at login by launchd, from the plist inside the app
+    /// (Contents/Library/LaunchAgents): "ask first" secrets work after a
+    /// restart without opening the panel.
+    @Published private(set) var agentAtLogin = BarModel.loginAgent.status
     /// `passess list --json`: the secrets and who may use each.
     @Published private(set) var secretList: SecretList?
     /// `passess discover --json`: what the vault holds that passess does not use.
@@ -64,6 +68,7 @@ final class BarModel: ObservableObject {
 
     /// The panel opened: what it shows should be current.
     func panelOpened() {
+        if !frozen { agentAtLogin = BarModel.loginAgent.status } // approved in System Settings meanwhile
         refresh()
         discover(maxAge: 120)
     }
@@ -298,6 +303,29 @@ final class BarModel: ObservableObject {
         self.secretList = secretList
         self.discovery = discovery
         openAtLogin = true
+        agentAtLogin = .enabled
+    }
+
+    static let loginAgent = SMAppService.agent(plistName: "io.github.afsharid.passess.agent.plist")
+
+    /// Whether the agent starts at login: on, waiting for the user's OK in
+    /// System Settings, or off.
+    var agentStartsAtLogin: Bool { agentAtLogin == .enabled || agentAtLogin == .requiresApproval }
+
+    func setAgentAtLogin(_ on: Bool) {
+        guard !frozen else { return }
+        do {
+            if on { try BarModel.loginAgent.register() } else { try BarModel.loginAgent.unregister() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = t("Could not change Start at Login")
+            alert.informativeText = "\(error.localizedDescription)\n\n"
+                + t("Move Passess.app to /Applications and try again. A copy built with swift run has no agent to register.")
+            alert.runModal()
+        }
+        agentAtLogin = BarModel.loginAgent.status
+        if agentAtLogin == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        refresh()
     }
 
     func setOpenAtLogin(_ on: Bool) {

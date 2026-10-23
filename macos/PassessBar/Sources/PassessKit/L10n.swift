@@ -266,4 +266,10 @@ let turkish: [String: String] = [
     "Type the value.": "Değeri yaz.",
     "Value": "Değer",
     "Vault": "Kasa",
+    // the agent at login
+    "Could not change Start at Login": "Oturum açılınca başlatma değiştirilemedi",
+    "Move Passess.app to /Applications and try again. A copy built with swift run has no agent to register.": "Passess.app'i /Applications klasörüne taşı ve yeniden dene. swift run ile derlenen kopyada kaydedilecek servis yok.",
+    "Start the agent at login": "Servisi oturum açılınca başlat",
+    "After a restart, secrets that ask first still work: the agent is there to ask.": "Yeniden başlattıktan sonra önce soran sırlar da çalışır: soracak servis hazırdır.",
+    "Allow in System Settings": "Sistem Ayarları'nda izin ver",
 ]

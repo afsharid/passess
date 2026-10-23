@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The passess agent at login: Passess.app registers it with SMAppService.
+     It runs the CLI inside the app in the foreground. No KeepAlive: Stop in
+     the panel forgets every value and approval, and must stay stopped. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.afsharid.passess.agent</string>
+	<key>BundleProgram</key>
+	<string>Contents/Resources/passess</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>passess</string>
+		<string>agent</string>
+		<string>serve</string>
+	</array>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>io.github.afsharid.passess.bar</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>WorkingDirectory</key>
+	<string>/</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>LANG</key>
+		<string>en_US.UTF-8</string>
+	</dict>
+</dict>
+</plist>
