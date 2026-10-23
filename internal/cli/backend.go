@@ -79,11 +79,18 @@ func runBackend(st *Streams, args []string) int {
 	return ExitOK
 }
 
-// readToken reads one line: typed without echo at a terminal, else stdin.
+// readToken reads the bws machine token: typed without echo at a terminal,
+// else stdin.
 func readToken(st *Streams) (secret.Value, error) {
+	return readSecretLine(st, "bws machine token")
+}
+
+// readSecretLine reads one line, what: typed without echo at a terminal, else
+// stdin.
+func readSecretLine(st *Streams, what string) (secret.Value, error) {
 	var raw []byte
 	if f, ok := st.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(st.Stderr, "bws machine token (not shown): ")
+		fmt.Fprintf(st.Stderr, "%s (not shown): ", what)
 		b, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(st.Stderr)
 		if err != nil {
@@ -100,7 +107,7 @@ func readToken(st *Streams) (secret.Value, error) {
 	defer clear(raw)
 	t := bytes.TrimSpace(raw)
 	if len(t) == 0 || bytes.ContainsAny(t, "\n\r") {
-		return secret.Value{}, errors.New("give the bws machine token on one line")
+		return secret.Value{}, fmt.Errorf("give the %s on one line", what)
 	}
 	return secret.New(t), nil
 }
