@@ -186,7 +186,8 @@ expect(fields.last?.name == "notesPlain" || fields.last?.type == "OTP", "notes a
 expect(fieldText(fields[1]).detail == "Tokens · concealed", "a field's section and type: \(fieldText(fields[1]))")
 expect(fieldText(fields[0]).detail == "concealed · used by GITHUB_TOKEN", "a field passess has: \(fieldText(fields[0]))")
 let keychain = load(KeychainBrowse.self, "browse-keychain.json")
-expect(keychain.service == "passess" && keychain.items.map(\.account) == ["GITHUB_TOKEN", "bws"] && keychain.items[1].usedBy == "BWS",
+expect(keychain.service == "passess" && keychain.items.map(\.account) == ["GITHUB_TOKEN", "bws"] && keychain.items[0].usedBy == "GH_LOCAL"
+       && keychain.items[1].backend == "bws" && keychain.items[1].usedBy == nil,
        "browse keychain lists passess's items")
 expect(suggestedName(item: "GitHub", field: "credential") == "GITHUB" && suggestedName(item: "Open Router", field: "read token") == "OPEN_ROUTER_READ_TOKEN"
        && suggestedName(item: "1Password", field: nil) == "SECRET_1PASSWORD", "a name from an item and a field")

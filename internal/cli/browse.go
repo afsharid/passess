@@ -80,6 +80,9 @@ type keychainEntry struct {
 	Ref      string `json:"ref"`
 	Modified string `json:"modified,omitempty"` // RFC 3339
 	UsedBy   string `json:"used_by,omitempty"`
+	// Backend names the backend whose own credential this is (bws's machine
+	// token): it opens a vault and must not become a secret agents get.
+	Backend string `json:"backend,omitempty"`
 }
 
 type keychainBrowseOutput struct {
@@ -269,6 +272,30 @@ func opFields(ctx context.Context, st *Streams, u *config.User, vault, item stri
 	return out, nil
 }
 
+// backendCredentials maps the references a backend reads its own
+// credential from to the backend's scheme.
+func backendCredentials(u *config.User) map[string]string {
+	out := map[string]string{defaultBWSToken.String(): ref.BWS}
+	for scheme, r := range map[string]*ref.Ref{ref.BWS: u.Backends.BWS.AccessToken, ref.Vault: u.Backends.Vault.Token, ref.Bitwarden: u.Backends.BW.Session} {
+		if r != nil {
+			out[r.String()] = scheme
+		}
+	}
+	return out
+}
+
+// backendCredential returns the first of refs that is a backend's own
+// credential, and that backend, or "".
+func backendCredential(u *config.User, refs []string) (reference, backend string) {
+	creds := backendCredentials(u)
+	for _, raw := range refs {
+		if r, err := ref.Parse(raw); err == nil && creds[r.String()] != "" {
+			return r.String(), creds[r.String()]
+		}
+	}
+	return "", ""
+}
+
 // usedRefs maps each configured reference to the secret that has it.
 func usedRefs(u *config.User) map[string]string {
 	used := map[string]string{}
@@ -295,9 +322,10 @@ func browseKeychain(ctx context.Context, st *Streams, u *config.User, asJSON boo
 		return failf(st, ExitUnavailable, "keychain: security exited %d: %s", res.Exit, provider.CLIMessage(res.Stderr))
 	}
 	out := keychainBrowseOutput{Service: keychainService, Items: keychainItems(res.Stdout, keychainService)}
-	used := usedRefs(u)
+	used, creds := usedRefs(u), backendCredentials(u)
 	for i := range out.Items {
 		out.Items[i].UsedBy = used[out.Items[i].Ref]
+		out.Items[i].Backend = creds[out.Items[i].Ref]
 	}
 	if asJSON {
 		return writeJSON(st, out)
@@ -305,7 +333,11 @@ func browseKeychain(ctx context.Context, st *Streams, u *config.User, asJSON boo
 	w := tabwriter.NewWriter(st.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ACCOUNT\tREFERENCE\tUSED BY")
 	for _, it := range out.Items {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", it.Account, it.Ref, it.UsedBy)
+		usedBy := it.UsedBy
+		if it.Backend != "" {
+			usedBy = it.Backend + " itself (not a secret to add)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", it.Account, it.Ref, usedBy)
 	}
 	_ = w.Flush()
 	return ExitOK

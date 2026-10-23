@@ -35,9 +35,12 @@ public struct KeychainBrowse: Decodable, Equatable {
         public let ref: String
         public let modified: String?
         public let usedBy: String?
+        /// The backend whose own credential this is (bws's machine token):
+        /// never offered as a secret.
+        public let backend: String?
 
         enum CodingKeys: String, CodingKey {
-            case account, ref, modified
+            case account, ref, modified, backend
             case usedBy = "used_by"
         }
     }

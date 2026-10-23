@@ -246,6 +246,9 @@ func runSet(st *Streams, args []string) int {
 			}
 			// As in add: a reference another secret has would reach programs
 			// under a second allow list.
+			if r, b := backendCredential(u, refs); r != "" {
+				return nil, fmt.Errorf("%s is the credential %s itself reads; it cannot be a secret", r, b)
+			}
 			others := *u
 			others.Secrets = maps.Clone(u.Secrets)
 			delete(others.Secrets, name)

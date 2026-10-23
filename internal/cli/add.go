@@ -117,6 +117,10 @@ func runAdd(st *Streams, args []string) int {
 		}
 		// A second name for a reference another secret already has would
 		// start with an allow list and approval setting of its own choosing.
+		// A backend's own credential opens the vault; agents never get it.
+		if r, b := backendCredential(u, refs); r != "" {
+			return nil, failf(st, ExitConfig, "%s is the credential %s itself reads; it cannot be a secret", r, b)
+		}
 		if other, r := sameReference(u, refs); other != "" {
 			return nil, failf(st, ExitConfig, "%s is already the reference of secrets.%s; to give it to another program, change that secret's allow list in %s", r, other, path)
 		}

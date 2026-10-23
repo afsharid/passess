@@ -343,7 +343,7 @@ struct ConnectView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 13, design: .monospaced))
                         .accessibilityLabel(t("Name agents see"))
-                    if let problem = model.nameError {
+                    if let problem = model.nameError, !model.creating || !model.name.isEmpty {
                         Label(problem, systemImage: "exclamationmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(Tone.error.color)

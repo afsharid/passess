@@ -197,10 +197,17 @@ ref = "keychain://passess/GITHUB_TOKEN"
 	}
 	want := []keychainEntry{
 		{Account: "GITHUB_TOKEN", Ref: "keychain://passess/GITHUB_TOKEN", Modified: "2026-10-19T19:39:48Z", UsedBy: "GITHUB_TOKEN"},
-		{Account: "bws", Ref: "keychain://passess/bws", Modified: "2026-09-26T14:54:56Z"},
+		{Account: "bws", Ref: "keychain://passess/bws", Modified: "2026-09-26T14:54:56Z", Backend: "bws"},
 	}
 	if !slices.Equal(got.Items, want) {
 		t.Fatalf("items:\n got %+v\nwant %+v", got.Items, want)
+	}
+
+	// The bws machine token opens the vault: add and set refuse it.
+	for _, args := range [][]string{{"add", "BWS", "--ref", "keychain://passess/bws"}, {"set", "GITHUB_TOKEN", "--ref", "keychain://passess/bws"}} {
+		if _, errOut, code := run(t, args...); code == 0 || !strings.Contains(errOut, "credential bws itself reads") {
+			t.Errorf("%v: exit %d, %q", args, code, errOut)
+		}
 	}
 
 	browseGOOS = "linux"
@@ -215,8 +222,8 @@ func TestMenuBarBrowseFixtures(t *testing.T) {
 	dir := writeConfig(t, `version = 1
 [secrets.GITHUB_TOKEN]
 ref = "op://Private/GitHub/credential"
-[secrets.BWS]
-ref = "keychain://passess/bws"
+[secrets.GH_LOCAL]
+ref = "keychain://passess/GITHUB_TOKEN"
 `)
 	fakeBrowse(t, opFake{t})
 	out, _, _ := run(t, "browse", "op", "--json")
