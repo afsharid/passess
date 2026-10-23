@@ -80,6 +80,9 @@ public func headline(doctor: Doctor?, failure: String?) -> Headline {
         return Headline(title: t("Checking…"), detail: "", health: .unknown)
     }
     let summary = secretsSummary(d)
+    if let broken = brokenConfig(d) {
+        return Headline(title: t("The config does not load"), detail: broken.line.map { t("Line %ld", $0) } ?? broken.message, health: .error)
+    }
     guard d.config.ok else {
         return Headline(title: t("No config yet"), detail: d.config.error ?? t("passess has no config to read"), health: .error)
     }
@@ -89,6 +92,26 @@ public func headline(doctor: Doctor?, failure: String?) -> Headline {
     case .warning: return Headline(title: t(n == 1 ? "%ld warning" : "%ld warnings", n), detail: summary, health: .warning)
     default: return Headline(title: t("All clear"), detail: summary, health: .ok)
     }
+}
+
+/// The config is there but does not load: what passess said, without the
+/// path it starts with, and the line, when it names one. nil when it loads
+/// or is not there yet.
+public func brokenConfig(_ d: Doctor) -> (message: String, line: Int?)? {
+    guard !d.config.ok, let error = d.config.error, error != "not found" else { return nil }
+    var message = error
+    var line: Int?
+    let prefix = d.config.path + ":"
+    if message.hasPrefix(prefix) {
+        message = String(message.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+        // 4:14: invalid TOML
+        let parts = message.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        if parts.count == 3, let n = Int(parts[0]), Int(parts[1]) != nil {
+            line = n
+            message = parts[2].trimmingCharacters(in: .whitespaces)
+        }
+    }
+    return (message, line)
 }
 
 /// "10 secrets · 2 profiles".

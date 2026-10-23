@@ -239,4 +239,12 @@ let turkish: [String: String] = [
     "Long: scroll to read all of it before you allow.": "Uzun: izin vermeden önce kaydırıp tamamını oku.",
     "This copy of the app has no passess inside it, so it cannot take the token. Run `passess backend bws` in a terminal.": "Uygulamanın bu kopyasında passess yok, bu yüzden token'ı alamıyor. Bir terminalde `passess backend bws` çalıştır.",
     "Another passess build than yours, which it refuses: start it again": "Seninkinden farklı bir passess sürümü, komutlarını reddediyor: yeniden başlat",
+    // a config that does not load; adding from any backend
+    "The config does not load": "Ayar dosyası yüklenmiyor",
+    "Line %ld": "Satır %ld",
+    "The config does not load: line %ld": "Ayar dosyası yüklenmiyor: satır %ld",
+    "Open": "Aç",
+    "Open the config to fix it": "Düzeltmek için ayar dosyasını aç",
+    "used by %@": "kullanan: %@",
+    "Write a reference such as op://vault/item/field or vault://path#key.": "op://kasa/öğe/alan ya da vault://yol#anahtar gibi bir referans yaz.",
 ]

@@ -133,6 +133,10 @@ func TestMenuBarFixtures(t *testing.T) {
 	out, _, _ = run(t, "doctor", "--json")
 	golden(t, "doctor-no-config.json", out, dir)
 
+	dir = writeConfig(t, "version = 1\n[secrets.A]\nref = \"env://PASSESS_TEST_A\"\nallow = [\"gh\"\n")
+	out, _, _ = run(t, "doctor", "--json")
+	golden(t, "doctor-broken-config.json", out, dir)
+
 	dir = writeConfig(t, "version = 1\n[secrets.PRESENT]\nref = \"env://PASSESS_TEST_PRESENT_TOKEN\"\n[secrets.ABSENT]\nref = \"env://PASSESS_TEST_ABSENT\"\n")
 	t.Setenv("PASSESS_TEST_PRESENT_TOKEN", execValue)
 	out, _, _ = run(t, "check", "--json")

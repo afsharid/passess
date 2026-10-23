@@ -24,6 +24,8 @@ struct PanelView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
                 content(d)
+            } else if let d = model.doctor, let broken = brokenConfig(d) {
+                BrokenConfigCard(path: d.config.path, message: broken.message, line: broken.line, model: model)
             } else if model.doctor != nil {
                 VaultCard(model: model)
             } else if model.failure == Passess.Failure.notFound.description {
@@ -607,6 +609,45 @@ struct VaultCard: View {
     }
 }
 
+/// The config is there but does not load: the line passess names, and the
+/// file to fix. Nothing else works until it loads, so nothing else is shown.
+struct BrokenConfigCard: View {
+    let path: String
+    let message: String
+    let line: Int?
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        Card(t("Needs attention"), highlighted: true) {
+            HStack(alignment: .top, spacing: 8) {
+                ToneIcon(symbol: "xmark.octagon.fill", tone: .error)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line.map { t("The config does not load: line %ld", $0) } ?? t("The config does not load"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Text(path)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 4)
+                Button(t("Open")) { model.open(URL(fileURLWithPath: path)) }
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
+                    .help(t("Open the config to fix it"))
+            }
+        }
+    }
+}
+
 struct GetStarted: View {
     let item: Item
     @ObservedObject var model: BarModel
@@ -638,7 +679,7 @@ struct Footer: View {
                     .help("passess \(version)")
             }
             Spacer()
-            if let config = model.doctor?.config, config.ok {
+            if let config = model.doctor?.config, config.ok || config.error != "not found" {
                 Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))

@@ -112,11 +112,14 @@ public struct Passess {
     /// Runs a command that changes the config; a refusal throws what passess said.
     private func change(_ arguments: [String], stdin: Data? = nil) throws {
         let r = try execute(arguments, timeout: 30, stdin: stdin)
-        guard r.status == 0 else {
-            let said = String(decoding: r.stderr, as: UTF8.self)
-                .split(separator: "\n").first.map { String($0) } ?? "passess exited \(r.status)"
-            throw Failure.refused(said.hasPrefix("passess: ") ? String(said.dropFirst(9)) : said)
-        }
+        guard r.status == 0 else { throw Failure.refused(said(r.stderr, status: r.status)) }
+    }
+
+    /// The first line passess wrote on stderr, without its "passess: ".
+    private func said(_ stderr: Data, status: Int32) -> String {
+        let line = String(decoding: stderr, as: UTF8.self)
+            .split(separator: "\n").first.map { String($0) } ?? "passess exited \(status)"
+        return line.hasPrefix("passess: ") ? String(line.dropFirst(9)) : line
     }
 
     /// `passess list --json`: every secret, and who may use it.
@@ -134,6 +137,34 @@ public struct Passess {
     public func add(name: String, ref: String, clients: String, approve: Bool, hosts: String? = nil) throws {
         try change(["add", name, "--ref", ref, "--clients", clients] + (approve ? ["--approve"] : [])
             + (hosts.map { ["--hosts", $0] } ?? []))
+    }
+
+    /// `passess add NAME --keychain --value-stdin`: a value the user typed
+    /// goes to the keychain on stdin, never on a command line. Only the copy
+    /// inside the app should run this, as with the bws token (see bundled).
+    public func addKeychain(name: String, value: String, clients: String, approve: Bool, hosts: String? = nil) throws {
+        var data = Data(value.utf8)
+        defer { data.resetBytes(in: 0..<data.count) }
+        try change(["add", name, "--keychain", "--value-stdin", "--clients", clients] + (approve ? ["--approve"] : [])
+            + (hosts.map { ["--hosts", $0] } ?? []), stdin: data)
+    }
+
+    /// `passess browse op --json`: vaults; a vault's items; an item's fields.
+    /// Names only: passess drops the values op sends along.
+    public func browseOP(vault: String? = nil, item: String? = nil) throws -> OPBrowse {
+        var args = ["browse", "op", "--json"]
+        if let v = vault { args += ["--vault", v] }
+        if let i = item { args += ["--item", i] }
+        let r = try execute(args, timeout: 90)
+        guard r.status == 0 else { throw Failure.refused(said(r.stderr, status: r.status)) }
+        return try decode(OPBrowse.self, from: r.stdout)
+    }
+
+    /// `passess browse keychain --json`: passess's keychain items, by account.
+    public func browseKeychain() throws -> KeychainBrowse {
+        let r = try execute(["browse", "keychain", "--json"], timeout: 30)
+        guard r.status == 0 else { throw Failure.refused(said(r.stderr, status: r.status)) }
+        return try decode(KeychainBrowse.self, from: r.stdout)
     }
 
     /// `passess set`: who may use a secret, whether each use asks, and, when

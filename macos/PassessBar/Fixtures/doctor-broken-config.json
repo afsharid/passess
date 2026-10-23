@@ -1,0 +1,19 @@
+{
+  "version": "v0.0.0-test",
+  "ok": false,
+  "config": {
+    "path": "/Users/you/.config/passess/config.toml",
+    "ok": false,
+    "error": "/Users/you/.config/passess/config.toml:4:14: invalid TOML"
+  },
+  "secrets": 0,
+  "profiles": 0,
+  "backends": [],
+  "problems": [
+    {
+      "severity": "error",
+      "message": "the config file does not load",
+      "fix": "fix the reported line in /Users/you/.config/passess/config.toml"
+    }
+  ]
+}
