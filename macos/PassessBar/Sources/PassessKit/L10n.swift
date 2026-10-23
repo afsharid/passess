@@ -378,4 +378,13 @@ let turkish: [String: String] = [
     "Installing…": "Kuruluyor…",
     "Open 1Password": "1Password'ü aç",
     "Homebrew could not install %@.": "Homebrew %@ aracını kuramadı.",
+    "Set up again, replacing entries I wrote": "Yeniden kur, benim yazdığım girdilerin yerine geçsin",
+    "Set up without hooks…": "Hook'lar olmadan kur…",
+    "Take passess out of %@…": "passess'i %@ içinden çıkar…",
+    "Take passess out of %@?": "passess %@ içinden çıkarılsın mı?",
+    "Its hooks, instructions and MCP entries go; a backup is kept. Agents there can then read secrets passess guarded.":
+        "Hook'ları, talimatları ve MCP girdileri silinir; bir yedek kalır. Oradaki ajanlar passess'in koruduğu sırları okuyabilir.",
+    "Take it out": "Çıkar",
+    "set up a coding agent without passess's hooks": "bir ajanı passess'in hook'ları olmadan kurmak",
+    "take passess out of a coding agent": "passess'i bir ajandan çıkarmak",
 ]

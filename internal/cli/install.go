@@ -203,9 +203,9 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 	if *apply && (verb == "uninstall" || *noHooks || *force) {
 		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
 			if *force {
-				return failf(st, ExitNoPerm, "passess install --force --apply replaces MCP entries the user wrote; run it yourself in a terminal, not from %s", agents[0])
+				return failf(st, ExitNoPerm, "passess install --force --apply replaces MCP entries the user wrote; run it yourself in a terminal or in Passess.app, not from %s", agents[0])
 			}
-			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, agents[0])
+			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal or in Passess.app", verb, agents[0])
 		}
 	}
 	// Which secret a DSH provider sends to its endpoint is the user's call,

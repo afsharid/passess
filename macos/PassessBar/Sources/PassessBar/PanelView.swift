@@ -538,6 +538,12 @@ struct AgentRowView: View {
                     .foregroundStyle(row.tone.color)
                     .accessibilityHidden(true)
             }
+            .contextMenu {
+                Button(t("Set up again, replacing entries I wrote")) { model.install(row.id, force: true, hooks: true) }
+                Button(t("Set up without hooks…")) { model.install(row.id, force: false, hooks: false) }
+                Divider()
+                Button(t("Take passess out of %@…", row.title)) { model.uninstall(row.id, label: row.title) }
+            }
             ForEach(row.keys) { key in
                 HStack(spacing: 8) {
                     Image(systemName: "key.fill")

@@ -320,6 +320,52 @@ final class BarModel: ObservableObject {
         }
     }
 
+    /// `passess install ID --apply` with --force (replace entries of the
+    /// same name the user wrote) or --no-hooks. Leaving the hooks out drops a
+    /// guard, so it asks for Touch ID first.
+    func install(_ id: String, force: Bool, hooks: Bool) {
+        guard !frozen, installing == nil, let cli = Passess.locateForAgent() else { return }
+        let run = {
+            self.installing = id
+            self.work.async {
+                var failure: String?
+                do { try cli.install(id, force: force, hooks: hooks) } catch { failure = String(describing: error) }
+                DispatchQueue.main.async {
+                    self.installing = nil
+                    self.installFailure[id] = failure
+                    self.refresh()
+                }
+            }
+        }
+        if hooks { run(); return }
+        Authenticator.confirm(t("set up a coding agent without passess's hooks")) { ok in if ok { run() } }
+    }
+
+    /// `passess uninstall ID --apply`, after the user says yes and Touch ID:
+    /// passess comes out of that agent's config, after a backup.
+    func uninstall(_ id: String, label: String) {
+        guard !frozen, installing == nil, let cli = Passess.locateForAgent() else { return }
+        let alert = NSAlert()
+        alert.messageText = t("Take passess out of %@?", label)
+        alert.informativeText = t("Its hooks, instructions and MCP entries go; a backup is kept. Agents there can then read secrets passess guarded.")
+        alert.addButton(withTitle: t("Take it out"))
+        alert.addButton(withTitle: t("Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Authenticator.confirm(t("take passess out of a coding agent")) { ok in
+            guard ok else { return }
+            self.installing = id
+            self.work.async {
+                var failure: String?
+                do { try cli.uninstall(id) } catch { failure = String(describing: error) }
+                DispatchQueue.main.async {
+                    self.installing = nil
+                    self.installFailure[id] = failure
+                    self.refresh()
+                }
+            }
+        }
+    }
+
     /// Whether the app an agent ID stands for is open.
     func isRunning(_ id: String) -> Bool {
         (AgentStyle.apps[id] ?? []).contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
