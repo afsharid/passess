@@ -198,6 +198,11 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "problems": [{"severity": "error", "message": "the config file does not load", "fix": "fix the reported line in /Users/you/.config/passess/config.toml"}]}
     """)
     return [
+        ("onboarding", {
+            let model = BarModel()
+            model.seed(doctor: healthy, agent: agentOn, harnesses: agentsNeedSetup, secretList: list)
+            return AnyView(OnboardingView(model: model, onClose: {}))
+        }, true),
         ("panel-broken-config", panel { $0.seed(doctor: brokenConfig, agent: agentOff) }, true),
         ("connect-add-1password", adding(.onePassword), true),
         ("connect-add-keychain", adding(.keychain), false),

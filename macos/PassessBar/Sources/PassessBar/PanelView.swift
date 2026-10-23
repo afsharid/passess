@@ -704,6 +704,12 @@ struct Footer: View {
                     .help("passess \(version)")
             }
             Spacer()
+            if model.setupLeft {
+                Button(t("Setup")) { model.openOnboarding() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12))
+                    .help(t("Set up passess"))
+            }
             if let config = model.doctor?.config, config.ok || config.error != "not found" {
                 Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)

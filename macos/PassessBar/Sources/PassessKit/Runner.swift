@@ -203,13 +203,37 @@ public struct Passess {
     /// harnesses run too, so the agent is the same build as its clients. The
     /// bundled copy only when there is none.
     public static func locateForAgent(bundle: Bundle = .main, fileManager: FileManager = .default) -> Passess? {
-        for dir in searchPath() {
+        onSearchPath(fileManager: fileManager) ?? locate(bundle: bundle, fileManager: fileManager)
+    }
+
+    /// The first passess on the search path, which a shell and the harnesses
+    /// find too; a link whose target is gone does not count.
+    public static func onSearchPath(home: String = NSHomeDirectory(), fileManager: FileManager = .default) -> Passess? {
+        for dir in searchPath(home: home) {
             let candidate = URL(fileURLWithPath: dir).appendingPathComponent("passess")
             if fileManager.isExecutableFile(atPath: candidate.path) {
                 return Passess(executable: candidate)
             }
         }
-        return locate(bundle: bundle, fileManager: fileManager)
+        return nil
+    }
+
+    /// Links ~/.local/bin/passess to the copy inside the app, so harness
+    /// configs name a path that outlives an update of the app. A link that
+    /// points elsewhere is replaced; a file of the user's is left alone.
+    @discardableResult
+    public static func linkBundled(_ bundled: Passess, home: String = NSHomeDirectory(), fileManager: FileManager = .default) throws -> URL {
+        let dir = URL(fileURLWithPath: home).appendingPathComponent(".local/bin")
+        let link = dir.appendingPathComponent("passess")
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let target = try? fileManager.destinationOfSymbolicLink(atPath: link.path) {
+            if target == bundled.executable.path { return link }
+            try fileManager.removeItem(at: link)
+        } else if fileManager.fileExists(atPath: link.path) {
+            throw Failure.refused(t("%@ is a file of yours; passess leaves it alone.", link.path))
+        }
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: bundled.executable)
+        return link
     }
 
     /// `passess status --json`: how each coding agent is set up. It reads

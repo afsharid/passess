@@ -193,6 +193,27 @@ expect(suggestedName(item: "GitHub", field: "credential") == "GITHUB" && suggest
 expect(referenceProblem("op://Private/GitHub/credential") == nil && referenceProblem("vault://secret/app#token") == nil, "references the config takes")
 expect(referenceProblem("ghp_abc") != nil && referenceProblem("op://") != nil && referenceProblem("https://x") != nil, "a value or a URL is no reference")
 
+// the CLI on the search path
+do {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("passess-link-\(getpid())")
+    let app = home.appendingPathComponent("Passess.app/Contents/Resources")
+    try fm.createDirectory(at: app, withIntermediateDirectories: true)
+    let cli = app.appendingPathComponent("passess")
+    fm.createFile(atPath: cli.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let link = try Passess.linkBundled(Passess(executable: cli), home: home.path)
+    expect(link.path == home.path + "/.local/bin/passess" && (try? fm.destinationOfSymbolicLink(atPath: link.path)) == cli.path, "the link points into the app")
+    expect(Passess.onSearchPath(home: home.path)?.executable.path == link.path, "a linked passess is on the search path")
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) != nil, "linking again is fine")
+    try fm.removeItem(at: link)
+    fm.createFile(atPath: link.path, contents: Data("mine".utf8))
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) == nil
+           && (try? String(contentsOf: link, encoding: .utf8)) == "mine", "a file of the user's is left alone")
+    try? fm.removeItem(at: home)
+} catch {
+    expect(false, "link check: \(error)")
+}
+
 // Turkish
 L10n.override = .turkish
 expect(headline(doctor: healthy, failure: nil).title == "Her şey yolunda", "Turkish headline")

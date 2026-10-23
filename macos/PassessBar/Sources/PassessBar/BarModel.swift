@@ -30,6 +30,8 @@ final class BarModel: ObservableObject {
     @Published private(set) var discovery: Discovery?
     /// What the Secrets window's filter field holds.
     @Published var secretsFilter = ""
+    /// The passess on the search path, which harnesses and shells find.
+    @Published private(set) var cliPath = Passess.onSearchPath()?.executable.path
 
     private let work = DispatchQueue(label: "passess.bar.work")
     private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh
@@ -41,6 +43,8 @@ final class BarModel: ObservableObject {
     private var connectPanel: ConnectPanel?
     private var secretsWindow: SecretsWindow?
     private var vaultPanel: VaultPanel?
+    private var onboardingWindow: OnboardingWindow?
+    private static let onboardedKey = "onboarded"
     let approver = ApproverController()
 
     var health: Health { doctor == nil && failure == nil ? .unknown : PassessKit.health(doctor) }
@@ -60,6 +64,10 @@ final class BarModel: ObservableObject {
         approver.start()
         refresh()
         discover(maxAge: 0)
+        // First run, or a setup left half done: the setup window, once.
+        if !UserDefaults.standard.bool(forKey: BarModel.onboardedKey) && (cliPath == nil || !agentStartsAtLogin) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.openOnboarding() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()
             self?.discover(maxAge: 30 * 60)
@@ -87,6 +95,42 @@ final class BarModel: ObservableObject {
                 self.discovery = found
             }
         }
+    }
+
+    func openOnboarding() {
+        if onboardingWindow == nil {
+            onboardingWindow = OnboardingWindow(model: self) { [weak self] in
+                self?.onboardingWindow = nil
+                UserDefaults.standard.set(true, forKey: BarModel.onboardedKey)
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        refresh()
+    }
+
+    var cliOnPath: Bool { cliPath != nil }
+
+    /// Whether a setup step is left: the footer then offers the window.
+    var setupLeft: Bool { !cliOnPath || !agentStartsAtLogin || (secretList?.secrets.isEmpty ?? true) }
+
+    /// Whether this app carries a passess to link.
+    var canLinkCLI: Bool { Passess.bundled() != nil }
+
+    /// Links ~/.local/bin/passess to the copy inside the app: harness
+    /// configs then name a path that outlives an update of the app.
+    func linkCLI() {
+        guard !frozen, let bundled = Passess.bundled() else { return }
+        do {
+            try Passess.linkBundled(bundled)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = t("Could not put passess on your PATH")
+            alert.informativeText = String(describing: error)
+            alert.runModal()
+        }
+        cliPath = Passess.onSearchPath()?.executable.path
+        refresh()
     }
 
     func openSecrets() {
@@ -227,8 +271,10 @@ final class BarModel: ObservableObject {
             let agent = try? onPath.agentStatus()
             let harnesses = try? onPath.harnesses()
             let list = try? cli.list()
+            let onSearchPath = Passess.onSearchPath()?.executable.path
             DispatchQueue.main.async {
                 self.refreshing = false
+                self.cliPath = onSearchPath
                 self.doctor = doctor
                 self.failure = failure
                 self.agent = agent
@@ -304,6 +350,7 @@ final class BarModel: ObservableObject {
         self.discovery = discovery
         openAtLogin = true
         agentAtLogin = .enabled
+        cliPath = nil
     }
 
     static let loginAgent = SMAppService.agent(plistName: "io.github.afsharid.passess.agent.plist")
