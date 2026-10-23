@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -226,4 +228,25 @@ ref = "keychain://passess/bws"
 	browseRunner = dumpFake{t}
 	out, _, _ = run(t, "browse", "keychain", "--json")
 	golden(t, "browse-keychain.json", out, dir)
+}
+
+// TestBeforeTheFirstSecret: Passess.app's setup lists the agents and browses
+// 1Password before any config exists; add then starts the file.
+func TestBeforeTheFirstSecret(t *testing.T) {
+	noHarness(t)
+	dir := t.TempDir()
+	t.Setenv("PASSESS_CONFIG", filepath.Join(dir, "config.toml"))
+	t.Chdir(dir)
+	fakeBrowse(t, opFake{t})
+	out, errOut, code := run(t, "list", "--json")
+	var got listOutput
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil || len(got.Secrets) != 0 || len(got.Agents) == 0 {
+		t.Fatalf("list without a config: exit %d, %q\n%s", code, errOut, out)
+	}
+	if _, errOut, code := run(t, "browse", "op", "--json"); code != 0 {
+		t.Fatalf("browse without a config: exit %d, %q", code, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("reading wrote a config: %v", err)
+	}
 }

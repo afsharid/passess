@@ -115,7 +115,7 @@ func runBrowse(st *Streams, args []string) int {
 	if code := refuseUnderAgent(st, "browse", "lists what your vault holds"); code != 0 {
 		return code
 	}
-	u, _, code := loadConfig(st)
+	u, _, code := loadConfigOrEmpty(st)
 	if code != 0 {
 		return code
 	}
