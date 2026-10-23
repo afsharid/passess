@@ -264,7 +264,9 @@ final class ActivityModel: ObservableObject {
     @Published var filter = ""
     @Published var refusedOnly = false
     @Published private(set) var error: String?
-    private let cli = Passess.locateForAgent()
+    // The log is a file next to the agent's socket; reading it needs no agent of
+    // the same build, so the app's own copy, which knows `activity`, reads it.
+    private let cli = Passess.locate()
 
     init() { load() }
 
