@@ -112,9 +112,12 @@ passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a 
 - hooks refuse 1Password's Environments MCP tools that hand values to the agent
   (`create_local_env_file`, `append_variables`), and an older hook matcher counts as
   drift.
+- an Allow is void once its secret's settings change, and `agent revoke` takes one
+  back; `activity` reads the agent's log; in the app, Take back per Allow, a Secrets in
+  clear window (`scan --dir`, `.env` files moved to the keychain or dropped on it,
+  transcripts cleaned) and an Activity window.
 
-Next, in order: expiring approvals bound to a secret's settings, an "exposed secrets"
-page for `scan` and `migrate`, an activity log; more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
+Next, in order: a project file's `needs` from the app; more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
 started with a launch profile), then a client's own API connection through a
 local proxy with a per-client key, so the real key never sits in the client's settings.
 

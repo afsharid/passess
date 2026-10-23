@@ -77,3 +77,8 @@ session. Codex and OpenCode are unmeasured: in that run neither CLI reached a mo
   `PASSESS_CONFIG=` or `PASSESS_AGENT_SOCK=` in agent commands.
 - The agent appends every question's outcome to `agent-audit.jsonl`: names, programs,
   anchors and outcomes, never a value.
+- Later (2026-10-23): an Allow also keeps the secret's fingerprint (references,
+  `allow`, `clients`, `hosts`, `approve`). When the config no longer matches, the Allow
+  is void and the next use asks again, as 1Password's gateway asks again when a setup
+  no longer matches what was approved. `agent revoke` takes back one Allow without a
+  lock; `activity` reads the log, which rotates at 2 MiB.

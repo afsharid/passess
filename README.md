@@ -414,8 +414,12 @@ passess agent approve   # answer questions here, in a terminal of your own
 
 With no approver running, the answer is no, and so it is when no agent runs.
 Passess.app will answer with Touch ID. `passess agent status` lists the live Allows;
-`lock` forgets them. The agent keeps a log of names, programs and answers, never a
-value, in `agent-audit.jsonl` next to its socket.
+`lock` forgets them, and `passess agent revoke SECRET [--program P] [--pid N]` takes
+back one. An Allow is for the secret as it was: change its references, `allow`,
+`clients` or `hosts` and the next use asks again (a note does not count). The agent
+keeps a log of names, programs and answers, never a value, in `agent-audit.jsonl` next
+to its socket; `passess activity [--secret NAME] [--since 24h]` reads it, newest
+first. Past 2 MiB the log starts anew and keeps the previous one as `.1`.
 
 ## macOS menu bar app
 
@@ -449,6 +453,14 @@ Bitwarden server), the MCP servers, the profiles, and how long the agent keeps v
 and approvals. Each Save takes Touch ID and runs the matching command. A coding agent's
 row has a menu to set it up again replacing entries you wrote, without hooks, or to
 take passess out of it; the agent tile's menu locks the agent.
+
+Each live Allow in the panel has Take back. Safety opens two windows. Secrets in clear
+runs `passess scan` on your home and a project folder, lists each file holding a
+credential in clear, and moves a `.env` file's values to the keychain (`passess migrate
+env`, after its dry run and Touch ID); a `.env` file dropped on the window moves the
+same way, and transcripts holding values passess manages are cleaned with `scan
+--scrub`. Activity lists what the agent ran and what was approved or refused, with a
+filter.
 
 When an agent needs your approval, a window asks who wants which secret for which
 command, and Allow takes Touch ID. The app never receives a value. It follows the Mac's
