@@ -1,0 +1,5 @@
+{
+  "cache_ttl": "5m0s",
+  "approval_ttl": "8h0m0s",
+  "approval_timeout": "1m0s"
+}

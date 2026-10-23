@@ -29,6 +29,7 @@ const (
 	Shell  Kind = "shell"  // a shell command is about to run
 	Read   Kind = "read"   // a file is about to be read
 	Write  Kind = "write"  // a file is about to be written
+	MCP    Kind = "mcp"    // an MCP tool is about to be called
 	Prompt Kind = "prompt" // the user submitted a prompt
 	Result Kind = "result" // a tool returned output
 	Start  Kind = "start"  // a session started
@@ -97,6 +98,10 @@ func Decide(ev Event, env Env) Verdict {
 				return Verdict{Deny: true, Reason: configReason(p)}
 			}
 		}
+	case MCP:
+		if r := checkMCP(ev.Tool); r != "" {
+			return Verdict{Deny: true, Reason: r}
+		}
 	case Prompt:
 		if r := pasted(ev.Text, env); r != "" {
 			return Verdict{Deny: true, Reason: r}
@@ -125,6 +130,31 @@ func Decide(ev Event, env Env) Verdict {
 }
 
 const useInstead = "Run the command that needs a secret with `passess exec -s NAME -- command`; `passess list` shows the names."
+
+// --- MCP tools ---
+
+// onePasswordMCP are the tools of 1Password's Environments MCP server that put
+// values where the agent reaches them: a mounted .env file any process can
+// read, and variables whose values the agent itself supplies.
+var onePasswordMCP = map[string]string{
+	"create_local_env_file": "mounts a .env file holding the Environment's values, which the agent can then read",
+	"append_variables":      "takes the values from the agent, so they pass through the conversation",
+}
+
+// checkMCP refuses the 1Password tools above. Harnesses name an MCP tool
+// mcp__<server>__<tool>, or by the bare tool name when that is unambiguous.
+// The server part is the user's to choose (op, 1p, …), so only the tool
+// name counts: these two names are 1Password's.
+func checkMCP(tool string) string {
+	parts := strings.Split(tool, "__")
+	name := parts[len(parts)-1]
+	why, ok := onePasswordMCP[name]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("passess refused the 1Password MCP tool %s: it %s. "+
+		"Ask the user to connect the variable in Passess.app or with `passess add NAME --ref op://…`. %s", name, why, useInstead)
+}
 
 // --- files ---
 
@@ -587,8 +617,17 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "add", sub(1) == "set", sub(1) == "remove":
 			return "passess: `passess " + sub(1) + "` decides who may use which secret; it is the user's to run, or to do in Passess.app. " +
 				"Tell the user the name and reference you need."
-		case sub(1) == "discover":
-			return "passess: `passess discover` lists what the user's vault holds; that inventory is the user's to see, " +
+		case (sub(1) == "mcp" || sub(1) == "profile") && (sub(2) == "add" || sub(2) == "set" || sub(2) == "remove"):
+			return "passess: `passess " + sub(1) + " " + sub(2) + "` decides which secrets a program gets; it is the user's to run, " +
+				"or to do in Passess.app. Tell the user what you need."
+		case sub(1) == "agent" && sub(2) == "config" && slices.ContainsFunc(args[3:], func(a string) bool { return a != "--json" }):
+			return "passess: `passess agent config` decides how long approvals and cached values last; it is the user's to run, " +
+				"or to do in Passess.app."
+		case sub(1) == "backend" && !slices.Contains(args, "--json"):
+			return "passess: `passess backend` sets how passess reaches the user's vault and stores its credentials; it is the user's " +
+				"to run, or to do in Passess.app. Tell the user which setting you need."
+		case sub(1) == "discover", sub(1) == "browse":
+			return "passess: `passess " + sub(1) + "` lists what the user's vault holds; that inventory is the user's to see, " +
 				"in Passess.app or a terminal of their own. Ask the user for the secret you need."
 		case sub(1) == "migrate" && slices.Contains(args, "--apply"):
 			return "passess: `passess migrate --apply` moves values out of the user's files; it is the user's to run. " +

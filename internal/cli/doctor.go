@@ -35,6 +35,13 @@ type problem struct {
 	Severity string `json:"severity"` // error | warning
 	Message  string `json:"message"`
 	Fix      string `json:"fix,omitempty"`
+	// Action names what Passess.app can do about it with one button, and
+	// Target what it acts on: start-config, open-config, fix-permissions
+	// (the config path), add-secret (a name), install-tool (op, bw, bws),
+	// open-1password, backend-settings (vault, bw, bws). Empty: the fix is
+	// text only.
+	Action string `json:"action,omitempty"`
+	Target string `json:"target,omitempty"`
 }
 
 type doctorOutput struct {
@@ -72,7 +79,12 @@ func runDoctor(st *Streams, args []string) int {
 
 func diagnose(st *Streams) doctorOutput {
 	out := doctorOutput{Version: buildinfo.String(), Backends: []backendStatus{}, Problems: []problem{}, Harness: detect.Harness(st.Getenv)}
-	add := func(sev, msg, fix string) { out.Problems = append(out.Problems, problem{sev, msg, fix}) }
+	add := func(sev, msg, fix string) {
+		out.Problems = append(out.Problems, problem{Severity: sev, Message: msg, Fix: fix})
+	}
+	act := func(action, target string) {
+		out.Problems[len(out.Problems)-1].Action, out.Problems[len(out.Problems)-1].Target = action, target
+	}
 
 	path, err := config.UserPath(st.Getenv)
 	if err != nil {
@@ -84,17 +96,20 @@ func diagnose(st *Streams) doctorOutput {
 	switch {
 	case errors.Is(err, config.ErrNoConfig):
 		out.Config.Error = "not found"
-		add("error", "no config file", fmt.Sprintf("passess add NAME --ref <reference>, or create %s with version = 1", path))
+		add("error", "no config file", fmt.Sprintf("set up in Passess.app, or passess add NAME --ref <reference>, or create %s with version = 1", path))
+		act("start-config", path)
 		return finish(out)
 	case err != nil:
 		out.Config.Error = err.Error()
 		add("error", "the config file does not load", "fix the reported line in "+path)
+		act("open-config", path)
 		return finish(out)
 	}
 	out.Config.OK = true
 	out.Secrets, out.Profiles = len(u.Secrets), len(u.Profiles)
 	if st, err := os.Stat(path); err == nil && st.Mode().Perm()&0o077 != 0 {
 		add("warning", fmt.Sprintf("%s is readable by other users (%o)", path, st.Mode().Perm()), "chmod 600 "+path)
+		act("fix-permissions", path)
 	}
 
 	var proj *config.Project
@@ -116,6 +131,7 @@ func diagnose(st *Streams) doctorOutput {
 				for _, n := range missing {
 					add("warning", fmt.Sprintf("the project needs %s, which your config does not define", n),
 						fmt.Sprintf("passess add %s --ref <reference>", n))
+					act("add-secret", n)
 				}
 			}
 			out.Project = fsProj
@@ -141,6 +157,7 @@ func diagnose(st *Streams) doctorOutput {
 			if _, err := exec.LookPath(tool); err != nil {
 				b.Detail = tool + " is not installed or not on PATH"
 				add("error", fmt.Sprintf("%s:// references need %s", scheme, tool), installHint(tool))
+				act("install-tool", tool)
 				out.Backends = append(out.Backends, b)
 				continue
 			}
@@ -148,6 +165,12 @@ func diagnose(st *Streams) doctorOutput {
 		if err := res.Available(context.Background(), scheme); err != nil {
 			b.Detail = err.Error()
 			add("error", fmt.Sprintf("%s:// is not usable", scheme), fixFor(scheme, u))
+			switch scheme {
+			case ref.OnePassword:
+				act("open-1password", "")
+			case ref.Vault, ref.Bitwarden, ref.BWS:
+				act("backend-settings", scheme)
+			}
 		} else {
 			b.OK = true
 			if scheme == ref.BWS {
@@ -205,9 +228,9 @@ func fixFor(scheme string, u *config.User) string {
 	case ref.OnePassword:
 		return "unlock the 1Password app and turn on Settings → Developer → Integrate with 1Password CLI, or set OP_SERVICE_ACCOUNT_TOKEN"
 	case ref.Vault:
-		return "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"
+		return "set the address and token in Passess.app, or with `passess backend vault --address URL --token`; VAULT_ADDR, VAULT_TOKEN and `vault login` work too"
 	case ref.Bitwarden:
-		return "run `bw unlock` and keep the session in backends.bw.session (for example keychain://passess/bw-session)"
+		return "run `bw unlock --raw` and give the session to Passess.app, or to `passess backend bw --session`"
 	}
 	return scheme + ":// is not supported"
 }

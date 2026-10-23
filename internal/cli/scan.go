@@ -47,9 +47,10 @@ func runScan(st *Streams, args []string) int {
 	noKnown := fs.Bool("no-known", false, "do not resolve configured secrets to search for their values")
 	scrub := fs.Bool("scrub", false, "replace your configured values in the transcripts found holding them (a dry run without --apply; implies --transcripts)")
 	apply := fs.Bool("apply", false, "with --scrub, back the transcripts up and rewrite them")
+	dir := fs.String("dir", "", "look for .env files under this directory instead of the current one")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts [--transcript-rules]] [--scrub [--apply]] [--no-known] [--json] [PATH...]")
-		fmt.Fprintln(st.Stderr, "Without PATH: harness configs and dotfiles in your home, .env files under this directory.")
+		fmt.Fprintln(st.Stderr, "Usage: passess scan [--transcripts [--transcript-rules]] [--scrub [--apply]] [--no-known] [--dir DIR] [--json] [PATH...]")
+		fmt.Fprintln(st.Stderr, "Without PATH: harness configs and dotfiles in your home, .env files under this directory (or --dir).")
 		fs.PrintDefaults()
 	}
 	paths, err := parseAnywhere(fs, args)
@@ -93,6 +94,9 @@ func runScan(st *Streams, args []string) int {
 		targets = scan.Paths(paths)
 	} else {
 		wd, _ := os.Getwd()
+		if *dir != "" {
+			wd = *dir
+		}
 		targets = scan.Discover(scan.Where{Home: st.Getenv("HOME"), ConfigHome: st.Getenv("XDG_CONFIG_HOME"), Dir: wd,
 			Backups: filepath.Join(stateDir(st.Getenv), "backups"), Transcripts: *transcripts})
 	}

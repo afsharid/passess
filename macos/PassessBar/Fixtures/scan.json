@@ -1,0 +1,18 @@
+{
+  "files": 1,
+  "rules": "gitleaks v8.30.1",
+  "known_secrets": 0,
+  "unresolved": [],
+  "findings": [
+    {
+      "path": "/Users/you/Projects/app/.env",
+      "line": 2,
+      "category": "env",
+      "kind": "rule",
+      "rule": "github-pat",
+      "fingerprint": "f1",
+      "length": 40
+    }
+  ],
+  "errors": []
+}

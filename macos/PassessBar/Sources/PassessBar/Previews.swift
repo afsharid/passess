@@ -77,7 +77,8 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "backends": [{"scheme": "vault", "ok": false, "detail": "no vault address; set backends.vault.address or VAULT_ADDR"},
                   {"scheme": "keychain", "ok": true}],
      "problems": [{"severity": "error", "message": "vault:// is not usable",
-                   "fix": "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"},
+                   "fix": "set the address and token in Passess.app, or with `passess backend vault --address URL --token`",
+                   "action": "backend-settings", "target": "vault"},
                   {"severity": "warning", "message": "~/.config/opencode/opencode.jsonc can be read by other users",
                    "fix": "chmod 600 ~/.config/opencode/opencode.jsonc"}]}
     """)
@@ -174,7 +175,90 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
      "secrets": [{"name": "HASS_TOKEN", "state": "ok"}, {"name": "OPENROUTER_API_KEY", "state": "ok"},
                  {"name": "SUDO_PASSWORD", "state": "ok"}, {"name": "TELEGRAM_BOT_TOKEN", "state": "ok"}]}
     """)
+    let opVaults = decode(OPBrowse.self, #"{"vaults": [{"id": "v1abc", "name": "Private"}, {"id": "v2def", "name": "Work"}]}"#)
+    let opItems = decode(OPBrowse.self, """
+    {"vault": "Private", "items": [{"id": "i1abc", "name": "GitHub", "category": "API_CREDENTIAL"},
+     {"id": "i2def", "name": "OpenRouter", "category": "LOGIN"}, {"id": "i3ghi", "name": "Home Assistant", "category": "PASSWORD"}]}
+    """)
+    let opFields = decode(OPBrowse.self, """
+    {"vault": "Private", "item": "GitHub", "fields": [
+     {"id": "credential", "name": "credential", "type": "CONCEALED", "ref": "op://Private/GitHub/credential", "used_by": "GITHUB_TOKEN"},
+     {"id": "f2", "name": "read token", "section": "Tokens", "type": "CONCEALED", "ref": "op://Private/GitHub/Tokens/read token"},
+     {"id": "notesPlain", "name": "notesPlain", "type": "STRING", "ref": "op://Private/GitHub/notesPlain"}]}
+    """)
+    func adding(_ source: ConnectModel.Source) -> () -> AnyView {
+        {
+            let model = ConnectModel(mode: .create, list: list, cli: nil, source: source)
+            if source == .onePassword { model.seedBrowse(opVaults, items: opItems, fields: opFields) }
+            return AnyView(ConnectView(model: model, onCancel: {}))
+        }
+    }
+    let brokenConfig = decode(Doctor.self, """
+    {"version": "v0.9.0", "ok": false, "config": {"path": "/Users/you/.config/passess/config.toml", "ok": false,
+     "error": "/Users/you/.config/passess/config.toml:4:14: invalid TOML"}, "secrets": 0, "profiles": 0, "backends": [],
+     "problems": [{"severity": "error", "message": "the config file does not load", "fix": "fix the reported line in /Users/you/.config/passess/config.toml"}]}
+    """)
+    let settingsBackends = decode(BackendSettings.self, """
+    {"op": {"account": "my.1password.com"},
+     "vault": {"address": "https://vault.example.com:8200", "namespace": "", "ca_cert": "", "token": "keychain://passess/vault"},
+     "bw": {"session": ""}, "bws": {"server_url": "", "access_token": "keychain://passess/bws"}}
+    """)
+    let settingsServers = decode([MCPServer].self, """
+    [{"name": "github", "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"}, "harnesses": ["claude"], "redact": true, "secrets": ["GITHUB_TOKEN"]},
+     {"name": "copilot", "url": "https://api.githubcopilot.com/mcp/", "headers": {"Authorization": "Bearer {{GITHUB_TOKEN}}"},
+      "harnesses": [], "redact": true, "secrets": ["GITHUB_TOKEN"]}]
+    """)
+    let settingsProfiles = decode([Profile].self, """
+    [{"name": "web", "secrets": ["OPENROUTER_API_KEY", "HASS_TOKEN"], "required": ["OPENROUTER_API_KEY"], "allow": ["node", "npm"],
+      "env": {"NODE_ENV": "development"}, "tty": false, "run": "passess run web -- COMMAND"}]
+    """)
+    let projectNeeds = decode(ProjectNeeds.self, """
+    {"path": "\(NSHomeDirectory())/Projects/web/passess.toml",
+     "needs": [{"name": "GITHUB_TOKEN", "note": "release notes", "allow": ["gh"], "defined": true},
+               {"name": "OPENAI_API_KEY", "defined": false}]}
+    """)
+    func settings(_ tab: SettingsModel.Tab, _ prepare: @escaping (SettingsModel) -> Void = { _ in }) -> () -> AnyView {
+        {
+            let model = SettingsModel(previewing: tab, backends: settingsBackends, servers: settingsServers, profiles: settingsProfiles,
+                                      agent: AgentConfig(cacheTTL: "10m0s", approvalTTL: "8h0m0s", approvalTimeout: "1m0s"),
+                                      secretNames: ["GITHUB_TOKEN", "HASS_TOKEN", "OPENROUTER_API_KEY"],
+                                      project: (NSHomeDirectory() + "/Projects/web", projectNeeds))
+            prepare(model)
+            return AnyView(SettingsView(model: model))
+        }
+    }
+    let exposure = decode(ScanReport.self, """
+    {"files": 41, "rules": "gitleaks", "known_secrets": 4, "unresolved": [], "errors": [],
+     "findings": [
+       {"path": "\(NSHomeDirectory())/Projects/shop/.env", "line": 3, "category": "env", "kind": "rule", "rule": "stripe-access-token", "fingerprint": "a"},
+       {"path": "\(NSHomeDirectory())/Projects/shop/.env", "line": 4, "category": "env", "kind": "known", "secret": "OPENROUTER_API_KEY", "fingerprint": "b"},
+       {"path": "\(NSHomeDirectory())/.cursor/mcp.json", "line": 9, "category": "config", "kind": "rule", "rule": "github-pat", "fingerprint": "c"},
+       {"path": "\(NSHomeDirectory())/.claude/projects/shop/7f1c.jsonl", "line": 212, "category": "transcript", "kind": "known", "secret": "HASS_TOKEN", "fingerprint": "d"}]}
+    """)
+    let activityLog = decode([ActivityEntry].self, """
+    [{"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-60)))", "kind": "exec", "harness": "claude-code", "secrets": ["HASS_TOKEN"], "program": "sh", "outcome": "refused"},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-300)))", "kind": "exec", "harness": "claude-code", "secrets": ["GITHUB_TOKEN"], "program": "gh", "dir": "\(NSHomeDirectory())/Projects/passess", "outcome": "ran", "status": 0},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-310)))", "kind": "approval", "anchor": "claude (46551)", "secrets": ["GITHUB_TOKEN"], "program": "gh", "dir": "\(NSHomeDirectory())/Projects/passess", "outcome": "allowed"},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-4000)))", "kind": "approval", "anchor": "codex (5120)", "secrets": ["OPENROUTER_API_KEY"], "program": "curl", "outcome": "denied"}]
+    """)
     return [
+        ("exposed", { AnyView(ExposedView(model: ExposedModel(previewing: exposure, folder: NSHomeDirectory() + "/Projects"))) }, true),
+        ("activity", { AnyView(ActivityView(model: ActivityModel(previewing: activityLog))) }, false),
+        ("settings-backends", settings(.backends), true),
+        ("settings-mcp", settings(.mcp), false),
+        ("settings-mcp-edit", settings(.mcp) { $0.edit(settingsServers[0]) }, true),
+        ("settings-profile-edit", settings(.profiles) { $0.edit(settingsProfiles[0]) }, false),
+        ("settings-agent", settings(.agent), false),
+        ("settings-project", settings(.project), true),
+        ("onboarding", {
+            let model = BarModel()
+            model.seed(doctor: healthy, agent: agentOn, harnesses: agentsNeedSetup, secretList: list)
+            return AnyView(OnboardingView(model: model, onClose: {}))
+        }, true),
+        ("panel-broken-config", panel { $0.seed(doctor: brokenConfig, agent: agentOff) }, true),
+        ("connect-add-1password", adding(.onePassword), true),
+        ("connect-add-keychain", adding(.keychain), false),
         ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
                                           approving: true, secretList: list, discovery: discovery) }, true),
         ("panel-problems", panel { $0.seed(doctor: broken, agent: agentOff, harnesses: agentsNeedSetup) }, false),

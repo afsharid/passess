@@ -147,4 +147,18 @@ func TestScan(t *testing.T) {
 	if out, errOut, code := run(t, "scan", ".env", "--no-known"); code != 0 {
 		t.Fatalf("clean file: exit %d\n%s%s", code, out, errOut)
 	}
+
+	// --dir looks for .env files there, as Passess.app asks, wherever it runs.
+	other := filepath.Join(home, "other", "app")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, ".env"), []byte("TOKEN="+pat+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(home)
+	out, _, _ = run(t, "scan", "--json", "--no-known", "--dir", filepath.Join(home, "other"))
+	if !strings.Contains(out, filepath.Join(other, ".env")) {
+		t.Fatalf("--dir did not find the .env file:\n%s", out)
+	}
 }

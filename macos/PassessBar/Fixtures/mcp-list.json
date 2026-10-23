@@ -1,0 +1,32 @@
+[
+  {
+    "name": "copilot",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "headers": {
+      "Authorization": "Bearer {{GITHUB_TOKEN}}"
+    },
+    "harnesses": [],
+    "redact": true,
+    "secrets": [
+      "GITHUB_TOKEN"
+    ]
+  },
+  {
+    "name": "github",
+    "command": [
+      "npx",
+      "-y",
+      "@modelcontextprotocol/server-github"
+    ],
+    "env": {
+      "GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"
+    },
+    "harnesses": [
+      "claude"
+    ],
+    "redact": true,
+    "secrets": [
+      "GITHUB_TOKEN"
+    ]
+  }
+]

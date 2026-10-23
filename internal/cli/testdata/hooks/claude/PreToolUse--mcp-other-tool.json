@@ -1,0 +1,1 @@
+{"hook_event_name": "PreToolUse", "cwd": "/home/u/proj", "tool_name": "mcp__plugin_1password_1password__list_variables", "tool_input": {"account_id": "A", "environment_id": "E"}}

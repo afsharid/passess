@@ -96,6 +96,27 @@ passess it runs is its own; GitHub Actions pinned by commit SHA, not tag; and a 
   up its plugin, and the app shows each key DSH asks for, with Connect;
 - in the app, Set up runs `passess install` for a coding agent, an agent's avatar is
   its installed app's icon, and an agent of another build is started again.
+- the app changes settings only through CLI commands, values on stdin
+  ([ADR 13](adr/0013-passess-app-changes-settings-only-through-cli-commands.md));
+- `browse op` and `browse keychain` list what a backend holds by name; `add --keychain
+  --value-stdin`; `set --ref`, `--allow`;
+- in the app, an Add tab: a 1Password vault, item and field picked by name, a keychain
+  value typed into a secure field, or a typed reference (Vault, bw, bws);
+- in the app, a first-run setup window (the CLI linked to `~/.local/bin`, backends,
+  first secret, coding agents, agent at login), the agent started at login by
+  `SMAppService`, and a config that does not load shown with its line.
+- `backend op | vault | bw | bws`, `mcp`, `profile` and `agent config`: every setting in
+  the config has a command, and Passess.app a Settings window for them; a doctor
+  problem gets a button (open 1Password, install `op`, settings); a coding agent can be
+  set up again with `--force` or without hooks, or have passess taken out;
+- hooks refuse 1Password's Environments MCP tools that hand values to the agent
+  (`create_local_env_file`, `append_variables`), and an older hook matcher counts as
+  drift.
+- an Allow is void once its secret's settings change, and `agent revoke` takes one
+  back; `activity` reads the agent's log; in the app, Take back per Allow, a Secrets in
+  clear window (`scan --dir`, `.env` files moved to the keychain or dropped on it,
+  transcripts cleaned) and an Activity window.
+- `needs list | add | remove` for a project's `passess.toml`, and Settings → Project.
 
 Next, in order: more apps (Hermes, OpenClaw: each reads its keys as DSH does, or is
 started with a launch profile), then a client's own API connection through a

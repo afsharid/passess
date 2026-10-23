@@ -1,0 +1,16 @@
+[
+  {
+    "name": "web",
+    "secrets": [
+      "GITHUB_TOKEN"
+    ],
+    "allow": [
+      "node"
+    ],
+    "env": {
+      "NODE_ENV": "development"
+    },
+    "tty": false,
+    "run": "passess run web -- COMMAND"
+  }
+]

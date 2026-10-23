@@ -1,0 +1,12 @@
+{
+  "vaults": [
+    {
+      "id": "v1abc",
+      "name": "Private"
+    },
+    {
+      "id": "v2def",
+      "name": "Work"
+    }
+  ]
+}

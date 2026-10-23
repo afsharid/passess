@@ -48,6 +48,9 @@ func TestShellCommands(t *testing.T) {
 		"passess add EVIL --ref keychain://passess/X --allow curl", "passess migrate env .env --apply --yes",
 		"passess set GITHUB_TOKEN --clients all", "passess remove GITHUB_TOKEN", "passess discover --json",
 		"passess uninstall --apply", "passess install --no-hooks --apply",
+		"passess browse op --json", "passess backend vault --token", "passess backend op --account x",
+		"passess mcp add gh --command gh-mcp --env GH=GITHUB_TOKEN", "passess profile set web --secrets API_KEY",
+		"passess mcp remove gh", "passess agent config --approval-ttl 999h",
 		// A literal cd earlier in the line moves where relative paths point.
 		`cd ~/.config/passess && echo 'allow = ["sh"]' >> config.toml`, "cd ~/.local/state/passess/backups && cat x",
 		"pushd ~/.config/passess && echo x > config.toml", "cd ~ && cd .config/passess && echo x >> config.toml",
@@ -88,7 +91,8 @@ func TestShellCommands(t *testing.T) {
 		`echo "unterminated`, "", "cat ~/.config/passess/config.toml", "sed -n 1p ~/.config/passess/config.toml",
 		"echo hi > /tmp/out.txt", `cat "$HOME/.config/passess/config.toml"`, "grep -n hosts $HOME/.config/passess/config.toml",
 		`sed -n 1p "${XDG_CONFIG_HOME:-$HOME/.config}/passess/config.toml"`, "ls $HOME/.config/passess", `echo x >> "$HOME/notes.txt"`,
-		"passess agent status", "passess agent start", "passess agent lock", "passess list", "HOME=/tmp ls",
+		"passess agent status", "passess agent start", "passess agent lock", "passess list", "passess backend --json", "passess mcp list --json",
+		"passess profile list", "passess agent config", "passess agent config --json", "HOME=/tmp ls",
 		"passess migrate env .env", "passess install --apply", "passess uninstall", "env -u FOO gh",
 		"cd /tmp && ls", "cd /tmp && cat README.md", "pushd /tmp && popd && ls",
 		"FOO=1 passess exec -s API_KEY -- gh api user",
@@ -191,6 +195,30 @@ func TestPromptResultAndStart(t *testing.T) {
 	}
 	if v := Decide(Event{Kind: Start}, env); !strings.Contains(v.Context, "API_KEY, DATABASE_URL") || !strings.Contains(v.Context, "passess exec -s NAME") {
 		t.Fatalf("context = %q", v.Context)
+	}
+}
+
+// 1Password's MCP tools that hand values to the agent are refused, under any
+// server name the user gave it and any form a harness names them in; the
+// rest of that server is not.
+func TestMCPTools(t *testing.T) {
+	env := testEnv(t)
+	for _, tool := range []string{
+		"mcp__plugin_1password_1password__create_local_env_file", "mcp__1password__append_variables",
+		"mcp__onepassword-mcp__create_local_env_file", "1Password__append_variables", "create_local_env_file",
+		"mcp__op__create_local_env_file", "mcp__1p__append_variables",
+	} {
+		if v := Decide(Event{Kind: MCP, Tool: tool}, env); !v.Deny || !strings.Contains(v.Reason, "passess add") {
+			t.Errorf("%s allowed: %+v", tool, v)
+		}
+	}
+	for _, tool := range []string{
+		"mcp__plugin_1password_1password__list_variables", "mcp__1password__list_environments",
+		"mcp__op__list_local_env_files", "mcp__github__create_issue",
+	} {
+		if v := Decide(Event{Kind: MCP, Tool: tool}, env); v.Deny {
+			t.Errorf("%s denied: %s", tool, v.Reason)
+		}
 	}
 }
 

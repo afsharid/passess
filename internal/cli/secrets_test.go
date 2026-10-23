@@ -534,3 +534,56 @@ func TestVaultNamesArePrintable(t *testing.T) {
 		}
 	}
 }
+
+func TestSetRefAndAllow(t *testing.T) {
+	noHarness(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := writeConfig(t, `version = 1
+[secrets.X]
+ref = "env://PASSESS_TEST_X_TOKEN"
+allow = ["gh"]
+note = "keep me"
+
+[secrets.Y]
+ref = "env://PASSESS_TEST_Y_TOKEN"
+`)
+	cfg := filepath.Join(dir, "config.toml")
+	load := func() *config.User {
+		t.Helper()
+		u, err := config.LoadUser(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	if _, errOut, code := run(t, "set", "X", "--ref", "op://Private/GitHub/credential", "--ref", "env://PASSESS_TEST_X2", "--allow", "gh,git"); code != 0 {
+		t.Fatalf("exit %d, %q", code, errOut)
+	}
+	x := load().Secrets["X"]
+	if len(x.Refs) != 2 || x.Refs[0].String() != "op://Private/GitHub/credential" || !slices.Equal(x.Allow, []string{"gh", "git"}) || x.Note != "keep me" {
+		t.Fatalf("set --ref --allow: %+v", x)
+	}
+	if _, errOut, code := run(t, "set", "X", "--ref", "env://PASSESS_TEST_X_TOKEN", "--allow", "none"); code != 0 {
+		t.Fatalf("exit %d, %q", code, errOut)
+	}
+	if x := load().Secrets["X"]; len(x.Refs) != 1 || x.Allow != nil {
+		t.Fatalf("one ref and no allow list: %+v", x)
+	}
+
+	before, _ := os.ReadFile(cfg)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"set", "X", "--ref", "nope"}, "--ref"},
+		{[]string{"set", "X", "--allow", "/usr/bin/gh"}, "program names"},
+		{[]string{"set", "X", "--ref", "env://PASSESS_TEST_Y_TOKEN"}, "secrets.Y"},
+	} {
+		if _, errOut, code := run(t, c.args...); code == 0 || !strings.Contains(errOut, c.want) {
+			t.Errorf("%q: exit %d, %q", c.args, code, errOut)
+		}
+	}
+	if after, _ := os.ReadFile(cfg); string(after) != string(before) {
+		t.Fatalf("a refused set changed the config:\n%s", after)
+	}
+}

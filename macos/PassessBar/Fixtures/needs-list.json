@@ -1,0 +1,17 @@
+{
+  "path": "/Users/you/Projects/web/passess.toml",
+  "needs": [
+    {
+      "name": "GITHUB_TOKEN",
+      "note": "release notes",
+      "allow": [
+        "gh"
+      ],
+      "defined": true
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "defined": false
+    }
+  ]
+}

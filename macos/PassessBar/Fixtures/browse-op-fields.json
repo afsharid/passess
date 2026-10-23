@@ -1,0 +1,32 @@
+{
+  "vault": "Private",
+  "item": "GitHub",
+  "fields": [
+    {
+      "id": "credential",
+      "name": "credential",
+      "type": "CONCEALED",
+      "ref": "op://Private/GitHub/credential",
+      "used_by": "GITHUB_TOKEN"
+    },
+    {
+      "id": "f2",
+      "name": "read token",
+      "section": "Tokens",
+      "type": "CONCEALED",
+      "ref": "op://Private/GitHub/Tokens/read token"
+    },
+    {
+      "id": "notesPlain",
+      "name": "notesPlain",
+      "type": "STRING",
+      "ref": "op://Private/GitHub/notesPlain"
+    },
+    {
+      "id": "totp",
+      "name": "one-time password",
+      "type": "OTP",
+      "ref": "op://Private/GitHub/one-time password?attribute=otp"
+    }
+  ]
+}

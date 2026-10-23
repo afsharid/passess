@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"regexp"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -23,11 +24,29 @@ type Field struct {
 // are the user's. The result is checked by parsing both versions; an edit
 // that would change anything else is refused, never written.
 func SetSecretFields(data []byte, name string, fields []Field) ([]byte, error) {
+	return SetTableFields(data, []string{"secrets", name}, fields, false)
+}
+
+// SetTableFields is SetSecretFields for any table, such as [backends.op] or
+// [mcp.NAME]. With create, a table the file does not have yet is added at
+// its end; a table written in another form (dotted keys, an inline table)
+// is refused either way.
+func SetTableFields(data []byte, path []string, fields []Field, create bool) ([]byte, error) {
 	lines := bytes.SplitAfter(data, []byte("\n"))
-	start, end, err := secretTable(lines, name)
+	start, end, err := findTable(lines, path)
+	if err != nil && create {
+		var doc map[string]any
+		if toml.Unmarshal(data, &doc) == nil {
+			if _, there := nodeAt(doc, path); !there {
+				lines, err = appendTable(lines, path), nil
+				start, end = len(lines)-1, len(lines)
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
+	name := tableName(path)
 	for _, f := range fields {
 		if !keyRe.MatchString(f.Key) {
 			return nil, fmt.Errorf("%q is not a key passess edits", f.Key)
@@ -38,7 +57,7 @@ func SetSecretFields(data []byte, name string, fields []Field) ([]byte, error) {
 		}
 		at, to, found, err := findKey(lines[start+1:end], f.Key)
 		if err != nil {
-			return nil, fmt.Errorf("secrets.%s.%s: %w", name, f.Key, err)
+			return nil, fmt.Errorf("%s.%s: %w", name, f.Key, err)
 		}
 		switch {
 		case found && line == nil:
@@ -64,7 +83,7 @@ func SetSecretFields(data []byte, name string, fields []Field) ([]byte, error) {
 		}
 	}
 	out := bytes.Join(lines, nil)
-	err = checkEdit(data, out, name, func(old map[string]any) (map[string]any, error) {
+	err = checkEdit(data, out, path, func(old map[string]any) (map[string]any, error) {
 		next := maps.Clone(old)
 		for _, f := range fields {
 			if f.Value == nil {
@@ -88,8 +107,13 @@ func SetSecretFields(data []byte, name string, fields []Field) ([]byte, error) {
 // RemoveSecret returns data without the [secrets.NAME] table, checked the
 // same way.
 func RemoveSecret(data []byte, name string) ([]byte, error) {
+	return RemoveTable(data, []string{"secrets", name})
+}
+
+// RemoveTable is RemoveSecret for any table.
+func RemoveTable(data []byte, path []string) ([]byte, error) {
 	lines := bytes.SplitAfter(data, []byte("\n"))
-	start, end, err := secretTable(lines, name)
+	start, end, err := findTable(lines, path)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +128,7 @@ func RemoveSecret(data []byte, name string) ([]byte, error) {
 		rest = splice(rest, start-1, start, nil)
 	}
 	out := bytes.Join(rest, nil)
-	if err := checkEdit(data, out, name, nil); err != nil {
+	if err := checkEdit(data, out, path, nil); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -115,11 +139,18 @@ var keyRe = regexp.MustCompile(`^[a-z_]+$`)
 // tableHeader is a line that opens a table or an array of tables.
 var tableHeader = regexp.MustCompile(`^\s*\[`)
 
-// secretTable finds the [secrets.NAME] header line and the line after the
-// table's last line.
-func secretTable(lines [][]byte, name string) (start, end int, err error) {
-	q := regexp.QuoteMeta(name)
-	header := regexp.MustCompile(`^\s*\[\s*secrets\s*\.\s*(` + q + `|"` + q + `"|'` + q + `')\s*\]\s*(#.*)?$`)
+// tableName is a table's path as a header writes it: secrets.NAME.
+func tableName(path []string) string { return strings.Join(path, ".") }
+
+// findTable finds the [a.b] header line of the table at path and the line
+// after the table's last line. Each part of the header may be quoted.
+func findTable(lines [][]byte, path []string) (start, end int, err error) {
+	parts := make([]string, len(path))
+	for i, p := range path {
+		q := regexp.QuoteMeta(p)
+		parts[i] = `(` + q + `|"` + q + `"|'` + q + `')`
+	}
+	header := regexp.MustCompile(`^\s*\[\s*` + strings.Join(parts, `\s*\.\s*`) + `\s*\]\s*(#.*)?$`)
 	start = -1
 	for i, l := range lines {
 		if header.Match(bytes.TrimRight(l, "\r\n")) {
@@ -128,7 +159,8 @@ func secretTable(lines [][]byte, name string) (start, end int, err error) {
 		}
 	}
 	if start < 0 {
-		return 0, 0, fmt.Errorf("secrets.%s is not written as a [secrets.%s] table, the only form passess edits; change it in the file yourself", name, name)
+		name := tableName(path)
+		return 0, 0, fmt.Errorf("%s is not written as a [%s] table, the only form passess edits; change it in the file yourself", name, name)
 	}
 	end = len(lines)
 	for i := start + 1; i < len(lines); i++ {
@@ -198,6 +230,21 @@ func bracketDepth(line []byte, first bool) (int, error) {
 	return depth, nil
 }
 
+// appendTable adds a [path] header at the end of the file, a blank line
+// parting it from what was before; the header is the last line.
+func appendTable(lines [][]byte, path []string) [][]byte {
+	for len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1] // SplitAfter's empty piece after the last newline
+	}
+	if n := len(lines); n > 0 && !bytes.HasSuffix(lines[n-1], []byte("\n")) {
+		lines[n-1] = append(append([]byte{}, lines[n-1]...), '\n')
+	}
+	if n := len(lines); n > 0 && len(bytes.TrimSpace(lines[n-1])) > 0 {
+		lines = append(lines, []byte("\n"))
+	}
+	return append(lines, []byte("["+tableName(path)+"]\n"))
+}
+
 func splice(lines [][]byte, from, to int, with [][]byte) [][]byte {
 	out := make([][]byte, 0, len(lines)-(to-from)+len(with))
 	out = append(out, lines[:from]...)
@@ -205,9 +252,38 @@ func splice(lines [][]byte, from, to int, with [][]byte) [][]byte {
 	return append(out, lines[to:]...)
 }
 
-// checkEdit parses both versions and checks that secrets.NAME came out as
-// expect says (nil: gone) and that nothing else changed.
-func checkEdit(before, after []byte, name string, expect func(map[string]any) (map[string]any, error)) error {
+// nodeAt is the table at path in a decoded document.
+func nodeAt(doc map[string]any, path []string) (map[string]any, bool) {
+	at := doc
+	for _, p := range path {
+		next, ok := at[p].(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		at = next
+	}
+	return at, true
+}
+
+// deleteAt removes the table at path, and the tables above it that it
+// leaves empty.
+func deleteAt(doc map[string]any, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	parent, ok := nodeAt(doc, path[:len(path)-1])
+	if !ok {
+		return
+	}
+	delete(parent, path[len(path)-1])
+	if len(parent) == 0 {
+		deleteAt(doc, path[:len(path)-1])
+	}
+}
+
+// checkEdit parses both versions and checks that the table at path came out
+// as expect says (nil: gone) and that nothing else changed.
+func checkEdit(before, after []byte, path []string, expect func(map[string]any) (map[string]any, error)) error {
 	var b, a map[string]any
 	if err := toml.Unmarshal(before, &b); err != nil {
 		return errors.New("the config does not parse as it is; fix it first")
@@ -215,12 +291,13 @@ func checkEdit(before, after []byte, name string, expect func(map[string]any) (m
 	if err := toml.Unmarshal(after, &a); err != nil {
 		return errors.New("the edit would not parse; config left unchanged")
 	}
-	bs, _ := b["secrets"].(map[string]any)
-	as, _ := a["secrets"].(map[string]any)
-	old, _ := bs[name].(map[string]any)
-	got, kept := as[name].(map[string]any)
+	old, _ := nodeAt(b, path)
+	if old == nil {
+		old = map[string]any{} // a table being created
+	}
+	got, kept := nodeAt(a, path)
 	switch {
-	case expect == nil && as[name] != nil:
+	case expect == nil && kept:
 		return errors.New("the table is still there after removing it; config left unchanged")
 	case expect != nil && !kept:
 		return errors.New("the edit lost the table; config left unchanged")
@@ -233,16 +310,10 @@ func checkEdit(before, after []byte, name string, expect func(map[string]any) (m
 			return errors.New("the edit did not come out as intended; config left unchanged")
 		}
 	}
-	for _, m := range []map[string]any{a, b} {
-		if s, ok := m["secrets"].(map[string]any); ok {
-			delete(s, name)
-			if len(s) == 0 {
-				delete(m, "secrets")
-			}
-		}
-	}
+	deleteAt(a, path)
+	deleteAt(b, path)
 	if !reflect.DeepEqual(a, b) {
-		return errors.New("the edit would change more than this secret; config left unchanged")
+		return fmt.Errorf("the edit would change more than %s; config left unchanged", tableName(path))
 	}
 	return nil
 }

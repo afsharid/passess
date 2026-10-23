@@ -245,6 +245,82 @@ func TestApprovalEndsWithLockAndWithoutTTL(t *testing.T) {
 	}
 }
 
+// An Allow is for the secret as it was: a change to where its value comes
+// from, who may have it or where it may go asks again; a note does not.
+func TestApprovalVoidWhenTheSecretChanges(t *testing.T) {
+	setupApprovals(t)
+	startAgent(t)
+	a := connectApprover(t, allowAll)
+	exec1 := func() {
+		t.Helper()
+		if _, errOut, code := run(t, "exec", "-s", "X", "--", "sh", "-c", "true"); code != 0 {
+			t.Fatalf("exit %d, %q", code, errOut)
+		}
+	}
+	cfg := os.Getenv("PASSESS_CONFIG")
+	if cfg == "" {
+		cfg = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "passess", "config.toml")
+	}
+	edit := func(from, to string) {
+		t.Helper()
+		data, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := strings.Replace(string(data), from, to, 1)
+		if next == string(data) {
+			t.Fatalf("%q is not in the config", from)
+		}
+		if err := os.WriteFile(cfg, []byte(next), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec1()
+	exec1()
+	edit("approve = true\n", "approve = true\nnote = \"for tests\"\n")
+	exec1()
+	if a.count() != 1 {
+		t.Fatalf("%d questions, want 1: a note is not a change", a.count())
+	}
+	edit("approve = true\n", "approve = true\nhosts = [\"api.example.com\"]\n")
+	exec1()
+	if a.count() != 2 {
+		t.Fatalf("%d questions, want 2: new hosts void the Allow", a.count())
+	}
+	edit("allow   = [\"sh\"]\napprove", "allow   = [\"sh\", \"env\"]\napprove")
+	if out, _, _ := run(t, "agent", "status"); strings.Contains(out, "X for sh") {
+		t.Fatalf("status lists a void Allow:\n%s", out)
+	}
+	exec1()
+	if a.count() != 3 {
+		t.Fatalf("%d questions, want 3: a new allow list voids the Allow", a.count())
+	}
+}
+
+// An Allow can be taken back on its own, without locking the agent.
+func TestApprovalRevoked(t *testing.T) {
+	setupApprovals(t)
+	startAgent(t)
+	a := connectApprover(t, allowAll)
+	if _, errOut, code := run(t, "exec", "-s", "X", "--", "sh", "-c", "true"); code != 0 {
+		t.Fatalf("exit %d, %q", code, errOut)
+	}
+	out, _, code := run(t, "agent", "revoke", "X", "--program", "other")
+	if code != 0 || !strings.Contains(out, "took back 0") {
+		t.Fatalf("another program: exit %d, %q", code, out)
+	}
+	out, _, code = run(t, "agent", "revoke", "X", "--program", "sh")
+	if code != 0 || !strings.Contains(out, "took back 1") {
+		t.Fatalf("revoke: exit %d, %q", code, out)
+	}
+	if _, errOut, code := run(t, "exec", "-s", "X", "--", "sh", "-c", "true"); code != 0 {
+		t.Fatalf("exit %d, %q", code, errOut)
+	}
+	if a.count() != 2 {
+		t.Fatalf("%d questions, want 2: a revoked Allow asks again", a.count())
+	}
+}
+
 func TestApprovalTTLZeroAsksEachTime(t *testing.T) {
 	setupApprovals(t, `approval_ttl = "0"`)
 	startAgent(t)
@@ -465,7 +541,7 @@ func TestAskIDsDifferAcrossAgents(t *testing.T) {
 		s := cacheServer(nil)
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		p, _ := s.pendingFor(nil, agent.AskFor{Secrets: []string{"X"}, Program: "gh"}, time.Hour, time.Hour)
+		p, _ := s.pendingFor(nil, nil, agent.AskFor{Secrets: []string{"X"}, Program: "gh"}, time.Hour, time.Hour)
 		p.timer.Stop()
 		return p.ask.ID
 	}

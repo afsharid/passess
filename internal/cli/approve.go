@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -36,6 +37,7 @@ type approvalKey struct {
 type approval struct {
 	anchor agent.Proc
 	until  time.Time
+	sum    string // the secret's Fingerprint when the user allowed it
 }
 
 // pendingAsk is a question no approver has answered yet. Callers that need
@@ -43,6 +45,7 @@ type approval struct {
 type pendingAsk struct {
 	ask   agent.AskFor
 	keys  []approvalKey // nil: the answer is for this caller only
+	sums  map[approvalKey]string
 	ttl   time.Duration
 	timer *time.Timer
 	done  chan struct{} // closed once settled
@@ -75,12 +78,20 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	s.mu.Lock()
 	var missing []string
 	var keys []approvalKey
+	sums := map[approvalKey]string{}
 	for _, n := range need {
 		k := approvalKey{n, family, anchor.PID, anchor.Start}
-		if a, ok := s.approved[k]; remember && ok && now.Before(a.until) {
+		sum := u.Secrets[n].Fingerprint()
+		a, ok := s.approved[k]
+		if remember && ok && now.Before(a.until) && a.sum == sum {
 			continue
 		}
-		missing, keys = append(missing, n), append(keys, k)
+		if ok && a.sum != sum {
+			// The secret changed since the user allowed it: that Allow was
+			// for something else, and is gone.
+			delete(s.approved, k)
+		}
+		missing, keys, sums[k] = append(missing, n), append(keys, k), sum
 	}
 	if len(missing) == 0 {
 		s.mu.Unlock()
@@ -102,7 +113,7 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	if remember {
 		ask.Until = now.Add(u.Agent.ApprovalTTL)
 	}
-	p, fresh := s.pendingFor(keys, ask, u.Agent.ApprovalTTL, u.Agent.ApprovalTimeout)
+	p, fresh := s.pendingFor(keys, sums, ask, u.Agent.ApprovalTTL, u.Agent.ApprovalTimeout)
 	var approvers []*agent.Conn
 	if fresh {
 		approvers = s.approverList()
@@ -138,17 +149,17 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 
 // pendingFor returns the open question for keys, or opens one. fresh says
 // whether the approvers have yet to see it. The caller holds s.mu.
-func (s *agentServer) pendingFor(keys []approvalKey, ask agent.AskFor, ttl, timeout time.Duration) (p *pendingAsk, fresh bool) {
+func (s *agentServer) pendingFor(keys []approvalKey, sums map[approvalKey]string, ask agent.AskFor, ttl, timeout time.Duration) (p *pendingAsk, fresh bool) {
 	if keys != nil {
 		for _, p := range s.pending {
-			if slices.Equal(p.keys, keys) {
+			if slices.Equal(p.keys, keys) && maps.Equal(p.sums, sums) {
 				return p, false
 			}
 		}
 	}
 	s.asks++
 	ask.ID = s.epoch + "-" + strconv.FormatUint(s.asks, 10)
-	p = &pendingAsk{ask: ask, keys: keys, ttl: ttl, done: make(chan struct{})}
+	p = &pendingAsk{ask: ask, keys: keys, sums: sums, ttl: ttl, done: make(chan struct{})}
 	p.timer = time.AfterFunc(timeout, func() { s.settle(p, false, "no answer within "+timeout.String(), "timeout") })
 	s.pending[ask.ID] = p
 	return p, true
@@ -168,7 +179,7 @@ func (s *agentServer) settle(p *pendingAsk, allow bool, why, outcome string) {
 	if allow && p.keys != nil {
 		until := time.Now().Add(p.ttl)
 		for _, k := range p.keys {
-			s.approved[k] = approval{anchor: *p.ask.Anchor, until: until}
+			s.approved[k] = approval{anchor: *p.ask.Anchor, until: until, sum: p.sums[k]}
 		}
 	}
 	approvers := s.approverList()
@@ -210,6 +221,24 @@ func (s *agentServer) dropApprovals(why string) {
 	}
 }
 
+// revoke forgets the Allows r matches and says how many there were. Taking
+// an Allow back only narrows access, so it needs no approval of its own.
+func (s *agentServer) revoke(r agent.RevokeFor) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for k := range s.approved {
+		if k.secret == r.Secret && (r.Program == "" || k.program == r.Program) && (r.PID == 0 || k.pid == r.PID) {
+			delete(s.approved, k)
+			n++
+		}
+	}
+	if n > 0 {
+		s.log.write(auditEntry{Kind: "approval", Secrets: []string{r.Secret}, Program: r.Program, Outcome: "revoked"})
+	}
+	return n
+}
+
 // prune drops the Allows that expired or whose caller is gone. Whether a
 // caller lives is a kernel call per entry, made without holding s.mu.
 func (s *agentServer) prune() {
@@ -240,13 +269,20 @@ func (s *agentServer) prune() {
 	s.mu.Unlock()
 }
 
-// approvals lists the live Allows.
-func (s *agentServer) approvals() []agent.Approval {
+// approvals lists the live Allows. With u, an Allow for a secret that has
+// changed or gone since is dropped: it would not be honored.
+func (s *agentServer) approvals(u *config.User) []agent.Approval {
 	s.prune()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []agent.Approval{}
 	for k, a := range s.approved {
+		if u != nil {
+			if sec, ok := u.Secrets[k.secret]; !ok || sec.Fingerprint() != a.sum {
+				delete(s.approved, k)
+				continue
+			}
+		}
 		out = append(out, agent.Approval{Secret: k.secret, Program: k.program, Anchor: a.anchor, Until: a.until})
 	}
 	slices.SortFunc(out, func(a, b agent.Approval) int {

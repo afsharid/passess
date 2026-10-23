@@ -87,6 +87,11 @@ struct SecretsView: View {
                 }
             }
             Spacer()
+            Button(action: model.openAdd) {
+                Label(t("Add"), systemImage: "plus")
+            }
+            .buttonStyle(PrimaryButtonStyle(compact: true))
+            .help(t("Add a secret from 1Password, the keychain or a reference"))
             Button(action: { model.refresh(); model.discover(maxAge: 0) }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 13, weight: .medium))

@@ -222,3 +222,41 @@ func TestLiveInstall(t *testing.T) {
 		}
 	}
 }
+
+// TestStablePathLeavesTheAppBundle: harness configs name a path that
+// outlives Passess.app's copy, the ~/.local/bin link the app makes.
+func TestStablePathLeavesTheAppBundle(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "Passess.app", "Contents", "Resources", "passess")
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(dir, "home")
+	other := filepath.Join(dir, "brew", "passess")
+	for _, p := range []string{filepath.Join(home, ".local", "bin"), filepath.Dir(other)} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	look := func(string) (string, error) { return other, nil } // another passess on PATH
+
+	if got := stablePath(exe, look, home); got != exe || !inAppBundle(got) {
+		t.Fatalf("without a link: %s", got)
+	}
+	link := filepath.Join(home, ".local", "bin", "passess")
+	if err := os.Symlink(exe, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := stablePath(exe, look, home); got != link || inAppBundle(got) {
+		t.Fatalf("with the link: %s, want %s", got, link)
+	}
+	if got := stablePath(other, look, home); got != other {
+		t.Fatalf("the PATH entry that is this binary: %s", got)
+	}
+}
