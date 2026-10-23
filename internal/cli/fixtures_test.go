@@ -184,6 +184,52 @@ allow   = ["node"]
 	golden(t, "discover.json", out, dir)
 }
 
+// TestMenuBarSafetyFixtures pins what the Secrets in clear and Activity
+// windows read: `scan --json` and `activity --json`.
+func TestMenuBarSafetyFixtures(t *testing.T) {
+	noHarness(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("PASSESS_CONFIG", filepath.Join(home, "none.toml"))
+	pat := "gh" + "p_" + strings.Repeat("A1b2C3d4E5", 3) + "f6G7h8"
+	proj := filepath.Join(home, "Projects", "app")
+	if err := os.MkdirAll(proj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".env"), []byte("DEBUG=1\nGITHUB_TOKEN="+pat+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ := run(t, "scan", "--json", "--dir", filepath.Join(home, "Projects"))
+	if strings.Contains(out, pat) {
+		t.Fatal("scan printed a value")
+	}
+	golden(t, "scan.json", regexp.MustCompile(`"fingerprint": "[^"]*"`).ReplaceAllString(strings.ReplaceAll(out, home, "/Users/you"),
+		`"fingerprint": "f1"`), "/nonexistent")
+
+	sock := agentSocket(t)
+	at := time.Date(2026, 10, 23, 9, 30, 0, 123456789, time.UTC)
+	var lines []string
+	for i, e := range []auditEntry{
+		{Kind: "approval", Anchor: "claude (4242)", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh", Dir: "/Users/you/project", Outcome: "allowed"},
+		{Kind: "exec", PID: 4300, Harness: "claude-code", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh", Dir: "/Users/you/project", Outcome: "ran", Status: new(0)},
+		{Kind: "exec", PID: 4301, Harness: "claude-code", Secrets: []string{"HASS_TOKEN"}, Program: "sh", Outcome: "refused"},
+	} {
+		e.Time = at.Add(time.Duration(i) * time.Minute)
+		b, _ := json.Marshal(e)
+		lines = append(lines, string(b))
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(sock), "agent-audit.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, "activity", "--json")
+	if code != 0 {
+		t.Fatalf("activity: exit %d, %s", code, errOut)
+	}
+	golden(t, "activity.json", out, "/nonexistent")
+}
+
 // TestMenuBarSettingsFixtures pins what the Settings window reads: `backend
 // --json`, `mcp list --json`, `profile list --json` and `agent config
 // --json`. References and names only.

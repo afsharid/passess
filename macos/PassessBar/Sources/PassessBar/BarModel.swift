@@ -46,6 +46,9 @@ final class BarModel: ObservableObject {
     private var onboardingWindow: OnboardingWindow?
     private var settingsWindow: SettingsWindow?
     private var settingsModel: SettingsModel?
+    private var exposedWindow: ToolWindow?
+    private var activityWindow: ToolWindow?
+    @Published private(set) var revoking: String? // the approval Item being taken back
     private static let onboardedKey = "onboarded"
     let approver = ApproverController()
 
@@ -130,6 +133,44 @@ final class BarModel: ObservableObject {
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Where credentials sit in clear on this Mac, and the moves that fix it.
+    func openExposed() {
+        if exposedWindow == nil {
+            let model = ExposedModel()
+            model.onChange = { [weak self] in self?.refresh() }
+            exposedWindow = ToolWindow(title: t("Secrets in clear"), view: ExposedView(model: model)) { [weak self] in
+                self?.exposedWindow = nil
+            }
+            model.scan()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        exposedWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// What the agent ran and what was approved.
+    func openActivity() {
+        if activityWindow == nil {
+            activityWindow = ToolWindow(title: t("Activity"), view: ActivityView(model: ActivityModel())) { [weak self] in
+                self?.activityWindow = nil
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        activityWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Takes back one Allow. Narrowing access needs no Touch ID.
+    func revoke(_ id: String, secret: String, program: String, pid: Int) {
+        guard !frozen, revoking == nil, let cli = Passess.locateForAgent() else { return }
+        revoking = id
+        work.async {
+            try? cli.revoke(secret: secret, program: program, pid: pid)
+            DispatchQueue.main.async {
+                self.revoking = nil
+                self.refresh()
+            }
+        }
     }
 
     /// What a problem's button does: the action doctor named for it.

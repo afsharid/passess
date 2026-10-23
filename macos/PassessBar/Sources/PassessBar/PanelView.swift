@@ -83,9 +83,35 @@ struct PanelView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    ForEach(card.approvals) { ItemRow(item: $0) }
+                    ForEach(card.approvals) { item in
+                        HStack {
+                            ItemRow(item: item)
+                            if case let .revoke(secret, program, pid) = item.action {
+                                Button(model.revoking == item.id ? "…" : t("Take back")) {
+                                    model.revoke(item.id, secret: secret, program: program, pid: pid)
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.system(size: 12))
+                                .fixedSize()
+                                .disabled(model.revoking != nil)
+                                .help(t("The next use asks you again"))
+                            }
+                        }
+                    }
                 }
             }
+        }
+        Card(t("Safety")) {
+            HStack(spacing: 10) {
+                Button { model.openExposed() } label: {
+                    Label(t("Secrets in clear…"), systemImage: "exclamationmark.shield")
+                }
+                Button { model.openActivity() } label: {
+                    Label(t("Activity…"), systemImage: "clock.arrow.circlepath")
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 12))
         }
         if let check = model.check {
             let failing = checkItems(check).filter { $0.tone != .ok }

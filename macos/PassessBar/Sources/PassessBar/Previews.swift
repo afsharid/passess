@@ -222,7 +222,23 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
             return AnyView(SettingsView(model: model))
         }
     }
+    let exposure = decode(ScanReport.self, """
+    {"files": 41, "rules": "gitleaks", "known_secrets": 4, "unresolved": [], "errors": [],
+     "findings": [
+       {"path": "\(NSHomeDirectory())/Projects/shop/.env", "line": 3, "category": "env", "kind": "rule", "rule": "stripe-access-token", "fingerprint": "a"},
+       {"path": "\(NSHomeDirectory())/Projects/shop/.env", "line": 4, "category": "env", "kind": "known", "secret": "OPENROUTER_API_KEY", "fingerprint": "b"},
+       {"path": "\(NSHomeDirectory())/.cursor/mcp.json", "line": 9, "category": "config", "kind": "rule", "rule": "github-pat", "fingerprint": "c"},
+       {"path": "\(NSHomeDirectory())/.claude/projects/shop/7f1c.jsonl", "line": 212, "category": "transcript", "kind": "known", "secret": "HASS_TOKEN", "fingerprint": "d"}]}
+    """)
+    let activityLog = decode([ActivityEntry].self, """
+    [{"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-60)))", "kind": "exec", "harness": "claude-code", "secrets": ["HASS_TOKEN"], "program": "sh", "outcome": "refused"},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-300)))", "kind": "exec", "harness": "claude-code", "secrets": ["GITHUB_TOKEN"], "program": "gh", "dir": "\(NSHomeDirectory())/Projects/passess", "outcome": "ran", "status": 0},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-310)))", "kind": "approval", "anchor": "claude (46551)", "secrets": ["GITHUB_TOKEN"], "program": "gh", "dir": "\(NSHomeDirectory())/Projects/passess", "outcome": "allowed"},
+     {"time": "\(ISO8601DateFormatter().string(from: now.addingTimeInterval(-4000)))", "kind": "approval", "anchor": "codex (5120)", "secrets": ["OPENROUTER_API_KEY"], "program": "curl", "outcome": "denied"}]
+    """)
     return [
+        ("exposed", { AnyView(ExposedView(model: ExposedModel(previewing: exposure, folder: NSHomeDirectory() + "/Projects"))) }, true),
+        ("activity", { AnyView(ActivityView(model: ActivityModel(previewing: activityLog))) }, false),
         ("settings-backends", settings(.backends), true),
         ("settings-mcp", settings(.mcp), false),
         ("settings-mcp-edit", settings(.mcp) { $0.edit(settingsServers[0]) }, true),

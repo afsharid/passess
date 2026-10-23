@@ -46,6 +46,18 @@ if case .fix(action: "start-config", _) = problems(load(Doctor.self, "doctor-no-
 }
 expect(fixLabel("something-new") == nil, "an action the app does not know has no button")
 
+// secrets in clear and activity
+let scanReport = load(ScanReport.self, "scan.json")
+expect(scanReport.byFile.count == 1 && scanReport.byFile[0].category == "env" && scanReport.findings[0].what == "github-pat"
+       && !scanReport.transcriptsHoldValues, "scan: \(scanReport)")
+let activityLog = load([ActivityEntry].self, "activity.json")
+expect(activityLog.count == 3 && activityLog[0].refused && !activityLog[1].refused && activityLog[2].anchor == "claude (4242)"
+       && activityLog[0].time > activityLog[2].time, "activity, newest first: \(activityLog)")
+let liveAgent = load(AgentStatus.self, "agent-status.json")
+if case let .revoke(secret, program, pid) = agentCard(liveAgent, approving: true)?.approvals.first?.action {
+    expect(secret == "GITHUB_TOKEN" && program == "gh" && pid == 4141, "an Allow is taken back by secret, program and caller")
+} else { expect(false, "a live Allow has a button that takes it back") }
+
 // settings
 let backendSettings = load(BackendSettings.self, "backends.json")
 expect(backendSettings.op.account == "my.1password.com" && backendSettings.vault.token == "keychain://passess/vault"

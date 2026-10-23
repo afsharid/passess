@@ -46,6 +46,8 @@ public enum ItemAction: Equatable {
     case open(URL)
     /// A button that fixes it in the app: a doctor action and its target.
     case fix(action: String, target: String?)
+    /// A live Allow, which a button takes back.
+    case revoke(secret: String, program: String, pid: Int)
 }
 
 /// The button text for a doctor action; nil for one the app does not know,
@@ -205,7 +207,8 @@ public func agentCard(_ a: AgentStatus?, approving: Bool, now: Date = Date()) ->
     }
     let approvals = (a.approvals ?? []).map { ap in
         Item(id: "approval-\(ap.secret)-\(ap.program)-\(ap.anchor.pid)", symbol: "checkmark.shield.fill", tone: .ok,
-             title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)))
+             title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)),
+             action: .revoke(secret: ap.secret, program: ap.program, pid: ap.anchor.pid))
     }
     return AgentCard(running: true, status: status, holds: holds, approving: approving, approvals: approvals,
                      outdated: a.outdated ?? false)
