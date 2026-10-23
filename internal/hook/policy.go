@@ -615,6 +615,12 @@ func checkCall(args []string, cwd string, env Env) string {
 		case sub(1) == "add", sub(1) == "set", sub(1) == "remove":
 			return "passess: `passess " + sub(1) + "` decides who may use which secret; it is the user's to run, or to do in Passess.app. " +
 				"Tell the user the name and reference you need."
+		case (sub(1) == "mcp" || sub(1) == "profile") && (sub(2) == "add" || sub(2) == "set" || sub(2) == "remove"):
+			return "passess: `passess " + sub(1) + " " + sub(2) + "` decides which secrets a program gets; it is the user's to run, " +
+				"or to do in Passess.app. Tell the user what you need."
+		case sub(1) == "agent" && sub(2) == "config" && slices.ContainsFunc(args[3:], func(a string) bool { return a != "--json" }):
+			return "passess: `passess agent config` decides how long approvals and cached values last; it is the user's to run, " +
+				"or to do in Passess.app."
 		case sub(1) == "backend" && !slices.Contains(args, "--json"):
 			return "passess: `passess backend` sets how passess reaches the user's vault and stores its credentials; it is the user's " +
 				"to run, or to do in Passess.app. Tell the user which setting you need."

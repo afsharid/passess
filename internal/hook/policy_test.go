@@ -49,6 +49,8 @@ func TestShellCommands(t *testing.T) {
 		"passess set GITHUB_TOKEN --clients all", "passess remove GITHUB_TOKEN", "passess discover --json",
 		"passess uninstall --apply", "passess install --no-hooks --apply",
 		"passess browse op --json", "passess backend vault --token", "passess backend op --account x",
+		"passess mcp add gh --command gh-mcp --env GH=GITHUB_TOKEN", "passess profile set web --secrets API_KEY",
+		"passess mcp remove gh", "passess agent config --approval-ttl 999h",
 		// A literal cd earlier in the line moves where relative paths point.
 		`cd ~/.config/passess && echo 'allow = ["sh"]' >> config.toml`, "cd ~/.local/state/passess/backups && cat x",
 		"pushd ~/.config/passess && echo x > config.toml", "cd ~ && cd .config/passess && echo x >> config.toml",
@@ -89,7 +91,8 @@ func TestShellCommands(t *testing.T) {
 		`echo "unterminated`, "", "cat ~/.config/passess/config.toml", "sed -n 1p ~/.config/passess/config.toml",
 		"echo hi > /tmp/out.txt", `cat "$HOME/.config/passess/config.toml"`, "grep -n hosts $HOME/.config/passess/config.toml",
 		`sed -n 1p "${XDG_CONFIG_HOME:-$HOME/.config}/passess/config.toml"`, "ls $HOME/.config/passess", `echo x >> "$HOME/notes.txt"`,
-		"passess agent status", "passess agent start", "passess agent lock", "passess list", "passess backend --json", "HOME=/tmp ls",
+		"passess agent status", "passess agent start", "passess agent lock", "passess list", "passess backend --json", "passess mcp list --json",
+		"passess profile list", "passess agent config", "passess agent config --json", "HOME=/tmp ls",
 		"passess migrate env .env", "passess install --apply", "passess uninstall", "env -u FOO gh",
 		"cd /tmp && ls", "cd /tmp && cat README.md", "pushd /tmp && popd && ls",
 		"FOO=1 passess exec -s API_KEY -- gh api user",

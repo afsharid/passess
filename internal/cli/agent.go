@@ -37,7 +37,7 @@ import (
 )
 
 func init() {
-	commands["agent"] = command{"keep resolved values in memory, run exec for agents, ask for approvals: start, stop, status, lock, approve", runAgent}
+	commands["agent"] = command{"keep resolved values in memory, run exec for agents, ask for approvals: start, stop, status, lock, approve, config", runAgent}
 }
 
 // ExitAgentStopped is what `passess agent status` returns when no agent runs
@@ -50,7 +50,7 @@ const killGrace = 5 * time.Second
 
 func runAgent(st *Streams, args []string) int {
 	usage := func() int {
-		fmt.Fprintln(st.Stderr, "Usage: passess agent start | stop | status [--json] | lock | approve | serve")
+		fmt.Fprintln(st.Stderr, "Usage: passess agent start | stop | status [--json] | lock | approve | serve | config [--json] [--cache-ttl D] …")
 		return ExitUsage
 	}
 	if len(args) == 0 {
@@ -59,6 +59,8 @@ func runAgent(st *Streams, args []string) int {
 	switch sub, rest := args[0], args[1:]; {
 	case sub == "status" && (len(rest) == 0 || len(rest) == 1 && rest[0] == "--json"):
 		return agentStatus(st, len(rest) == 1)
+	case sub == "config":
+		return agentConfig(st, rest)
 	case len(rest) != 0:
 		return usage()
 	case sub == "start":
