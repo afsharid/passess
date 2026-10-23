@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -61,6 +62,8 @@ func runAgent(st *Streams, args []string) int {
 		return agentStatus(st, len(rest) == 1)
 	case sub == "config":
 		return agentConfig(st, rest)
+	case sub == "revoke":
+		return agentRevoke(st, rest)
 	case len(rest) != 0:
 		return usage()
 	case sub == "start":
@@ -174,6 +177,52 @@ func agentControl(st *Streams, kind agent.Kind) int {
 	default:
 		fmt.Fprintln(st.Stdout, "passess agent: forgot every cached value")
 	}
+	return ExitOK
+}
+
+// agentRevoke takes back the Allows for one secret: every one, or only the
+// one for a program, or for a caller's pid, as status lists them.
+func agentRevoke(st *Streams, args []string) int {
+	fs := flag.NewFlagSet("agent revoke", flag.ContinueOnError)
+	fs.SetOutput(st.Stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(st.Stderr, "Usage: passess agent revoke SECRET [--program PROGRAM] [--pid PID]   (the Allows `passess agent status` lists)")
+	}
+	program := fs.String("program", "", "only the Allow for this program")
+	pid := fs.Int("pid", 0, "only the Allow for the caller with this pid")
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fs.Usage()
+		return ExitUsage
+	}
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() > 0 {
+		return ExitUsage
+	}
+	path, err := agent.SocketPath(st.Getenv)
+	if err != nil {
+		return failf(st, ExitConfig, "%v", err)
+	}
+	c, err := agent.Dial(path)
+	if errors.Is(err, agent.ErrNotRunning) {
+		fmt.Fprintln(st.Stdout, "passess agent: not running, so it holds no Allow")
+		return ExitOK
+	}
+	if err != nil {
+		return failf(st, ExitUnavailable, "agent revoke: %v", err)
+	}
+	defer c.Close()
+	req := agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Revoke,
+		Revoke: &agent.RevokeFor{Secret: args[0], Program: *program, PID: *pid}}
+	if err := c.Send(req, nil); err != nil {
+		return failf(st, ExitUnavailable, "agent revoke: %v", err)
+	}
+	f, err := c.ReadFrame()
+	if err == nil && f.Error != "" {
+		err = errors.New(f.Error)
+	}
+	if err != nil {
+		return failf(st, ExitUnavailable, "agent revoke: %v", err)
+	}
+	fmt.Fprintf(st.Stdout, "passess agent: took back %d Allow(s) for %s\n", f.Revoked, args[0])
 	return ExitOK
 }
 
@@ -425,6 +474,12 @@ func (s *agentServer) handle(c *agent.Conn) {
 	case agent.Stop:
 		s.stop() // before the reply: once stop returns, the socket is gone
 		_ = c.Write(agent.Frame{Status: new(0)})
+	case agent.Revoke:
+		if req.Revoke == nil || req.Revoke.Secret == "" {
+			_ = c.Write(agent.Frame{Error: "revoke names no secret"})
+			break
+		}
+		_ = c.Write(agent.Frame{Status: new(0), Revoked: s.revoke(*req.Revoke)})
 	default:
 		_ = c.Write(agent.Frame{Error: fmt.Sprintf("unknown request %q", req.Kind)})
 	}
@@ -508,15 +563,18 @@ func (s *agentServer) stop() {
 func (s *agentServer) info() *agent.Info {
 	in := &agent.Info{PID: os.Getpid(), Build: buildinfo.String(), Protocol: agent.Version, Started: s.started,
 		Socket: s.l.Path(), Config: s.configPath, Jobs: int(s.running.Load()), Served: int(s.served.Load())}
-	if u, err := config.LoadUser(s.configPath); err == nil {
+	u, err := config.LoadUser(s.configPath)
+	if err == nil {
 		in.CacheTTL = u.Agent.CacheTTL.String()
+	} else {
+		u = nil // a config that does not load drops no Allow; it is not served either
 	}
 	s.mu.Lock()
 	in.Stopping = s.stopping
 	in.Approvers, in.Pending = len(s.approvers), len(s.pending)
 	s.mu.Unlock()
 	in.Cached, in.Expires, in.Busy = s.cacheState()
-	in.Approvals = s.approvals()
+	in.Approvals = s.approvals(u)
 	return in
 }
 

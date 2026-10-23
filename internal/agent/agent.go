@@ -28,7 +28,16 @@ const (
 	Status   Kind = "status"   // describe the agent
 	Lock     Kind = "lock"     // forget every cached value and approval
 	Stop     Kind = "stop"     // stop accepting, forget, exit once running commands end
+	Revoke   Kind = "revoke"   // forget the Allows Request.Revoke matches
 )
+
+// RevokeFor picks the Allows a Revoke request forgets: those for Secret,
+// and, when set, for Program and for the caller with that PID.
+type RevokeFor struct {
+	Secret  string `json:"secret"`
+	Program string `json:"program,omitempty"`
+	PID     int    `json:"pid,omitempty"`
+}
 
 // Secret is one -s flag: the variable to set and the secret it gets.
 type Secret struct {
@@ -40,15 +49,16 @@ type Secret struct {
 // environment, which may hold credentials of its own, so nothing may format
 // or log it; Environ prints as a count.
 type Request struct {
-	V       int      `json:"v"`
-	Build   string   `json:"build,omitempty"` // the client's passess version
-	Kind    Kind     `json:"kind"`
-	Argv    []string `json:"argv,omitempty"`
-	Dir     string   `json:"dir,omitempty"`
-	Env     Environ  `json:"env,omitempty"`
-	Secrets []Secret `json:"secrets,omitempty"`
-	Config  string   `json:"config,omitempty"` // the user config path the client would read
-	Text    Blob     `json:"text,omitempty"`   // what a Redact request masks
+	V       int        `json:"v"`
+	Build   string     `json:"build,omitempty"` // the client's passess version
+	Kind    Kind       `json:"kind"`
+	Argv    []string   `json:"argv,omitempty"`
+	Dir     string     `json:"dir,omitempty"`
+	Env     Environ    `json:"env,omitempty"`
+	Secrets []Secret   `json:"secrets,omitempty"`
+	Config  string     `json:"config,omitempty"` // the user config path the client would read
+	Text    Blob       `json:"text,omitempty"`   // what a Redact request masks
+	Revoke  *RevokeFor `json:"revoke,omitempty"`
 }
 
 // Blob is text that may hold a credential: a tool's output, before or after
@@ -88,6 +98,8 @@ type Frame struct {
 	Cancel string  `json:"cancel,omitempty"` // agent → approver: the question with this ID is settled
 	Answer *Answer `json:"answer,omitempty"` // approver → agent
 	Text   Blob    `json:"text,omitempty"`   // agent → client: the answer to Redact
+	// Revoked is how many Allows a Revoke request forgot.
+	Revoked int `json:"revoked,omitempty"`
 }
 
 // AskFor is a question for an approver: may these secrets go to this
