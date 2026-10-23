@@ -98,6 +98,14 @@ final class BarModel: ObservableObject {
         show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate(), tick: tick))
     }
 
+    /// The Add tab: a new secret from 1Password, the keychain or a typed
+    /// reference. 1Password first when doctor finds it usable.
+    func openAdd() {
+        let op = doctor?.backends.first { $0.scheme == "op" }?.ok == true
+        show(ConnectModel(mode: .create, list: secretList, cli: Passess.locate(), valueCLI: Passess.bundled(),
+                          source: op ? .onePassword : .keychain))
+    }
+
     func openEdit(_ secret: SecretList.Secret, tick: String? = nil) {
         show(ConnectModel(mode: .edit(secret), list: secretList, cli: Passess.locate(), tick: tick))
     }
