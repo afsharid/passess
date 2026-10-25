@@ -128,8 +128,32 @@ passess set GITHUB_TOKEN --clients claude-code,codex --approve false --hosts api
 passess remove GITHUB_TOKEN          # passess forgets it; the vault keeps it
 ```
 
-`add`, `set`, `remove` and `discover` are yours to run: they refuse inside an agent, and
-the hooks refuse them in agent shells. Passess.app does the same in a few clicks.
+```sh
+passess browse op                    # 1Password vaults; --vault V for items, --item I for fields
+passess browse keychain              # passess's keychain items, by account
+passess add GITHUB_TOKEN --keychain --value-stdin < file   # the value on stdin, never argv
+passess set GITHUB_TOKEN --ref op://Private/GitHub/credential --allow gh,git
+```
+
+`add`, `set`, `remove`, `browse` and `discover` are yours to run: they refuse inside an
+agent, and the hooks refuse them in agent shells. Passess.app does the same in a few
+clicks, and changes settings only through these commands
+([ADR 13](docs/adr/0013-passess-app-changes-settings-only-through-cli-commands.md)).
+
+### What a project needs
+
+A project can say which secrets it uses in a `passess.toml` that is committed with it.
+It holds names, never references or values; your user config maps each name
+([ADR 3](docs/adr/0003-project-file-names-only.md)):
+
+```sh
+passess needs add GITHUB_TOKEN --note "release notes" --allow gh   # starts passess.toml here
+passess needs list                                                 # which names your config defines
+passess needs remove GITHUB_TOKEN
+```
+
+`passess doctor` warns about a name the project needs and your config lacks. In
+Passess.app, Settings → Project does the same for a folder you choose.
 
 ## MCP servers without tokens in harness configs
 
@@ -147,7 +171,20 @@ harnesses = ["codex"]                         # only there; without it, every ha
 ```
 
 `passess migrate mcp` sets `harnesses` to the harness a server came from, so moving it
-into passess does not spread it anywhere else.
+into passess does not spread it anywhere else. Or write none of this by hand:
+
+```sh
+passess mcp add github --command github-mcp-server --command stdio \
+  --env GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
+passess mcp set tracker --url https://mcp.example.com/mcp \
+  --header 'Authorization=Bearer {{TRACKER_TOKEN}}' --harnesses codex
+passess mcp list
+```
+
+`profile add | set | remove | list` does the same for profiles, `agent config` for the
+agent's timings, and `backend op | vault | bw | bws` for each backend's settings (a
+credential such as the Vault token is read from stdin and kept in the keychain).
+Passess.app's Settings window runs these.
 
 Then let passess register them with your harnesses:
 
@@ -193,6 +230,10 @@ refuses the actions that would put a secret value into the conversation:
   harness sign-ins);
 - vault reads that print a value: `op read`, `bws secret get`, `bw get`, `vault kv get`,
   `security … -w`, `gh auth token`;
+- the 1Password Environments MCP tools that hand values to the agent:
+  `create_local_env_file` (a mounted `.env` any process can read) and `append_variables`
+  (the agent supplies the values). Claude Code passes MCP calls to the hook; run
+  `passess install` again so an older hook config picks them up;
 - `$TOKEN` in a command line for a credential;
 - a prompt with a pasted credential in it;
 - an agent rewriting the passess config;
@@ -388,13 +429,18 @@ passess agent approve   # answer questions here, in a terminal of your own
 
 With no approver running, the answer is no, and so it is when no agent runs.
 Passess.app will answer with Touch ID. `passess agent status` lists the live Allows;
-`lock` forgets them. The agent keeps a log of names, programs and answers, never a
-value, in `agent-audit.jsonl` next to its socket.
+`lock` forgets them, and `passess agent revoke SECRET [--program P] [--pid N]` takes
+back one. An Allow is for the secret as it was: change its references, `allow`,
+`clients` or `hosts` and the next use asks again (a note does not count). The agent
+keeps a log of names, programs and answers, never a value, in `agent-audit.jsonl` next
+to its socket; `passess activity [--secret NAME] [--since 24h]` reads it, newest
+first. Past 2 MiB the log starts anew and keeps the previous one as `.1`.
 
 ## macOS menu bar app
 
 `Passess.app` puts passess in the menu bar. Its panel shows:
-- whether everything is fine, and every problem with its fix, copyable;
+- whether everything is fine, and every problem with its fix: a button where the app
+  can do it (open 1Password, install `op`, open the settings), else copyable;
 - two tiles: the agent, which you switch on and off here, and the secrets, whose
   check shows which resolve (names and sources only);
 - secrets that turned up in your vault and are not connected yet, each with Connect,
@@ -407,6 +453,29 @@ The Secrets window lists every secret with the coding agents it is connected to,
 the vault's secrets passess does not use yet. Connect, or a click on a secret, opens a
 window with a checkbox per agent and "ask me first"; Save asks for Touch ID or your
 password, then runs `passess add` or `set`. No terminal, no config file.
+
+Add, in the Secrets window, takes a secret from any backend: a 1Password vault, item and
+field picked by name (`passess browse op`), a value for the keychain typed into a secure
+field and sent to the app's own CLI on stdin, or a reference typed as it is (Vault,
+`bw`, `bws`). On first run a setup window walks through five steps, each a button: put
+passess on your PATH (a `~/.local/bin` link to the CLI inside the app), find your
+password managers, add the first secret, set up the coding agents, and start the agent
+at login. A config that does not load is shown with its line, and Config opens it.
+
+Settings, in the panel's footer, holds the rest of the config: each backend's settings
+(the 1Password account, the Vault address and token, the `bw` session, a self-hosted
+Bitwarden server), the MCP servers, the profiles, and how long the agent keeps values
+and approvals. Each Save takes Touch ID and runs the matching command. A coding agent's
+row has a menu to set it up again replacing entries you wrote, without hooks, or to
+take passess out of it; the agent tile's menu locks the agent.
+
+Each live Allow in the panel has Take back. Safety opens two windows. Secrets in clear
+runs `passess scan` on your home and a project folder, lists each file holding a
+credential in clear, and moves a `.env` file's values to the keychain (`passess migrate
+env`, after its dry run and Touch ID); a `.env` file dropped on the window moves the
+same way, and transcripts holding values passess manages are cleaned with `scan
+--scrub`. Activity lists what the agent ran and what was approved or refused, with a
+filter.
 
 When an agent needs your approval, a window asks who wants which secret for which
 command, and Allow takes Touch ID. The app never receives a value. It follows the Mac's
@@ -440,7 +509,8 @@ make macos-previews   # the panel and the windows in sample states, as PNG files
 ```
 
 It bundles its own copy of the CLI, and starts the agent with the `passess` on your
-PATH, which is the one your harnesses run. The build is ad-hoc signed, so the first
+PATH, which is the one your harnesses run. "Start the agent at login" registers a
+LaunchAgent inside the app that runs the bundled CLI's `passess agent serve`. The build is ad-hoc signed, so the first
 launch of a copy downloaded from elsewhere needs right-click → Open.
 
 ## What it protects against — and what it does not

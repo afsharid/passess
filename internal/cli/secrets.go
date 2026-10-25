@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/afsharid/passess/internal/config"
 	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/harness"
+	"github.com/afsharid/passess/internal/ref"
 )
 
 func init() {
@@ -152,8 +154,11 @@ func runSet(st *Streams, args []string) int {
 	approve := fs.String("approve", "", "true: every new program and caller waits for your Allow; false: no approval")
 	note := fs.String("note", "", "free-text note (an empty value removes it)")
 	hosts := fs.String("hosts", "", "hosts `passess http` may send it to, comma-separated (api.github.com,*.example.com), or none")
+	var refs, allow listFlag
+	fs.Var(&refs, "ref", "a new reference (repeatable: candidates in order); replaces the ones it has")
+	fs.Var(&allow, "allow", "programs that may receive it, comma-separated; replaces the list (none: no list)")
 	fs.Usage = func() {
-		fmt.Fprintln(st.Stderr, "Usage: passess set NAME [--clients claude-code,codex|all|none] [--approve true|false] [--hosts HOST,…|none] [--note TEXT]")
+		fmt.Fprintln(st.Stderr, "Usage: passess set NAME [--ref REFERENCE…] [--allow gh,git|none] [--clients claude-code,codex|all|none] [--approve true|false] [--hosts HOST,…|none] [--note TEXT]")
 		fs.PrintDefaults()
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -172,6 +177,28 @@ func runSet(st *Streams, args []string) int {
 		return ExitUsage
 	}
 	var fields []config.Field
+	if given["ref"] {
+		for _, r := range refs {
+			if _, err := ref.Parse(r); err != nil {
+				return failf(st, ExitUsage, "--ref: %v", err)
+			}
+		}
+		lit := refLiteral(refs)
+		fields = append(fields, config.Field{Key: "ref", Value: &lit})
+	}
+	if given["allow"] {
+		var lit *string // none, or an empty list: no allow key
+		if len(allow) > 0 && (len(allow) != 1 || allow[0] != "none") {
+			for _, a := range allow {
+				if strings.ContainsAny(a, "/ \t") {
+					return failf(st, ExitUsage, "--allow takes program names, not paths")
+				}
+			}
+			l := arrayLiteral(allow)
+			lit = &l
+		}
+		fields = append(fields, config.Field{Key: "allow", Value: lit})
+	}
 	if given["clients"] {
 		lit, err := clientsLiteral(*clients)
 		if err != nil {
@@ -216,6 +243,17 @@ func runSet(st *Streams, args []string) int {
 		if u, err := config.ParseUser("", data); err == nil {
 			if _, ok := u.Secrets[name]; !ok {
 				return nil, fmt.Errorf("%s is not defined; add it first", name)
+			}
+			// As in add: a reference another secret has would reach programs
+			// under a second allow list.
+			if r, b := backendCredential(u, refs); r != "" {
+				return nil, fmt.Errorf("%s is the credential %s itself reads; it cannot be a secret", r, b)
+			}
+			others := *u
+			others.Secrets = maps.Clone(u.Secrets)
+			delete(others.Secrets, name)
+			if other, r := sameReference(&others, refs); other != "" {
+				return nil, fmt.Errorf("%s is already the reference of secrets.%s", r, other)
 			}
 		}
 		return config.SetSecretFields(data, name, fields)

@@ -93,22 +93,42 @@ func knownHarnesses(st *Streams) string {
 }
 
 // passessPath is the binary harnesses should start: the PATH entry if it is
-// this binary (it survives Homebrew upgrades), otherwise this binary itself.
+// this binary (it survives Homebrew upgrades), else ~/.local/bin/passess if it
+// is (the link Passess.app makes), otherwise this binary itself.
 func passessPath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "passess"
 	}
-	if lp, err := exec.LookPath("passess"); err == nil {
-		a, errA := os.Stat(lp)
-		b, errB := os.Stat(exe)
-		if errA == nil && errB == nil && os.SameFile(a, b) {
-			if abs, err := filepath.Abs(lp); err == nil {
+	return stablePath(exe, exec.LookPath, os.Getenv("HOME"))
+}
+
+func stablePath(exe string, look func(string) (string, error), home string) string {
+	self, err := os.Stat(exe)
+	if err != nil {
+		return exe
+	}
+	var candidates []string
+	if lp, err := look("passess"); err == nil {
+		candidates = append(candidates, lp)
+	}
+	if home != "" {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "passess"))
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && os.SameFile(st, self) { //nolint:gosec // G703: PATH's passess and ~/.local/bin's, only compared
+			if abs, err := filepath.Abs(c); err == nil {
 				return abs
 			}
 		}
 	}
 	return exe
+}
+
+// inAppBundle reports whether path is inside a macOS app: the copy
+// Passess.app carries, which moves or goes away with the app.
+func inAppBundle(path string) bool {
+	return strings.Contains(path, ".app/Contents/")
 }
 
 // desiredServers are the [mcp.*] servers passess wants the harness with ID
@@ -183,9 +203,9 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 	if *apply && (verb == "uninstall" || *noHooks || *force) {
 		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
 			if *force {
-				return failf(st, ExitNoPerm, "passess install --force --apply replaces MCP entries the user wrote; run it yourself in a terminal, not from %s", agents[0])
+				return failf(st, ExitNoPerm, "passess install --force --apply replaces MCP entries the user wrote; run it yourself in a terminal or in Passess.app, not from %s", agents[0])
 			}
-			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal", verb, agents[0])
+			return failf(st, ExitNoPerm, "passess %s --apply takes away the hooks that guard %s sessions; run it yourself in a terminal or in Passess.app", verb, agents[0])
 		}
 	}
 	// Which secret a DSH provider sends to its endpoint is the user's call,
@@ -196,6 +216,13 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 	}
 	augmentPath(st.Getenv)
+	// A harness config naming the copy inside Passess.app breaks when the
+	// app is moved or updated: the harness then starts no passess at all.
+	if *apply && verb == "install" {
+		if bin := passessPath(); inAppBundle(bin) {
+			return failf(st, ExitConfig, "passess runs from inside an app (%s), and harnesses would lose it when the app moves; put passess on your PATH first: Passess.app links it to ~/.local/bin/passess in its setup, or %s", bin, "brew install afsharid/tap/passess")
+		}
+	}
 	appNames, names := splitApps(names)
 	if len(keys) > 0 && !slices.Contains(appNames, "dsh") {
 		return failf(st, ExitUsage, "--key names a DeepSeek Harness provider's key: passess install dsh --key PROVIDER=NAME")

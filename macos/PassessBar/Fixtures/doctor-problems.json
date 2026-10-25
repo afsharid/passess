@@ -18,7 +18,9 @@
     {
       "severity": "error",
       "message": "vault:// is not usable",
-      "fix": "set backends.vault.address (or VAULT_ADDR) and a token: backends.vault.token, VAULT_TOKEN or `vault login`"
+      "fix": "set the address and token in Passess.app, or with `passess backend vault --address URL --token`; VAULT_ADDR, VAULT_TOKEN and `vault login` work too",
+      "action": "backend-settings",
+      "target": "vault"
     }
   ]
 }

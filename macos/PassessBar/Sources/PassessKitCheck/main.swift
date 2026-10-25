@@ -38,12 +38,60 @@ expect(health(broken) == .error, "doctor with an error problem should be .error"
 expect(headline(doctor: broken, failure: nil).title == "1 problem", "problem headline")
 let issue = problems(broken).first
 expect(issue?.tone == .error && issue?.symbol == "xmark.octagon.fill", "an error problem looks like one")
-if case .copy = issue?.action {} else { expect(false, "a problem with a fix can be copied") }
+if case let .fix(action, target) = issue?.action {
+    expect(action == "backend-settings" && target == "vault" && fixLabel(action) == "Settings", "a backend problem opens its settings")
+} else { expect(false, "a problem doctor names an action for gets a button: \(String(describing: issue?.action))") }
+if case .fix(action: "start-config", _) = problems(load(Doctor.self, "doctor-no-config.json")).first?.action {} else {
+    expect(false, "no config: the button starts the setup")
+}
+expect(fixLabel("something-new") == nil, "an action the app does not know has no button")
+
+// secrets in clear and activity
+let scanReport = load(ScanReport.self, "scan.json")
+expect(scanReport.byFile.count == 1 && scanReport.byFile[0].category == "env" && scanReport.findings[0].what == "github-pat"
+       && !scanReport.transcriptsHoldValues, "scan: \(scanReport)")
+let activityLog = load([ActivityEntry].self, "activity.json")
+expect(activityLog.count == 3 && activityLog[0].refused && !activityLog[1].refused && activityLog[2].anchor == "claude (4242)"
+       && activityLog[0].time > activityLog[2].time, "activity, newest first: \(activityLog)")
+let liveAgent = load(AgentStatus.self, "agent-status.json")
+if case let .revoke(secret, program, pid) = agentCard(liveAgent, approving: true)?.approvals.first?.action {
+    expect(secret == "GITHUB_TOKEN" && program == "gh" && pid == 4141, "an Allow is taken back by secret, program and caller")
+} else { expect(false, "a live Allow has a button that takes it back") }
+
+// settings
+let backendSettings = load(BackendSettings.self, "backends.json")
+expect(backendSettings.op.account == "my.1password.com" && backendSettings.vault.token == "keychain://passess/vault"
+       && backendSettings.bw.session.isEmpty, "backends: \(backendSettings)")
+let servers = load([MCPServer].self, "mcp-list.json")
+expect(servers.map(\.name) == ["copilot", "github"] && servers[0].isRemote && !servers[1].isRemote
+       && servers[1].env?["GITHUB_PERSONAL_ACCESS_TOKEN"] == "GITHUB_TOKEN", "mcp servers: \(servers)")
+let form = MCPForm(servers[1])
+expect(form.arguments == ["--command", "npx", "--command", "-y", "--command", "@modelcontextprotocol/server-github",
+                          "--env", "GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN", "--var", "", "--inherit", "",
+                          "--harnesses", "claude", "--redact=true"],
+       "a server's form gives back its flags: \(form.arguments)")
+let remoteForm = MCPForm(servers[0])
+expect(remoteForm.arguments.prefix(4) == ["--url", "https://api.githubcopilot.com/mcp/", "--header", "Authorization=Bearer {{GITHUB_TOKEN}}"]
+       && remoteForm.arguments.contains("all"), "a remote server's form: \(remoteForm.arguments)")
+let profileList = load([Profile].self, "profile-list.json")
+expect(profileList.first?.run == "passess run web -- COMMAND" && profileList.first?.env?["NODE_ENV"] == "development", "profiles: \(profileList)")
+let needs = load(ProjectNeeds.self, "needs-list.json")
+expect(needs.path.hasSuffix("/passess.toml") && needs.needs.map(\.name) == ["GITHUB_TOKEN", "OPENAI_API_KEY"]
+       && needs.needs[0].defined && !needs.needs[1].defined && needs.needs[0].allow == ["gh"], "needs: \(needs)")
+let agentSettings = load(AgentConfig.self, "agent-config.json")
+expect(agentSettings.cacheTTL == "5m0s" && agentSettings.approvalTTL == "8h0m0s", "agent config: \(agentSettings)")
 expect(backends(broken).first?.tone == .warning && backends(broken).first?.title == "vault", "an unusable backend is flagged")
 
 let missing = load(Doctor.self, "doctor-no-config.json")
 expect(health(missing) == .error, "missing config should be .error")
 expect(headline(doctor: missing, failure: nil).title == "No config yet", "missing config headline")
+
+let brokenConfigReport = load(Doctor.self, "doctor-broken-config.json")
+let brokenFile = brokenConfig(brokenConfigReport)
+expect(brokenFile?.line == 4 && brokenFile?.message == "invalid TOML", "a config that does not load names its line: \(String(describing: brokenFile))")
+expect(headline(doctor: brokenConfigReport, failure: nil).title == "The config does not load"
+       && headline(doctor: brokenConfigReport, failure: nil).detail == "Line 4", "a broken config is not a missing one")
+expect(brokenConfig(missing) == nil && brokenConfig(healthy) == nil, "a missing or healthy config is not broken")
 
 expect(headline(doctor: nil, failure: nil).title == "Checking…", "no report yet is shown as checking")
 expect(headline(doctor: nil, failure: "boom").detail == "boom", "a failure is shown when there is no report")
@@ -166,6 +214,47 @@ expect(fresh.first?.title == "NEW_KEY" && fresh.first?.isNew == true && fresh.fi
 expect(fresh.dropFirst().allSatisfy { !$0.isNew }, "a secret without a date is not new")
 expect(fresh.dropFirst().map(\.title) == discovery.secrets.map(\.key).filter { $0 != "NEW_KEY" }, "the rest keep discover's order")
 expect(foundRows(discovery, now: added.addingTimeInterval(4 * 86_400)).allSatisfy { !$0.isNew }, "new for three days")
+
+// browse
+let vaults = load(OPBrowse.self, "browse-op-vaults.json")
+expect(vaults.vaults?.map(\.name) == ["Private", "Work"] && vaults.items == nil, "browse op lists vaults")
+let opItems = load(OPBrowse.self, "browse-op-items.json")
+expect(opItems.vault == "Private" && opItems.items?.first?.category == "API_CREDENTIAL", "browse op --vault lists items")
+let opFields = load(OPBrowse.self, "browse-op-fields.json")
+let fields = orderedFields(opFields.fields ?? [])
+expect(fields.first?.usedBy == "GITHUB_TOKEN" && fields.map(\.type).prefix(2) == ["CONCEALED", "CONCEALED"], "concealed fields first")
+expect(fields.last?.name == "notesPlain" || fields.last?.type == "OTP", "notes and one-time codes last: \(fields.map(\.name))")
+expect(fieldText(fields[1]).detail == "Tokens · concealed", "a field's section and type: \(fieldText(fields[1]))")
+expect(fieldText(fields[0]).detail == "concealed · used by GITHUB_TOKEN", "a field passess has: \(fieldText(fields[0]))")
+let keychain = load(KeychainBrowse.self, "browse-keychain.json")
+expect(keychain.service == "passess" && keychain.items.map(\.account) == ["GITHUB_TOKEN", "bws"] && keychain.items[0].usedBy == "GH_LOCAL"
+       && keychain.items[1].backend == "bws" && keychain.items[1].usedBy == nil,
+       "browse keychain lists passess's items")
+expect(suggestedName(item: "GitHub", field: "credential") == "GITHUB" && suggestedName(item: "Open Router", field: "read token") == "OPEN_ROUTER_READ_TOKEN"
+       && suggestedName(item: "1Password", field: nil) == "SECRET_1PASSWORD", "a name from an item and a field")
+expect(referenceProblem("op://Private/GitHub/credential") == nil && referenceProblem("vault://secret/app#token") == nil, "references the config takes")
+expect(referenceProblem("ghp_abc") != nil && referenceProblem("op://") != nil && referenceProblem("https://x") != nil, "a value or a URL is no reference")
+
+// the CLI on the search path
+do {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("passess-link-\(getpid())")
+    let app = home.appendingPathComponent("Passess.app/Contents/Resources")
+    try fm.createDirectory(at: app, withIntermediateDirectories: true)
+    let cli = app.appendingPathComponent("passess")
+    fm.createFile(atPath: cli.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let link = try Passess.linkBundled(Passess(executable: cli), home: home.path)
+    expect(link.path == home.path + "/.local/bin/passess" && (try? fm.destinationOfSymbolicLink(atPath: link.path)) == cli.path, "the link points into the app")
+    expect(Passess.onSearchPath(home: home.path)?.executable.path == link.path, "a linked passess is on the search path")
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) != nil, "linking again is fine")
+    try fm.removeItem(at: link)
+    fm.createFile(atPath: link.path, contents: Data("mine".utf8))
+    expect((try? Passess.linkBundled(Passess(executable: cli), home: home.path)) == nil
+           && (try? String(contentsOf: link, encoding: .utf8)) == "mine", "a file of the user's is left alone")
+    try? fm.removeItem(at: home)
+} catch {
+    expect(false, "link check: \(error)")
+}
 
 // Turkish
 L10n.override = .turkish

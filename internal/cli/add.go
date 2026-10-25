@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/provider"
 	"github.com/afsharid/passess/internal/ref"
 )
 
@@ -38,12 +40,14 @@ func runAdd(st *Streams, args []string) int {
 	fs.Var(&allow, "allow", "programs that may receive it, comma-separated")
 	note := fs.String("note", "", "free-text note")
 	keychain := fs.Bool("keychain", false, "prompt for the value in this terminal and store it in the OS keychain")
+	valueStdin := fs.Bool("value-stdin", false, "with --keychain: read the value from stdin (one line), as Passess.app sends it")
 	clients := fs.String("clients", "all", "coding agents it is connected to: IDs comma-separated (claude-code,codex), all, or none")
 	approve := fs.Bool("approve", false, "every new program and caller waits for your Allow")
 	hosts := fs.String("hosts", "none", "hosts `passess http` may send it to, comma-separated (api.github.com,*.example.com), or none")
 	fs.Usage = func() {
 		fmt.Fprintln(st.Stderr, "Usage: passess add NAME --ref REFERENCE [--allow gh,git] [--clients claude-code,codex] [--approve] [--hosts api.github.com] [--note TEXT]")
 		fmt.Fprintln(st.Stderr, "       passess add NAME --keychain [--allow …]   (you type the value; it never passes through passess)")
+		fmt.Fprintln(st.Stderr, "       passess add NAME --keychain --value-stdin [--allow …] < value   (the value on stdin, never in argv)")
 		fs.PrintDefaults()
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -60,6 +64,9 @@ func runAdd(st *Streams, args []string) int {
 	}
 	if *keychain == (len(refs) > 0) {
 		return failf(st, ExitUsage, "give either --ref or --keychain")
+	}
+	if *valueStdin && !*keychain {
+		return failf(st, ExitUsage, "--value-stdin goes with --keychain")
 	}
 	for _, r := range refs {
 		if _, err := ref.Parse(r); err != nil {
@@ -110,6 +117,10 @@ func runAdd(st *Streams, args []string) int {
 		}
 		// A second name for a reference another secret already has would
 		// start with an allow list and approval setting of its own choosing.
+		// A backend's own credential opens the vault; agents never get it.
+		if r, b := backendCredential(u, refs); r != "" {
+			return nil, failf(st, ExitConfig, "%s is the credential %s itself reads; it cannot be a secret", r, b)
+		}
 		if other, r := sameReference(u, refs); other != "" {
 			return nil, failf(st, ExitConfig, "%s is already the reference of secrets.%s; to give it to another program, change that secret's allow list in %s", r, other, path)
 		}
@@ -120,7 +131,11 @@ func runAdd(st *Streams, args []string) int {
 	}
 
 	if *keychain {
-		r, code := storeInKeychain(st, name)
+		store := storeInKeychain
+		if *valueStdin {
+			store = storeFromStdin
+		}
+		r, code := store(st, name)
 		if code != 0 {
 			return code
 		}
@@ -171,26 +186,32 @@ func runAdd(st *Streams, args []string) int {
 func secretBlock(name string, refs, allow []string, note string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[secrets.%s]\n", name)
-	if len(refs) == 1 {
-		fmt.Fprintf(&b, "ref = %s\n", tomlString(refs[0]))
-	} else {
-		quoted := make([]string, len(refs))
-		for i, r := range refs {
-			quoted[i] = tomlString(r)
-		}
-		fmt.Fprintf(&b, "ref = [%s]\n", strings.Join(quoted, ", "))
-	}
+	fmt.Fprintf(&b, "ref = %s\n", refLiteral(refs))
 	if len(allow) > 0 {
-		quoted := make([]string, len(allow))
-		for i, a := range allow {
-			quoted[i] = tomlString(a)
-		}
-		fmt.Fprintf(&b, "allow = [%s]\n", strings.Join(quoted, ", "))
+		fmt.Fprintf(&b, "allow = %s\n", arrayLiteral(allow))
 	}
 	if note != "" {
 		fmt.Fprintf(&b, "note = %s\n", tomlString(note))
 	}
 	return []byte(b.String())
+}
+
+// refLiteral is the TOML value of ref: a string for one reference, an array
+// of candidates for more.
+func refLiteral(refs []string) string {
+	if len(refs) == 1 {
+		return tomlString(refs[0])
+	}
+	return arrayLiteral(refs)
+}
+
+// arrayLiteral is a TOML array of strings.
+func arrayLiteral(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = tomlString(s)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 // tomlString quotes s as a TOML basic string. Callers have rejected control
@@ -241,6 +262,26 @@ func storeInKeychain(st *Streams, name string) (string, int) {
 		return "", failf(st, ExitUnavailable, "storing %s in the keychain failed: %v", name, err)
 	}
 	return "keychain://passess/" + name, 0
+}
+
+// addRunner runs security(1) or secret-tool for add --value-stdin; tests
+// keep it off the real keychain.
+var addRunner provider.Runner = provider.ExecRunner{}
+
+// storeFromStdin stores the value given on stdin in the OS keychain. The
+// value reaches the keychain tool on its stdin as well, never in argv. An
+// agent cannot get here: add refuses to run under one before it reads stdin.
+func storeFromStdin(st *Streams, name string) (string, int) {
+	value, err := readSecretLine(st, "value for "+name)
+	if err != nil {
+		return "", failf(st, ExitUsage, "%v", err)
+	}
+	defer value.Zero()
+	kc := provider.Keychain{Runner: addRunner, Getenv: st.Getenv}
+	if err := kc.Store(context.Background(), keychainService, name, value); err != nil {
+		return "", failf(st, ExitUnavailable, "storing %s in the keychain failed: %v", name, err)
+	}
+	return "keychain://" + keychainService + "/" + name, 0
 }
 
 // writeFileAtomic replaces path with data via a temporary file in the same directory.

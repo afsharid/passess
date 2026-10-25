@@ -9,6 +9,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -166,6 +168,30 @@ type Secret struct {
 	// nil means every agent; an empty list means none. A command an agent
 	// left out of the list asked for is refused (ADR 10).
 	Clients []string
+}
+
+// Fingerprint sums what an Allow for the secret was given against: where its
+// value comes from, which programs and agents may have it, and where it may
+// be sent. An Allow whose fingerprint no longer matches is void, so a change
+// to any of these asks the user again. The note does not count.
+func (s Secret) Fingerprint() string {
+	h := sha256.New()
+	field := func(name string, items []string, set bool) {
+		fmt.Fprintf(h, "%s %t %d\n", name, set, len(items))
+		for _, it := range items {
+			fmt.Fprintf(h, "%d:%s\n", len(it), it)
+		}
+	}
+	refs := make([]string, len(s.Refs))
+	for i, r := range s.Refs {
+		refs[i] = r.String()
+	}
+	field("refs", refs, true)
+	field("allow", s.Allow, s.Allow != nil)
+	field("clients", s.Clients, s.Clients != nil)
+	field("hosts", s.Hosts, s.Hosts != nil)
+	fmt.Fprintf(h, "approve %t\n", s.Approve)
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // ConnectedTo reports whether the secret may go to commands the coding agent
@@ -545,6 +571,11 @@ func LoadProject(path string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseProject(path, data)
+}
+
+// ParseProject parses a project file's contents; path is for messages.
+func ParseProject(path string, data []byte) (*Project, error) {
 	var raw rawProject
 	if err := decode(path, data, &raw); err != nil {
 		return nil, err

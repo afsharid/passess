@@ -44,6 +44,25 @@ public enum ItemAction: Equatable {
     case none
     case copy(String)
     case open(URL)
+    /// A button that fixes it in the app: a doctor action and its target.
+    case fix(action: String, target: String?)
+    /// A live Allow, which a button takes back.
+    case revoke(secret: String, program: String, pid: Int)
+}
+
+/// The button text for a doctor action; nil for one the app does not know,
+/// which then falls back to copying the fix.
+public func fixLabel(_ action: String) -> String? {
+    switch action {
+    case "start-config": return t("Set up")
+    case "open-config": return t("Open the config")
+    case "fix-permissions": return t("Make it private")
+    case "add-secret": return t("Add it")
+    case "install-tool": return t("Install")
+    case "open-1password": return t("Open 1Password")
+    case "backend-settings": return t("Settings")
+    default: return nil
+    }
 }
 
 /// One line of the panel.
@@ -80,6 +99,9 @@ public func headline(doctor: Doctor?, failure: String?) -> Headline {
         return Headline(title: t("Checking…"), detail: "", health: .unknown)
     }
     let summary = secretsSummary(d)
+    if let broken = brokenConfig(d) {
+        return Headline(title: t("The config does not load"), detail: broken.line.map { t("Line %ld", $0) } ?? broken.message, health: .error)
+    }
     guard d.config.ok else {
         return Headline(title: t("No config yet"), detail: d.config.error ?? t("passess has no config to read"), health: .error)
     }
@@ -89,6 +111,26 @@ public func headline(doctor: Doctor?, failure: String?) -> Headline {
     case .warning: return Headline(title: t(n == 1 ? "%ld warning" : "%ld warnings", n), detail: summary, health: .warning)
     default: return Headline(title: t("All clear"), detail: summary, health: .ok)
     }
+}
+
+/// The config is there but does not load: what passess said, without the
+/// path it starts with, and the line, when it names one. nil when it loads
+/// or is not there yet.
+public func brokenConfig(_ d: Doctor) -> (message: String, line: Int?)? {
+    guard !d.config.ok, let error = d.config.error, error != "not found" else { return nil }
+    var message = error
+    var line: Int?
+    let prefix = d.config.path + ":"
+    if message.hasPrefix(prefix) {
+        message = String(message.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+        // 4:14: invalid TOML
+        let parts = message.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        if parts.count == 3, let n = Int(parts[0]), Int(parts[1]) != nil {
+            line = n
+            message = parts[2].trimmingCharacters(in: .whitespaces)
+        }
+    }
+    return (message, line)
 }
 
 /// "10 secrets · 2 profiles".
@@ -101,7 +143,8 @@ public func problems(_ d: Doctor) -> [Item] {
         let error = p.severity == "error"
         return Item(id: "problem-\(i)", symbol: error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill",
                     tone: error ? .error : .warning, title: p.message, detail: p.fix,
-                    action: p.fix.map { .copy($0) } ?? .none)
+                    action: p.action.flatMap { fixLabel($0) != nil ? .fix(action: $0, target: p.target) : nil }
+                        ?? p.fix.map { .copy($0) } ?? .none)
     }
 }
 
@@ -164,7 +207,8 @@ public func agentCard(_ a: AgentStatus?, approving: Bool, now: Date = Date()) ->
     }
     let approvals = (a.approvals ?? []).map { ap in
         Item(id: "approval-\(ap.secret)-\(ap.program)-\(ap.anchor.pid)", symbol: "checkmark.shield.fill", tone: .ok,
-             title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)))
+             title: "\(ap.secret) → \(ap.program)", detail: t("%@ · until %@", ap.anchor.name, clock(ap.until)),
+             action: .revoke(secret: ap.secret, program: ap.program, pid: ap.anchor.pid))
     }
     return AgentCard(running: true, status: status, holds: holds, approving: approving, approvals: approvals,
                      outdated: a.outdated ?? false)

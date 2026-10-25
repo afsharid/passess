@@ -133,6 +133,10 @@ func TestMenuBarFixtures(t *testing.T) {
 	out, _, _ = run(t, "doctor", "--json")
 	golden(t, "doctor-no-config.json", out, dir)
 
+	dir = writeConfig(t, "version = 1\n[secrets.A]\nref = \"env://PASSESS_TEST_A\"\nallow = [\"gh\"\n")
+	out, _, _ = run(t, "doctor", "--json")
+	golden(t, "doctor-broken-config.json", out, dir)
+
 	dir = writeConfig(t, "version = 1\n[secrets.PRESENT]\nref = \"env://PASSESS_TEST_PRESENT_TOKEN\"\n[secrets.ABSENT]\nref = \"env://PASSESS_TEST_ABSENT\"\n")
 	t.Setenv("PASSESS_TEST_PRESENT_TOKEN", execValue)
 	out, _, _ = run(t, "check", "--json")
@@ -178,4 +182,115 @@ allow   = ["node"]
 		t.Fatal("discover printed a value")
 	}
 	golden(t, "discover.json", out, dir)
+}
+
+// TestMenuBarSafetyFixtures pins what the Secrets in clear and Activity
+// windows read: `scan --json` and `activity --json`.
+func TestMenuBarSafetyFixtures(t *testing.T) {
+	noHarness(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("PASSESS_CONFIG", filepath.Join(home, "none.toml"))
+	pat := "gh" + "p_" + strings.Repeat("A1b2C3d4E5", 3) + "f6G7h8"
+	proj := filepath.Join(home, "Projects", "app")
+	if err := os.MkdirAll(proj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".env"), []byte("DEBUG=1\nGITHUB_TOKEN="+pat+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ := run(t, "scan", "--json", "--dir", filepath.Join(home, "Projects"))
+	if strings.Contains(out, pat) {
+		t.Fatal("scan printed a value")
+	}
+	golden(t, "scan.json", regexp.MustCompile(`"fingerprint": "[^"]*"`).ReplaceAllString(strings.ReplaceAll(out, home, "/Users/you"),
+		`"fingerprint": "f1"`), "/nonexistent")
+
+	sock := agentSocket(t)
+	at := time.Date(2026, 10, 23, 9, 30, 0, 123456789, time.UTC)
+	var lines []string
+	for i, e := range []auditEntry{
+		{Kind: "approval", Anchor: "claude (4242)", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh", Dir: "/Users/you/project", Outcome: "allowed"},
+		{Kind: "exec", PID: 4300, Harness: "claude-code", Secrets: []string{"GITHUB_TOKEN"}, Program: "gh", Dir: "/Users/you/project", Outcome: "ran", Status: new(0)},
+		{Kind: "exec", PID: 4301, Harness: "claude-code", Secrets: []string{"HASS_TOKEN"}, Program: "sh", Outcome: "refused"},
+	} {
+		e.Time = at.Add(time.Duration(i) * time.Minute)
+		b, _ := json.Marshal(e)
+		lines = append(lines, string(b))
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(sock), "agent-audit.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, "activity", "--json")
+	if code != 0 {
+		t.Fatalf("activity: exit %d, %s", code, errOut)
+	}
+	golden(t, "activity.json", out, "/nonexistent")
+}
+
+// TestMenuBarNeedsFixture pins `needs list --json`, as the Settings
+// window's Project tab reads it.
+func TestMenuBarNeedsFixture(t *testing.T) {
+	noHarness(t)
+	writeConfig(t, "version = 1\n[secrets.GITHUB_TOKEN]\nref = \"env://GH\"\n")
+	proj := t.TempDir()
+	body := "version = 1\n\n[needs.GITHUB_TOKEN]\nnote = \"release notes\"\nallow = [\"gh\"]\n\n[needs.OPENAI_API_KEY]\n"
+	if err := os.WriteFile(filepath.Join(proj, "passess.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, "needs", "list", "--json", "--dir", proj)
+	if code != 0 {
+		t.Fatalf("exit %d, %s", code, errOut)
+	}
+	golden(t, "needs-list.json", strings.ReplaceAll(out, proj, "/Users/you/Projects/web"), "/nonexistent")
+}
+
+// TestMenuBarSettingsFixtures pins what the Settings window reads: `backend
+// --json`, `mcp list --json`, `profile list --json` and `agent config
+// --json`. References and names only.
+func TestMenuBarSettingsFixtures(t *testing.T) {
+	noHarness(t)
+	dir := writeConfig(t, `version = 1
+
+[backends.op]
+account = "my.1password.com"
+
+[backends.vault]
+address = "https://vault.example.com:8200"
+token = "keychain://passess/vault"
+
+[secrets.GITHUB_TOKEN]
+ref = "keychain://passess/github"
+
+[mcp.github]
+command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "GITHUB_TOKEN" }
+harnesses = ["claude"]
+
+[mcp.copilot]
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer {{GITHUB_TOKEN}}" }
+
+[profiles.web]
+secrets = ["GITHUB_TOKEN"]
+allow = ["node"]
+env = { NODE_ENV = "development" }
+
+[agent]
+cache_ttl = "5m"
+`)
+	for name, args := range map[string][]string{
+		"backends.json":     {"backend", "--json"},
+		"mcp-list.json":     {"mcp", "list", "--json"},
+		"profile-list.json": {"profile", "list", "--json"},
+		"agent-config.json": {"agent", "config", "--json"},
+	} {
+		out, errOut, code := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d, %s", args, code, errOut)
+		}
+		golden(t, name, out, dir)
+	}
 }

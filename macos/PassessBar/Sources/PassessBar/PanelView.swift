@@ -1,4 +1,5 @@
 import PassessKit
+import ServiceManagement
 import SwiftUI
 
 // No @State in these views: the SDK's @State is a macro, and the Command Line
@@ -22,8 +23,13 @@ struct PanelView: View {
                     SecretsTile(model: model)
                 }
                 .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.bottom, 6)
+                AgentAtLogin(model: model)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
                 content(d)
+            } else if let d = model.doctor, let broken = brokenConfig(d) {
+                BrokenConfigCard(path: d.config.path, message: broken.message, line: broken.line, model: model)
             } else if model.doctor != nil {
                 VaultCard(model: model)
             } else if model.failure == Passess.Failure.notFound.description {
@@ -77,9 +83,35 @@ struct PanelView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    ForEach(card.approvals) { ItemRow(item: $0) }
+                    ForEach(card.approvals) { item in
+                        HStack {
+                            ItemRow(item: item)
+                            if case let .revoke(secret, program, pid) = item.action {
+                                Button(model.revoking == item.id ? "…" : t("Take back")) {
+                                    model.revoke(item.id, secret: secret, program: program, pid: pid)
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.system(size: 12))
+                                .fixedSize()
+                                .disabled(model.revoking != nil)
+                                .help(t("The next use asks you again"))
+                            }
+                        }
+                    }
                 }
             }
+        }
+        Card(t("Safety")) {
+            HStack(spacing: 10) {
+                Button { model.openExposed() } label: {
+                    Label(t("Secrets in clear…"), systemImage: "exclamationmark.shield")
+                }
+                Button { model.openActivity() } label: {
+                    Label(t("Activity…"), systemImage: "clock.arrow.circlepath")
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 12))
         }
         if let check = model.check {
             let failing = checkItems(check).filter { $0.tone != .ok }
@@ -354,9 +386,36 @@ struct AgentTile: View {
             }
             .help(card.running ? t("%@. Click to stop: the agent forgets every value and approval.", card.status)
                 : t("Start the agent: cached values, approvals"))
+            .contextMenu {
+                if card.running {
+                    Button(t("Lock: forget values and approvals, keep running")) { model.agentCommand("lock") }
+                }
+                Button(t("Agent settings…")) { model.openSettings(.agent) }
+            }
         } else {
             Tile(symbol: "bolt.slash", title: t("Agent"), detail: t("Update passess"), enabled: false) {}
                 .help(t("The passess on your PATH has no agent yet: brew upgrade passess"))
+        }
+    }
+}
+
+/// Under the agent tile: whether launchd starts the agent at login.
+struct AgentAtLogin: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Toggle(t("Start the agent at login"), isOn: Binding(get: { model.agentStartsAtLogin }, set: { model.setAgentAtLogin($0) }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .fixedSize()
+                .help(t("After a restart, secrets that ask first still work: the agent is there to ask."))
+            if model.agentAtLogin == .requiresApproval {
+                Button(t("Allow in System Settings")) { SMAppService.openSystemSettingsLoginItems() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -392,8 +451,19 @@ struct ProblemRow: View {
                     if case let .copy(text) = item.action {
                         CopyButton(copied: model.copied == item.id) { model.copy(text, from: item.id) }
                     }
+                    if case let .fix(action, target) = item.action, let label = fixLabel(action) {
+                        Button(model.installing == "tool:" + (target ?? "") ? t("Installing…") : label) {
+                            model.performFix(action, target: target)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                        .disabled(model.installing != nil)
+                    }
                 }
-                if let fix = item.detail {
+                if case let .fix(_, target) = item.action, let failed = model.installFailure["tool:" + (target ?? "")] {
+                    Text(failed)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tone.error.color)
+                } else if let fix = item.detail {
                     Text(fix)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -493,6 +563,12 @@ struct AgentRowView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(row.tone.color)
                     .accessibilityHidden(true)
+            }
+            .contextMenu {
+                Button(t("Set up again, replacing entries I wrote")) { model.install(row.id, force: true, hooks: true) }
+                Button(t("Set up without hooks…")) { model.install(row.id, force: false, hooks: false) }
+                Divider()
+                Button(t("Take passess out of %@…", row.title)) { model.uninstall(row.id, label: row.title) }
             }
             ForEach(row.keys) { key in
                 HStack(spacing: 8) {
@@ -607,6 +683,45 @@ struct VaultCard: View {
     }
 }
 
+/// The config is there but does not load: the line passess names, and the
+/// file to fix. Nothing else works until it loads, so nothing else is shown.
+struct BrokenConfigCard: View {
+    let path: String
+    let message: String
+    let line: Int?
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        Card(t("Needs attention"), highlighted: true) {
+            HStack(alignment: .top, spacing: 8) {
+                ToneIcon(symbol: "xmark.octagon.fill", tone: .error)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line.map { t("The config does not load: line %ld", $0) } ?? t("The config does not load"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Text(path)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 4)
+                Button(t("Open")) { model.open(URL(fileURLWithPath: path)) }
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
+                    .help(t("Open the config to fix it"))
+            }
+        }
+    }
+}
+
 struct GetStarted: View {
     let item: Item
     @ObservedObject var model: BarModel
@@ -624,7 +739,7 @@ struct Footer: View {
     @ObservedObject var model: BarModel
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Toggle(t("Open at Login"), isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
                 .toggleStyle(.checkbox)
                 .font(.system(size: 12))
@@ -638,11 +753,25 @@ struct Footer: View {
                     .help("passess \(version)")
             }
             Spacer()
-            if let config = model.doctor?.config, config.ok {
+            if model.setupLeft {
+                Button(t("Setup")) { model.openOnboarding() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12))
+                    .help(t("Set up passess"))
+                    .fixedSize()
+            }
+            Button { model.openSettings() } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help(t("Backends, MCP servers, profiles and the agent"))
+            .accessibilityLabel(t("Settings"))
+            if let config = model.doctor?.config, config.ok || config.error != "not found" {
                 Button(t("Config")) { model.open(URL(fileURLWithPath: config.path)) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12))
                     .help(config.path)
+                    .fixedSize()
             }
             Button {
                 model.open(URL(string: "https://github.com/afsharid/passess#readme")!)
@@ -656,6 +785,7 @@ struct Footer: View {
                 .buttonStyle(.borderless)
                 .font(.system(size: 12))
                 .keyboardShortcut("q")
+                .fixedSize()
         }
     }
 }

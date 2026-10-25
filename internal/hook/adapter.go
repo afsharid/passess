@@ -127,6 +127,10 @@ func (c claude) Parse(event string, payload []byte, _ func(string) string) (Even
 			ev.Kind, ev.Paths = Write, []string{str(in.ToolInput, "file_path", "notebook_path")}
 		case "apply_patch":
 			ev.Kind, ev.Paths = Write, patchPaths(shellCommand(in.ToolInput["command"])+str(in.ToolInput, "input", "patch"))
+		default:
+			if strings.HasPrefix(in.ToolName, "mcp__") {
+				ev.Kind = MCP
+			}
 		}
 	case "PostToolUse":
 		if c.rewritesOutput {

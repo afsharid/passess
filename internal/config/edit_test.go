@@ -139,3 +139,51 @@ func TestRemoveSecret(t *testing.T) {
 		t.Fatal("removing a missing table should fail")
 	}
 }
+
+// A table the file does not have yet is added at its end, parted from what
+// was before by one blank line; set again, it is edited in place.
+func TestSetTableFieldsCreates(t *testing.T) {
+	got, err := SetTableFields([]byte(editBase), []string{"backends", "op"}, []Field{{"account", lit(`"my.1password.com"`)}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := editBase + "\n[backends.op]\naccount = \"my.1password.com\"\n"
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	again, err := SetTableFields(got, []string{"backends", "op"}, []Field{{"account", lit(`"team.1password.com"`)}}, true)
+	if err != nil || !strings.HasSuffix(string(again), "[backends.op]\naccount = \"team.1password.com\"\n") || strings.Count(string(again), "[backends.op]") != 1 {
+		t.Fatalf("set again: %v\n%s", err, again)
+	}
+	// No trailing newline before: one is added first.
+	got, err = SetTableFields([]byte("version = 1"), []string{"agent"}, []Field{{"cache_ttl", lit(`"5m"`)}}, true)
+	if err != nil || string(got) != "version = 1\n\n[agent]\ncache_ttl = \"5m\"\n" {
+		t.Fatalf("no newline: %v %q", err, got)
+	}
+	// Without create, a missing table is still refused.
+	if _, err := SetTableFields([]byte(editBase), []string{"agent"}, []Field{{"cache_ttl", lit(`"5m"`)}}, false); err == nil {
+		t.Fatal("a missing table was created without create")
+	}
+}
+
+// A table written as dotted keys or inline is the user's form: never
+// edited, and never shadowed by a second table.
+func TestSetTableFieldsRefusesOtherForms(t *testing.T) {
+	for name, in := range map[string]string{
+		"dotted keys":  "version = 1\nbackends.op.account = \"a\"\n",
+		"inline table": "version = 1\n[backends]\nop = { account = \"a\" }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := SetTableFields([]byte(in), []string{"backends", "op"}, []Field{{"account", lit(`"b"`)}}, true); err == nil {
+				t.Fatal("expected a refusal")
+			}
+		})
+	}
+}
+
+func TestRemoveTable(t *testing.T) {
+	got, err := RemoveTable([]byte(editBase), []string{"profiles", "web"})
+	if err != nil || strings.Contains(string(got), "profiles") || !strings.Contains(string(got), "[secrets.DB_URL]") {
+		t.Fatalf("%v\n%s", err, got)
+	}
+}
