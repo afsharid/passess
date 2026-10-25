@@ -331,11 +331,7 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: $model.tab) {
-                ForEach(SettingsModel.Tab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            TabBar(selection: $model.tab)
 
             Group {
                 switch model.tab {
@@ -362,6 +358,37 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 520, alignment: .topLeading)
         .disabled(model.busy)
+    }
+}
+
+/// The Settings tabs, each an equal share of the width. The system's
+/// segmented control sizes each segment to its text and widens the selected
+/// one, so five Turkish titles ran past the window and the last one vanished.
+private struct TabBar: View {
+    @Binding var selection: SettingsModel.Tab
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(SettingsModel.Tab.allCases) { tab in
+                let selected = tab == selection
+                Button { selection = tab } label: {
+                    Text(tab.title)
+                        .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(selected ? Brand.tint : Color.clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 }
 
