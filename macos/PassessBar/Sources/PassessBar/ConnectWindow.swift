@@ -553,15 +553,10 @@ struct AddSourceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker(t("From"), selection: Binding(get: { model.source }, set: { model.pickSource($0) })) {
-                Text(verbatim: "1Password").tag(ConnectModel.Source.onePassword)
-                Text(verbatim: "bws").tag(ConnectModel.Source.bws)
-                Text(t("Keychain")).tag(ConnectModel.Source.keychain)
-                Text(t("Reference")).tag(ConnectModel.Source.reference)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityLabel(t("From"))
+            TabBar(selection: Binding(get: { model.source }, set: { model.pickSource($0) }),
+                   tabs: [(.onePassword, "1Password"), (.bws, "bws"),
+                          (.keychain, t("Keychain")), (.reference, t("Reference"))])
+                .accessibilityLabel(t("From"))
 
             switch model.source {
             case .onePassword: onePassword
