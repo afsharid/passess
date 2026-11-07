@@ -190,8 +190,16 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         {
             let model = ConnectModel(mode: .create, list: list, cli: nil, source: source)
             if source == .onePassword { model.seedBrowse(opVaults, items: opItems, fields: opFields) }
+            if source == .bws { model.seedBWS(discovery) }
             return AnyView(ConnectView(model: model, onCancel: {}))
         }
+    }
+    let bwsNotSetUp = decode(Discovery.self, #"{"backends": [{"scheme": "bws", "ok": false, "state": "not-set-up"}], "secrets": []}"#)
+    func addingBWSNotSetUp() -> AnyView {
+        let model = ConnectModel(mode: .create, list: list, cli: nil, source: .bws)
+        model.seedBWS(bwsNotSetUp)
+        model.onOpenVault = {}
+        return AnyView(ConnectView(model: model, onCancel: {}))
     }
     let brokenConfig = decode(Doctor.self, """
     {"version": "v0.9.0", "ok": false, "config": {"path": "/Users/you/.config/passess/config.toml", "ok": false,
@@ -258,6 +266,8 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         }, true),
         ("panel-broken-config", panel { $0.seed(doctor: brokenConfig, agent: agentOff) }, true),
         ("connect-add-1password", adding(.onePassword), true),
+        ("connect-add-bws", adding(.bws), true),
+        ("connect-add-bws-not-set-up", addingBWSNotSetUp, false),
         ("connect-add-keychain", adding(.keychain), false),
         ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
                                           approving: true, secretList: list, discovery: discovery) }, true),

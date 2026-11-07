@@ -94,7 +94,7 @@ struct OnboardingView: View {
 
     private var secretsDetail: String {
         secretCount > 0 ? t(secretCount == 1 ? "%ld secret" : "%ld secrets", secretCount)
-            : t("From 1Password, the keychain or a reference")
+            : t("From 1Password, bws, the keychain or a reference")
     }
 
     private var rows: [AgentRow] {

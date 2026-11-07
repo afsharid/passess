@@ -15,7 +15,7 @@ final class ConnectModel: ObservableObject {
 
     /// Where a new secret comes from, in the Add tab.
     enum Source: Hashable {
-        case onePassword, keychain, reference
+        case onePassword, bws, keychain, reference
     }
 
     let mode: Mode
@@ -50,13 +50,22 @@ final class ConnectModel: ObservableObject {
     @Published private(set) var browseError: String?
     @Published var value = ""
     @Published var reference = ""
+    // The bws tab: what `passess discover` found in bws that passess does not
+    // use yet, and the one picked. Names and references only.
+    @Published private(set) var discovery: Discovery?
+    @Published private(set) var bwsRef: String?
+    @Published var bwsFilter = ""
+    /// Opens the window that takes the bws machine token.
+    var onOpenVault: (() -> Void)?
     private var nameTyped = false
     private let browse = DispatchQueue(label: "passess.bar.browse")
 
     /// tick is an agent ticked from the start: the app whose row asked to
     /// connect this key. Saving still takes the user's Touch ID.
-    init(mode: Mode, list: SecretList?, cli: Passess?, valueCLI: Passess? = nil, source: Source = .onePassword, tick: String? = nil) {
+    init(mode: Mode, list: SecretList?, cli: Passess?, valueCLI: Passess? = nil, source: Source = .onePassword,
+         discovery: Discovery? = nil, tick: String? = nil) {
         self.mode = mode
+        self.discovery = discovery
         agents = list?.agents ?? []
         taken = list?.secrets.map(\.name) ?? []
         self.cli = cli
@@ -105,6 +114,58 @@ final class ConnectModel: ObservableObject {
         source = next
         browseError = nil
         if next == .onePassword && vaults.isEmpty { loadVaults() }
+        if next == .bws && discovery == nil { loadBWS() }
+    }
+
+    /// `passess discover`: it asks bws, which sends its values along with the
+    /// names (passess drops them).
+    func loadBWS() {
+        guard let cli = cli else { return }
+        loading = true
+        browseError = nil
+        browse.async {
+            do {
+                let got = try cli.discover()
+                DispatchQueue.main.async {
+                    self.loading = false
+                    self.discovery = got
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.loading = false
+                    self.browseError = String(describing: error)
+                }
+            }
+        }
+    }
+
+    /// bws as discover saw it: why it cannot list, or nil.
+    var bwsProblem: String? {
+        guard let d = discovery else { return nil }
+        if d.bwsNotSetUp { return t("bws is not connected yet: passess needs its machine token.") }
+        if let b = d.backends.first(where: { $0.scheme == "bws" }), !b.ok {
+            return b.error ?? t("bws did not answer.")
+        }
+        return nil
+    }
+
+    /// The bws secrets passess does not use yet, filtered, new ones first.
+    var shownBWS: [Discovery.Found] {
+        guard let d = discovery else { return [] }
+        return foundRows(d).map(\.found).filter {
+            matches($0.key, filter: bwsFilter) || matches($0.project, filter: bwsFilter)
+        }
+    }
+
+    func pickBWS(_ found: Discovery.Found) {
+        bwsRef = found.ref
+        if !nameTyped { name = found.name }
+    }
+
+    /// Fixed bws state for previews: nothing is asked.
+    func seedBWS(_ discovery: Discovery) {
+        self.discovery = discovery
+        if let first = shownBWS.first { pickBWS(first) }
     }
 
     /// `passess browse op`: 1Password may ask the user to unlock it first.
@@ -185,6 +246,7 @@ final class ConnectModel: ObservableObject {
         guard creating else { return nil }
         switch source {
         case .onePassword: return fieldRef == nil ? t("Pick a field.") : nil
+        case .bws: return bwsRef == nil ? t("Pick a secret.") : nil
         case .keychain:
             if valueCLI == nil {
                 return t("This copy of the app has no passess inside it, so it cannot store a value. Run `passess add NAME --keychain` in a terminal.")
@@ -206,7 +268,7 @@ final class ConnectModel: ObservableObject {
         switch mode {
         case let .add(found): return t("Source: %@", found.project.isEmpty ? "bws" : t("%@ · %@", "bws", found.project))
         case let .edit(secret): return t("Source: %@", secret.refs?.first.map(sourceText) ?? secret.backends.joined(separator: ", "))
-        case .create: return t("From 1Password, the keychain or a reference")
+        case .create: return t("From 1Password, bws, the keychain or a reference")
         }
     }
 
@@ -248,7 +310,12 @@ final class ConnectModel: ObservableObject {
         let name = name, approve = approve, clients = clientsArgument(picked, agents: agents), mode = mode
         let hosts = hostsChange
         let source = source, valueCLI = valueCLI
-        let ref = source == .onePassword ? fieldRef : reference.trimmingCharacters(in: .whitespaces)
+        let ref: String?
+        switch source {
+        case .onePassword: ref = fieldRef
+        case .bws: ref = bwsRef
+        case .keychain, .reference: ref = reference.trimmingCharacters(in: .whitespaces)
+        }
         let reason = adding ? t("connect %@ to coding agents", name) : t("change who may use %@", name)
         busy = true // through the prompt too: a second Save would ask and run twice
         Authenticator.confirm(reason) { ok in
@@ -488,6 +555,7 @@ struct AddSourceView: View {
         VStack(alignment: .leading, spacing: 10) {
             Picker(t("From"), selection: Binding(get: { model.source }, set: { model.pickSource($0) })) {
                 Text(verbatim: "1Password").tag(ConnectModel.Source.onePassword)
+                Text(verbatim: "bws").tag(ConnectModel.Source.bws)
                 Text(t("Keychain")).tag(ConnectModel.Source.keychain)
                 Text(t("Reference")).tag(ConnectModel.Source.reference)
             }
@@ -497,6 +565,7 @@ struct AddSourceView: View {
 
             switch model.source {
             case .onePassword: onePassword
+            case .bws: bws
             case .keychain: keychain
             case .reference: reference
             }
@@ -560,6 +629,79 @@ struct AddSourceView: View {
                 Text(t("Asking 1Password… it may ask you to unlock it."))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// bws: the secrets it holds that passess does not use yet, picked by
+    /// name. A bws that is not set up offers the vault window instead.
+    @ViewBuilder
+    private var bws: some View {
+        if let problem = model.browseError {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Tone.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                Button(t("Try again"), action: model.loadBWS)
+                    .buttonStyle(.borderless)
+            }
+        } else if model.loading {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(t("Asking bws…"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        } else if let problem = model.bwsProblem {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(problem, systemImage: "lock.slash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Tone.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                if model.discovery?.bwsNotSetUp == true, let open = model.onOpenVault {
+                    Button(t("Connect your vault…"), action: open)
+                        .buttonStyle(.borderless)
+                } else {
+                    Button(t("Try again"), action: model.loadBWS)
+                        .buttonStyle(.borderless)
+                }
+            }
+        } else if let d = model.discovery {
+            if d.secrets.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(t("passess already has every secret bws holds."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button(t("Try again"), action: model.loadBWS)
+                        .buttonStyle(.borderless)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField(t("Filter secrets"), text: Binding(get: { model.bwsFilter }, set: { model.bwsFilter = $0 }))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(model.shownBWS) { f in
+                                PickRow(title: f.key, detail: f.project.isEmpty ? "bws" : f.project,
+                                        picked: model.bwsRef == f.ref) { model.pickBWS(f) }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 150)
+                    .surface()
+                    Text(t("Only names reach the app; passess reads the value when an agent needs it."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
