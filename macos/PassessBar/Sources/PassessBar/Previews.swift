@@ -201,6 +201,12 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         model.onOpenVault = {}
         return AnyView(ConnectView(model: model, onCancel: {}))
     }
+    let bwsAllUsed = decode(Discovery.self, #"{"backends": [{"scheme": "bws", "ok": true}], "secrets": []}"#)
+    func addingBWSAllUsed() -> AnyView {
+        let model = ConnectModel(mode: .create, list: list, cli: nil, source: .bws)
+        model.seedBWS(bwsAllUsed)
+        return AnyView(ConnectView(model: model, onCancel: {}))
+    }
     let brokenConfig = decode(Doctor.self, """
     {"version": "v0.9.0", "ok": false, "config": {"path": "/Users/you/.config/passess/config.toml", "ok": false,
      "error": "/Users/you/.config/passess/config.toml:4:14: invalid TOML"}, "secrets": 0, "profiles": 0, "backends": [],
@@ -268,6 +274,7 @@ private func samples() -> [(String, () -> AnyView, Bool)] {
         ("connect-add-1password", adding(.onePassword), true),
         ("connect-add-bws", adding(.bws), true),
         ("connect-add-bws-not-set-up", addingBWSNotSetUp, false),
+        ("connect-add-bws-all-used", addingBWSAllUsed, true),
         ("connect-add-keychain", adding(.keychain), false),
         ("panel-healthy", panel { $0.seed(doctor: healthy, agent: agentOn, harnesses: agents, check: allResolve, checkedAt: now,
                                           approving: true, secretList: list, discovery: discovery) }, true),

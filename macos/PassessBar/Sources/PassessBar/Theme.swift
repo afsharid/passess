@@ -272,3 +272,36 @@ extension View {
         modifier(Surface(highlighted: highlighted))
     }
 }
+
+/// Tabs that each take an equal share of the width. The system's segmented
+/// control sizes each segment to its text and widens the selected one, so
+/// Turkish titles grew wider than the window and pushed its content aside.
+struct TabBar<Tab: Hashable>: View {
+    @Binding var selection: Tab
+    let tabs: [(Tab, String)]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(tabs.indices, id: \.self) { i in
+                let (tab, title) = tabs[i]
+                let selected = tab == selection
+                Button { selection = tab } label: {
+                    Text(verbatim: title)
+                        .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(selected ? Brand.tint : Color.clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+    }
+}
