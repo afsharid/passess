@@ -223,13 +223,32 @@ func references(name string, lookPath func(string) (string, error)) []string {
 	return out
 }
 
+// installedAs reports whether the system installs st under name: an entry in
+// referenceDirs by that name is st itself. Only the system writes there, so
+// a file the caller copied or renamed does not pass.
+func installedAs(name string, st os.FileInfo) bool {
+	for _, d := range referenceDirs {
+		if rst, err := os.Stat(filepath.Join(d, name)); err == nil && os.SameFile(st, rst) {
+			return true
+		}
+	}
+	return false
+}
+
 // copyOf reports whether path is the same file as, or byte-identical to, a
 // denied interpreter found on PATH or in referenceDirs.
+//
+// A multi-call binary the system installs under many names (uutils
+// coreutils: sleep, ls and base32 are one file) runs the applet its name
+// says, so the system's own sleep is not a copy of base32. That holds only
+// for one file the system links under both names: a byte-identical copy, or
+// a link under a name the system does not install it as, still counts.
 func copyOf(path string, lookPath func(string) (string, error)) (family, original string) {
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
 		return "", ""
 	}
+	system := installedAs(filepath.Base(path), st)
 	var sum []byte
 	for _, name := range lookups {
 		f := Family(name)
@@ -242,6 +261,9 @@ func copyOf(path string, lookPath func(string) (string, error)) (family, origina
 				continue
 			}
 			if os.SameFile(st, ost) {
+				if system && installedAs(filepath.Base(orig), ost) {
+					continue // one multi-call binary under two system names
+				}
 				return f, orig
 			}
 			if sum == nil {

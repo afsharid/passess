@@ -31,7 +31,11 @@ Names fold into families before comparison: every shell is `sh` (Debian's `/bin/
 dash, Fedora's is bash, Alpine's is busybox, and allowing a shell should not depend on
 which one), `python3.14` is `python`, `nodejs` is `node`. For a multi-call binary such as
 busybox the applet named by argv[0] decides, so `ls` on Alpine stays an ordinary program
-while `sh` and `busybox` itself stay denied.
+while `sh` and `busybox` itself stay denied. The same holds for one file the system
+links under many names in its own directories (uutils coreutils on recent Ubuntu, where
+`sleep`, `ls` and `base32` are one file): the system's `sleep` is not a copy of
+`base32`. A byte-identical copy, or a link under a name the system does not install it
+as, still counts as a copy.
 
 ## Consequences
 
