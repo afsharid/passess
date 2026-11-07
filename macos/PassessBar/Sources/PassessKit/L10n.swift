@@ -116,6 +116,7 @@ let turkish: [String: String] = [
     "instructions": "talimatlar",
     "no instructions": "talimat yok",
     "instructions outdated": "talimatlar eski",
+    "instructions markers broken": "talimat işaretleri bozuk",
     "%ld MCP server": "%ld MCP sunucusu",
     "%ld MCP servers": "%ld MCP sunucusu",
     "Nothing set up": "Hiçbir şey kurulu değil",

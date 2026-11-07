@@ -34,7 +34,23 @@ const (
 	BlockMissing = "missing"
 	BlockDrift   = "drift" // present, but not the current text
 	BlockNone    = "none"  // the harness reads no user-level instructions file
+	// The markers do not pair up: a start without an end, an end without a
+	// start, or more than one block. passess does not guess which text is
+	// its own; the user fixes the file.
+	BlockBroken = "broken"
 )
+
+// broken reports whether doc has markers that do not make exactly one block.
+func broken(doc string) bool {
+	starts, ends := strings.Count(doc, BlockStart), strings.Count(doc, BlockEnd)
+	if starts == 0 && ends == 0 {
+		return false
+	}
+	if starts != 1 || ends != 1 {
+		return true
+	}
+	return strings.Index(doc, BlockEnd) < strings.Index(doc, BlockStart)
+}
 
 // span locates the block in doc; ok is false when either marker is missing.
 func span(doc string) (start, end int, ok bool) {
@@ -51,6 +67,9 @@ func span(doc string) (start, end int, ok bool) {
 
 // BlockState reports whether doc carries the current block.
 func BlockState(doc string) string {
+	if broken(doc) {
+		return BlockBroken
+	}
 	s, e, ok := span(doc)
 	switch {
 	case !ok:

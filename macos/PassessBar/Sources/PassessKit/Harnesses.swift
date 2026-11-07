@@ -110,6 +110,7 @@ public func codingAgents(_ status: HarnessStatus, running: (String) -> Bool = { 
         case "ok": parts.append(t("instructions"))
         case "missing": parts.append(t("no instructions")); attention = true
         case "drift": parts.append(t("instructions outdated")); attention = true
+        case "broken": parts.append(t("instructions markers broken")); attention = true
         default: break
         }
         let servers = h.servers ?? []

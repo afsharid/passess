@@ -345,8 +345,13 @@ func instructionsChange(verb, state string) bool {
 	return verb == "install" && state != harness.BlockOK
 }
 
-// settled reports whether a harness needs nothing from passess.
+// settled reports whether a harness needs nothing from passess. Missing hooks
+// are a choice (--no-hooks, or the Claude Code plugin registers them); a
+// passess handler that drifted is not.
 func settled(r harnessReport) bool {
+	if r.Hooks == harness.StateDrift {
+		return false
+	}
 	for _, s := range r.Servers {
 		if s.State != harness.StateOK {
 			return false
@@ -562,6 +567,9 @@ func writeInstructions(path, verb string) error {
 	doc, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if harness.BlockState(string(doc)) == harness.BlockBroken {
+		return fmt.Errorf("%s: the %q and %q markers do not make one block; fix them by hand", path, harness.BlockStart, harness.BlockEnd)
 	}
 	perm := os.FileMode(0o644)
 	if st, err := os.Stat(path); err == nil {
