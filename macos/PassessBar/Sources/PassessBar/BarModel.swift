@@ -36,7 +36,9 @@ final class BarModel: ObservableObject {
     private let work = DispatchQueue(label: "passess.bar.work")
     private let vault = DispatchQueue(label: "passess.bar.vault") // discover asks the vault: not behind refresh
     private var refreshing = false
+    private var refreshAgain = false // refresh was asked for while one ran
     private var discovering = false
+    private var discoverAgain: TimeInterval? // discover was asked for while one ran
     private var discoveredAt: Date?
     private var timer: Timer?
     private var frozen = false // a preview: seeded state, nothing runs
@@ -88,8 +90,15 @@ final class BarModel: ObservableObject {
 
     /// `passess discover`, at most once per maxAge seconds: it asks the vault,
     /// which sends its values along with the names (passess drops them).
+    /// A call while one runs is not dropped: the one running may predate the
+    /// change the caller made (a secret just connected), so it runs again
+    /// after, with the smallest maxAge asked for meanwhile.
     func discover(maxAge: TimeInterval) {
-        guard !frozen, !discovering, let cli = Passess.locate() else { return }
+        guard !frozen, let cli = Passess.locate() else { return }
+        if discovering {
+            discoverAgain = min(discoverAgain ?? maxAge, maxAge)
+            return
+        }
         if let at = discoveredAt, Date().timeIntervalSince(at) < maxAge { return }
         discovering = true
         vault.async {
@@ -98,6 +107,10 @@ final class BarModel: ObservableObject {
                 self.discovering = false
                 self.discoveredAt = Date()
                 self.discovery = found
+                if let again = self.discoverAgain {
+                    self.discoverAgain = nil
+                    self.discover(maxAge: again)
+                }
             }
         }
     }
@@ -429,8 +442,14 @@ final class BarModel: ObservableObject {
     }
 
 
+    /// A call while one runs is not dropped: it runs once more after, since
+    /// the one running may predate the change the caller made.
     func refresh() {
-        guard !frozen, !refreshing else { return }
+        guard !frozen else { return }
+        if refreshing {
+            refreshAgain = true
+            return
+        }
         guard let cli = Passess.locate() else {
             doctor = nil
             failure = Passess.Failure.notFound.description
@@ -458,6 +477,10 @@ final class BarModel: ObservableObject {
                 self.harnesses = harnesses
                 self.secretList = list
                 self.updateAgent()
+                if self.refreshAgain {
+                    self.refreshAgain = false
+                    self.refresh()
+                }
             }
         }
     }
@@ -473,7 +496,7 @@ final class BarModel: ObservableObject {
     }
 
     func runCheck() {
-        guard let cli = Passess.locate(), !checking else { return }
+        guard !frozen, let cli = Passess.locate(), !checking else { return }
         checking = true
         work.async {
             let result = try? cli.check()
@@ -487,7 +510,7 @@ final class BarModel: ObservableObject {
 
     /// `passess agent start`, `lock` or `stop`, with the CLI harnesses run.
     func agentCommand(_ subcommand: String) {
-        guard let cli = Passess.locateForAgent(), !agentBusy else { return }
+        guard !frozen, let cli = Passess.locateForAgent(), !agentBusy else { return }
         agentBusy = true
         work.async {
             try? cli.agent(subcommand)

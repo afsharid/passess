@@ -23,9 +23,9 @@ final class VaultModel: ObservableObject {
 
     func save() {
         guard canSave, let cli = cli else { return }
+        busy = true // through the prompt too: a second Save would ask and store twice
         Authenticator.confirm(t("store the token that opens your vault")) { ok in
-            guard ok else { return }
-            self.busy = true
+            guard ok else { self.busy = false; return }
             self.error = nil
             let token = self.token.trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.global().async {

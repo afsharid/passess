@@ -250,8 +250,9 @@ final class ConnectModel: ObservableObject {
         let source = source, valueCLI = valueCLI
         let ref = source == .onePassword ? fieldRef : reference.trimmingCharacters(in: .whitespaces)
         let reason = adding ? t("connect %@ to coding agents", name) : t("change who may use %@", name)
+        busy = true // through the prompt too: a second Save would ask and run twice
         Authenticator.confirm(reason) { ok in
-            guard ok else { return }
+            guard ok else { self.busy = false; return }
             let value = self.value
             if source == .keychain { self.value = "" } // typed again if the store fails
             self.perform {
@@ -281,8 +282,9 @@ final class ConnectModel: ObservableObject {
         alert.addButton(withTitle: t("Remove"))
         alert.addButton(withTitle: t("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        busy = true
         Authenticator.confirm(t("remove %@ from passess", secret.name)) { ok in
-            guard ok else { return }
+            guard ok else { self.busy = false; return }
             self.perform { try cli.remove(name: secret.name) }
         }
     }

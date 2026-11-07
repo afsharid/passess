@@ -174,6 +174,21 @@ func TestStatusExitCodeAndUnknownHarness(t *testing.T) {
 	}
 }
 
+// A drifted passess handler is something to fix; missing hooks are a choice.
+func TestSettledHooks(t *testing.T) {
+	base := harnessReport{InstructionsState: harness.BlockOK}
+	for state, want := range map[string]bool{
+		harness.StateOK: true, harness.StateMissing: true, "none": true, "unavailable": true,
+		harness.StateDrift: false,
+	} {
+		r := base
+		r.Hooks = state
+		if got := settled(r); got != want {
+			t.Errorf("hooks %q: settled %v, want %v", state, got, want)
+		}
+	}
+}
+
 // TestLiveInstall runs install --apply and uninstall --apply end to end with
 // the real claude and codex CLIs against a throwaway HOME. Opt in with
 // PASSESS_LIVE_HARNESS=1.

@@ -148,6 +148,17 @@ func TestInstructionsBlock(t *testing.T) {
 	if BlockState(doc) != BlockMissing || BlockState(doc+"\n"+BlockStart+"\nold\n"+BlockEnd) != BlockDrift {
 		t.Fatal("block states")
 	}
+	block := BlockStart + "\nold\n" + BlockEnd
+	for _, bad := range []string{
+		doc + BlockStart + "\nno end\n",
+		doc + "no start\n" + BlockEnd,
+		doc + BlockEnd + "\n" + BlockStart,
+		doc + block + "\n" + block,
+	} {
+		if got := BlockState(bad); got != BlockBroken {
+			t.Errorf("BlockState(%q) = %q, want %q", bad, got, BlockBroken)
+		}
+	}
 }
 
 func TestBackup(t *testing.T) {

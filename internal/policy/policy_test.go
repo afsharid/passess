@@ -155,6 +155,58 @@ func TestMultiCallBinary(t *testing.T) {
 	}
 }
 
+// TestSystemMultiCallHardlinks builds the uutils layout of recent Ubuntu: one
+// file the system links as base64 and as sleep. The system's sleep runs
+// sleep; a copy of that file, or a link to it under another name, does not
+// get the same pass.
+func TestSystemMultiCallHardlinks(t *testing.T) {
+	root := t.TempDir()
+	sys := filepath.Join(root, "bin")
+	other := filepath.Join(root, "home")
+	for _, d := range []string{sys, other} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := referenceDirs
+	referenceDirs = []string{sys}
+	t.Cleanup(func() { referenceDirs = saved })
+
+	multi := []byte("\x7fELF not really coreutils")
+	if err := os.WriteFile(filepath.Join(sys, "base64"), multi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []string{filepath.Join(sys, "sleep"), filepath.Join(other, "mytool")} {
+		if err := os.Link(filepath.Join(sys, "base64"), link); err != nil {
+			t.Skipf("no hard links here: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(other, "sleep"), multi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	look := func(name string) (string, error) {
+		if strings.Contains(name, "/") {
+			return name, nil
+		}
+		return filepath.Join(sys, name), nil
+	}
+	check := func(path string) (Decision, Program) {
+		p, err := Inspect(path, look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Check("TOKEN", p, nil), p
+	}
+	if d, p := check(filepath.Join(sys, "sleep")); !d.Allowed {
+		t.Fatalf("the system's sleep refused (families %v): %+v", p.Families, d)
+	}
+	for _, path := range []string{filepath.Join(sys, "base64"), filepath.Join(other, "mytool"), filepath.Join(other, "sleep")} {
+		if d, p := check(path); d.Allowed {
+			t.Errorf("%s allowed (families %v)", path, p.Families)
+		}
+	}
+}
+
 func TestEffective(t *testing.T) {
 	if got := Effective(nil, nil); got != nil {
 		t.Fatalf("no lists: %v", got)

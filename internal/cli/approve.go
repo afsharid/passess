@@ -169,9 +169,20 @@ func (s *agentServer) pendingFor(keys []approvalKey, sums map[approvalKey]string
 // approvers the question is gone, and writes the outcome to the audit log.
 func (s *agentServer) settle(p *pendingAsk, allow bool, why, outcome string) {
 	s.mu.Lock()
+	ok := s.claim(p, allow, why)
+	approvers := s.approverList()
+	s.mu.Unlock()
+	if ok {
+		s.finish(p, allow, outcome, approvers)
+	}
+}
+
+// claim takes p out of the open questions and records the answer, remembering
+// an Allow. It reports false when p was settled already. The caller holds
+// s.mu, so an answer and a lock cannot interleave.
+func (s *agentServer) claim(p *pendingAsk, allow bool, why string) bool {
 	if s.pending[p.ask.ID] != p {
-		s.mu.Unlock()
-		return
+		return false
 	}
 	delete(s.pending, p.ask.ID)
 	p.timer.Stop()
@@ -182,8 +193,12 @@ func (s *agentServer) settle(p *pendingAsk, allow bool, why, outcome string) {
 			s.approved[k] = approval{anchor: *p.ask.Anchor, until: until, sum: p.sums[k]}
 		}
 	}
-	approvers := s.approverList()
-	s.mu.Unlock()
+	return true
+}
+
+// finish wakes whoever waits on a claimed p, tells the approvers the question
+// is gone, and writes the outcome to the audit log. It runs without s.mu.
+func (s *agentServer) finish(p *pendingAsk, allow bool, outcome string, approvers []*agent.Conn) {
 	close(p.done)
 	if allow {
 		s.prune()
@@ -207,17 +222,23 @@ func (s *agentServer) approverList() []*agent.Conn {
 	return out
 }
 
-// dropApprovals forgets every Allow and refuses every open question.
+// dropApprovals forgets every Allow and refuses every open question. Both
+// happen under one hold of s.mu: an approver's Allow that arrives meanwhile
+// finds its question gone and is not remembered past the lock.
 func (s *agentServer) dropApprovals(why string) {
 	s.mu.Lock()
-	s.approved = map[approvalKey]approval{}
 	open := make([]*pendingAsk, 0, len(s.pending))
 	for _, p := range s.pending {
 		open = append(open, p)
 	}
+	for _, p := range open {
+		s.claim(p, false, why)
+	}
+	s.approved = map[approvalKey]approval{}
+	approvers := s.approverList()
 	s.mu.Unlock()
 	for _, p := range open {
-		s.settle(p, false, why, "cancelled")
+		s.finish(p, false, "cancelled", approvers)
 	}
 }
 
@@ -515,24 +536,32 @@ func approveLoop(st *Streams, c *agent.Conn, in io.Reader, out io.Writer) int {
 			frames <- f
 		}
 	}()
-	lines := make(chan string)
+	// Each line carries when it was read, so an answer typed for a question
+	// that was settled elsewhere is not taken as the answer to the next one.
+	type typed struct {
+		text string
+		at   time.Time
+	}
+	lines := make(chan typed)
 	go func() {
 		defer close(lines)
 		sc := bufio.NewScanner(in)
 		for sc.Scan() {
-			lines <- sc.Text()
+			lines <- typed{sc.Text(), time.Now()}
 		}
 	}()
 
 	var queue []agent.AskFor
 	settled := map[string]bool{}
 	var current *agent.AskFor
+	var shown time.Time // when current was printed
 	for {
 		for current == nil && len(queue) > 0 {
 			a := queue[0]
 			queue = queue[1:]
 			if !settled[a.ID] {
 				current = &a
+				shown = time.Now() // before printing: a reply to the prompt always counts
 				printAsk(out, a)
 			}
 		}
@@ -559,7 +588,12 @@ func approveLoop(st *Streams, c *agent.Conn, in io.Reader, out io.Writer) int {
 			if current == nil {
 				continue
 			}
-			allow := strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes")
+			if line.at.Before(shown) {
+				fmt.Fprintln(out, "  (that answer came before this question; answer it again)")
+				continue
+			}
+			answer := strings.TrimSpace(line.text)
+			allow := strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes")
 			if err := c.Write(agent.Frame{Answer: &agent.Answer{ID: current.ID, Allow: allow}}); err != nil {
 				return failf(st, ExitUnavailable, "%v", err)
 			}
