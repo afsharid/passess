@@ -291,12 +291,18 @@ final class BarModel: ObservableObject {
         show(ConnectModel(mode: .add(found), list: secretList, cli: Passess.locate(), tick: tick))
     }
 
-    /// The Add tab: a new secret from 1Password, the keychain or a typed
-    /// reference. 1Password first when doctor finds it usable.
+    /// The Add tab: a new secret from 1Password, bws, the keychain or a typed
+    /// reference. It opens on the first of 1Password and bws that doctor
+    /// finds usable, else on the keychain.
     func openAdd() {
-        let op = doctor?.backends.first { $0.scheme == "op" }?.ok == true
-        show(ConnectModel(mode: .create, list: secretList, cli: Passess.locate(), valueCLI: Passess.bundled(),
-                          source: op ? .onePassword : .keychain))
+        let usable = { (scheme: String) in self.doctor?.backends.first { $0.scheme == scheme }?.ok == true }
+        let source: ConnectModel.Source = usable("op") ? .onePassword : usable("bws") ? .bws : .keychain
+        let model = ConnectModel(mode: .create, list: secretList, cli: Passess.locate(), valueCLI: Passess.bundled(),
+                                 source: source, discovery: discovery)
+        model.onOpenVault = { [weak self, weak model] in
+            self?.openVault { model?.loadBWS() }
+        }
+        show(model)
     }
 
     func openEdit(_ secret: SecretList.Secret, tick: String? = nil) {
@@ -310,8 +316,9 @@ final class BarModel: ObservableObject {
         return discovery?.bwsNotSetUp ?? false
     }
 
-    /// The window that takes the bws machine token.
-    func openVault() {
+    /// The window that takes the bws machine token. then runs once the token
+    /// is stored.
+    func openVault(then: (() -> Void)? = nil) {
         vaultPanel?.close()
         let model = VaultModel(cli: Passess.bundled()) // never one from the search path: it gets the token
         let panel = VaultPanel(model: model) { [weak self] in self?.vaultPanel = nil }
@@ -319,6 +326,7 @@ final class BarModel: ObservableObject {
             panel?.close()
             self?.refresh()
             self?.discover(maxAge: 0)
+            then?()
         }
         vaultPanel = panel
         NSApp.activate(ignoringOtherApps: true)
