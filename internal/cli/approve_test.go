@@ -549,3 +549,28 @@ func TestAskIDsDifferAcrossAgents(t *testing.T) {
 		t.Fatalf("two agents gave their first question the same ID %q", a)
 	}
 }
+
+// An Allow that races a lock is either wiped by the lock or refused: it never
+// outlives it.
+func TestAllowDoesNotOutliveLock(t *testing.T) {
+	for i := 0; i < 500; i++ {
+		s := newAgentServer(nil, "", nil)
+		s.log = &auditLog{path: filepath.Join(t.TempDir(), "audit.jsonl"), stderr: io.Discard}
+		anchor := agent.Proc{PID: 1, Name: "launchd"}
+		key := approvalKey{secret: "X", program: "/bin/true", pid: 1}
+		s.mu.Lock()
+		p, _ := s.pendingFor([]approvalKey{key}, nil, agent.AskFor{Secrets: []string{"X"}, Anchor: &anchor}, time.Hour, time.Hour)
+		s.mu.Unlock()
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); s.settle(p, true, "allowed", "allowed") }()
+		go func() { defer wg.Done(); s.dropApprovals("the agent was locked") }()
+		wg.Wait()
+		s.mu.Lock()
+		n := len(s.approved)
+		s.mu.Unlock()
+		if n != 0 {
+			t.Fatalf("run %d: %d Allows survived the lock", i, n)
+		}
+	}
+}
