@@ -440,6 +440,25 @@ func TestUnknownDirectory(t *testing.T) {
 	}
 }
 
+// $'…' is static text the shell decodes; a brace expansion of static
+// alternatives is every one of them.
+func TestAnsiCQuotingAndBraces(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat $'.env'`, `cat .e$'n'v`, `cat $'\x2eenv'`, `cat $'\056env'`, `cat $'\u002eenv'`, `cat $'.e\156v'`,
+		`cat $'\x2e\x65nv'`, `cat ~/.aws/$'credentials'`, `echo x > ~/.config/pass$'ess'/config.toml`, `$'passess' agent stop`,
+		`passess $'\x61dd' X --ref keychain://passess/X`, `cat {.env,x}`, `cat .env{,}`, `cat {a,.env}`, `cat {x,{y,.env}}`,
+		`cat {$X,.env}`, `cat .e{n,m}v`, `cat {.,x}env`, `tee {a,~/.config/passess/config.toml}`, `cat $'.env' $'x'`,
+		`cat ~/.ssh/id_$'rsa'`, `cd ~/.aws; cat cred$'entials'`, `cat $'.e'nv`,
+	}, []string{
+		`echo $'a\tb' > out.txt`, `cat $'README.md'`, `cat {a,b}.txt`, `cat $'.env.example'`, `echo {1..3}`, `echo $'\e[0m'`,
+		`cat $'.e\nv'`, `cat $'\\.env'`, `cat {a,b}{c,d}`, `echo $'it\'s'`, `cat $'\x2e'env.example`, `cat .en{x,y}`,
+		`cat $'not-env'`, `passess exec -s API_KEY -- echo $'a\tb'`, `echo {a,b}`, `cat {x,y}.md`, `cat $'\e'.env.sample`,
+	})
+	if got, want := ansiC(`a\x41\101\u00e9\n\q\c`), "aAA\u00e9\n\\q\\c"; got != want {
+		t.Errorf("ansiC decoded to %q, want %q", got, want)
+	}
+}
+
 // A function body is checked where the function is called, with the
 // directory in effect there; a coproc is a subshell.
 func TestFunctionBodiesAndCoproc(t *testing.T) {

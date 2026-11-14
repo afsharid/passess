@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
 
@@ -425,8 +426,7 @@ func checkShell(cmd string, at where, env Env) string {
 			case *syntax.CallExpr:
 				var args []string
 				for _, w := range n.Args {
-					ws, _ := literal(w, env) // a non-literal word stays "" and matches nothing
-					args = append(args, ws)
+					args = append(args, words(w, env)...) // a non-literal word stays "" and matches nothing
 				}
 				program := ""
 				if len(args) > 0 {
@@ -688,8 +688,9 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 	for _, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.SglQuoted:
-			if p.Dollar { // $'…' holds escapes the shell decodes, not the text itself
-				return "", false
+			if p.Dollar { // $'…' holds escapes the shell decodes
+				b.WriteString(ansiC(p.Value))
+				continue
 			}
 			b.WriteString(p.Value)
 		case *syntax.DblQuoted:
@@ -705,6 +706,144 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 		}
 	}
 	return b.String(), true
+}
+
+// ansiC decodes the escapes inside $'…' as the shell does: \a \b \e \f \n
+// \r \t \v \\ \' \" \?, \NNN octal, \xHH, \uHHHH, \UHHHHHHHH and \cX. An
+// escape it does not know stays as it is, and a NUL ends the text.
+func ansiC(s string) string {
+	var b strings.Builder
+	digits := func(i, max, base int) (n, used int) {
+		for used < max && i+used < len(s) {
+			d := strings.IndexByte("0123456789abcdef", s[i+used]|0x20)
+			if d < 0 || d >= base {
+				break
+			}
+			n, used = n*base+d, used+1
+		}
+		return n, used
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		e := s[i]
+		switch e {
+		case 'a', 'b', 'e', 'E', 'f', 'n', 'r', 't', 'v':
+			b.WriteByte(map[byte]byte{'a': 7, 'b': 8, 'e': 27, 'E': 27, 'f': 12, 'n': 10, 'r': 13, 't': 9, 'v': 11}[e])
+		case '\\', '\'', '"', '?':
+			b.WriteByte(e)
+		case '0', '1', '2', '3', '4', '5', '6', '7', 'x', 'u', 'U':
+			base, max, from := 8, 3, i
+			switch e {
+			case 'x':
+				base, max, from = 16, 2, i+1
+			case 'u':
+				base, max, from = 16, 4, i+1
+			case 'U':
+				base, max, from = 16, 8, i+1
+			}
+			n, used := digits(from, max, base)
+			if used == 0 {
+				b.WriteString(`\` + string(e))
+				continue
+			}
+			i = from + used - 1
+			switch {
+			case n == 0:
+				return b.String()
+			case e == 'u' || e == 'U':
+				if n > utf8.MaxRune {
+					n = utf8.RuneError
+				}
+				b.WriteRune(rune(n))
+			default:
+				b.WriteByte(byte(n & 0xff))
+			}
+		case 'c':
+			if i+1 < len(s) {
+				i++
+				b.WriteByte(s[i] & 0x1f)
+			} else {
+				b.WriteString(`\c`)
+			}
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(e)
+		}
+	}
+	return b.String()
+}
+
+// words are the words w becomes: itself, or for a brace expansion of static
+// alternatives one word for each. A word, or an alternative, not known here is "".
+func words(w *syntax.Word, env Env) []string {
+	if w == nil {
+		return nil
+	}
+	braced := slices.ContainsFunc(w.Parts, func(p syntax.WordPart) bool {
+		l, ok := p.(*syntax.Lit)
+		return ok && strings.Contains(l.Value, "{")
+	})
+	if braced {
+		split := &syntax.Word{Parts: slices.Clone(w.Parts)}
+		if syntax.SplitBraces(split) {
+			var out []string
+			for _, a := range expandParts(split.Parts, env) {
+				out = append(out, a.s)
+			}
+			return out
+		}
+	}
+	s, _ := literal(w, env)
+	return []string{s}
+}
+
+// maxAlternatives bounds a brace expansion; a larger one is not known.
+const maxAlternatives = 64
+
+type alternative struct {
+	s  string
+	ok bool // the text is known
+}
+
+// expandParts is the alternatives a word's parts make, brace expansions included.
+func expandParts(parts []syntax.WordPart, env Env) []alternative {
+	out := []alternative{{"", true}}
+	for _, part := range parts {
+		var opts []alternative
+		if be, isBrace := part.(*syntax.BraceExp); isBrace {
+			if be.Sequence { // {1..3}: the words are not made here
+				opts = []alternative{{"", false}}
+			}
+			for _, e := range be.Elems {
+				if !be.Sequence {
+					opts = append(opts, expandParts(e.Parts, env)...)
+				}
+			}
+		} else {
+			s, ok := literal(&syntax.Word{Parts: []syntax.WordPart{part}}, env)
+			opts = []alternative{{s, ok}}
+		}
+		var next []alternative
+		for _, a := range out {
+			for _, o := range opts {
+				next = append(next, alternative{a.s + o.s, a.ok && o.ok})
+			}
+		}
+		if len(next) > maxAlternatives {
+			return []alternative{{"", false}}
+		}
+		out = next
+	}
+	for i, a := range out {
+		if !a.ok {
+			out[i].s = ""
+		}
+	}
+	return out
 }
 
 // plain writes a literal part, or the value of a locator, to b.
