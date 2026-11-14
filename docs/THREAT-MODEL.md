@@ -33,16 +33,15 @@ where the protection stops. Read the last section before relying on it.
   credential file reached the transcript despite a PreToolUse hook), pasted text,
   `@`-mentions, subagent results, compaction. Hooks stop the obvious mistakes early and
   suggest the right command; they are not what keeps a value out of the context.
-- **Allowing `curl` means allowing every host.** A secret whose allow list contains
-  `curl` can be sent through `exec` to any URL the agent chooses. `passess http` closes
-  that for secrets that name their `hosts`: passess sends the request itself, only to
-  those hosts, over https, and follows redirects only among them, and no child process
-  holds the value. It ignores the caller's proxy variables and `SSL_CERT_FILE` /
-  `SSL_CERT_DIR`, so a proxy the caller names cannot read the request; the same holds
-  for the remote MCP bridge and the Vault client. It binds the host, not what the request does there: an agent can
-  still use a token for anything the API allows it. Programs other than curl (gh, a
-  cloud CLI) reach their hosts through `exec` as before; a transparent proxy for them
-  is future work.
+- **Allowing `curl` means allowing every host.** A secret whose allow list contains `curl`
+  can be sent through `exec` to any URL the agent chooses. `passess http` closes that for
+  secrets that name their `hosts`: passess sends the request itself, only to those hosts,
+  over https, and follows redirects only among them, and no child process holds the value.
+  It ignores the caller's proxy variables and `SSL_CERT_FILE` / `SSL_CERT_DIR`, so a proxy
+  the caller names cannot read the request; the same holds for the remote MCP bridge and
+  the Vault client. It binds the host, not what the request does there: an agent can still
+  use a token for anything the API allows it. Programs other than curl (gh, a cloud CLI)
+  reach their hosts through `exec` as before; a transparent proxy for them is future work.
 - **Keychain ACLs do not stop the same user.** Any same-user process that shells out to
   `security` can read an item that `security` is trusted for. Binding the bootstrap
   credential to a signed passess binary is planned, and even then T6 stays out of scope.
@@ -108,12 +107,14 @@ where the protection stops. Read the last section before relying on it.
   a newer agent that way, which forgets the cache and the approvals, as `agent lock`
   does. That is part of T5, not a hard line: what the hooks cannot parse (a script, an
   interpreter one-liner that builds the path) still gets through.
-- **A clients list holds the agents passess recognizes.** An agent is seen by a marker
-  in its commands' environment or by its executable among their ancestors. A command
-  that clears the markers and detaches from the agent (a daemonized child whose parent
-  is now launchd) is seen as no agent and keeps only the secret's allow list. So is an
-  agent passess does not know. Like the allow lists, `clients` narrows an agent that
-  uses passess; one that attacks it is T6.
+- **A clients list holds the agents passess recognizes.** An agent is seen by a marker in
+  its commands' environment or by its executable among their ancestors. A command that
+  clears the markers and detaches from the agent (a daemonized child whose parent is now
+  launchd) is seen as no agent and keeps only the secret's allow list. So is an agent
+  passess does not know. A chain of more than 64 processes, or a peer whose process
+  passess cannot read, may hide an agent: it is an unidentified caller, which no clients
+  list names, so a secret that has a clients list refuses it. Like the allow lists,
+  `clients` narrows an agent that uses passess; one that attacks it is T6.
 - **The agent answers whether a text holds one of its values.** Hooks send tool output
   to it for masking, and so could any same-user process, with a guess. For a short,
   guessable value, a password, that is an oracle. Reaching the socket at all is T6.
@@ -125,14 +126,14 @@ where the protection stops. Read the last section before relying on it.
 - **Approvals stop an agent that uses passess, not one that attacks it.** Any process
   running as the user can connect to the agent as an approver, and so could approve its
   own requests. The agent refuses approvers with a harness executable among their
-  ancestors, whatever runs in between (`script`, `timeout`, an interpreter), and one
-  whose chain passess cannot follow to the end (more than 64 processes deep, or a peer that has gone or has no pid), and
-  `passess agent approve` refuses when it sees a harness, by a marker or among its
-  ancestors. To get through, a process has to detach from its harness first (a
-  daemonized child whose parent is now launchd), which makes it T6, or run under an
-  agent whose executable passess does not know, such as an editor's. An Allow follows
-  the anchor process (ADR 9): in an editor's integrated terminal, the user's commands
-  and the editor's agent share it.
+  ancestors, whatever runs in between (`script`, `timeout`, an interpreter), and ones
+  whose chain passess cannot follow to the end (more than 64 processes deep, or a peer
+  that has gone or has no pid), and `passess agent approve` refuses when it sees a
+  harness, by a marker or among its ancestors. To get through, a process has to detach
+  from its harness first (a daemonized child whose parent is now launchd), which makes it
+  T6, or run under an agent whose executable passess does not know, such as an editor's.
+  An Allow follows the anchor process (ADR 9): in an editor's integrated terminal, the
+  user's commands and the editor's agent share it.
 - **Moving a value does not unleak it.** A token that sat in a file an agent could read,
   or in a transcript, may already have reached a model provider. `migrate` says to
   rotate; `scan --transcripts` shows where a known value went; `scan --scrub` takes it

@@ -26,6 +26,9 @@ for every secret; nothing said "Codex, but not OpenCode".
 - A call in which no agent is seen keeps the secret's other rules. Detection only ever
   adds a refusal (the rule of `internal/detect`); the user's own terminal and services
   started by launchd still get what their allow lists and profiles say.
+- A chain of more than 64 processes, or a caller whose process passess cannot read, is
+  not "no agent": it may hide one. It counts as an unidentified caller, which no clients
+  list names, so a secret that has a clients list (an empty one too) refuses it.
 - `passess discover` lists the bws secrets no reference points at, with a name and a
   reference to add each by. `bws secret list` prints values beside the names; passess
   parses the names and clears that output at once. Other backends come later.
