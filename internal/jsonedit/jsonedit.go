@@ -14,9 +14,51 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+// maxDepth is the deepest nesting parse accepts. hujson.Parse recurses once per
+// level with no limit, and a goroutine stack overflow is fatal, so a hostile
+// config could abort passess. Real harness configs nest a handful of levels.
+const maxDepth = 512
+
+// parse is hujson.Parse behind a depth check. One linear pass counts open
+// brackets, skipping strings and comments, and refuses a document that nests
+// deeper than maxDepth before the recursive parser sees it.
+func parse(src []byte) (hujson.Value, error) {
+	depth := 0
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '[', '{':
+			if depth++; depth > maxDepth {
+				return hujson.Value{}, fmt.Errorf("nested deeper than %d levels", maxDepth)
+			}
+		case ']', '}':
+			depth--
+		case '"':
+			for i++; i < len(src) && src[i] != '"'; i++ {
+				if src[i] == '\\' {
+					i++
+				}
+			}
+		case '/':
+			switch {
+			case i+1 < len(src) && src[i+1] == '/':
+				for i < len(src) && src[i] != '\n' {
+					i++
+				}
+			case i+1 < len(src) && src[i+1] == '*':
+				if end := bytes.Index(src[i+2:], []byte("*/")); end >= 0 {
+					i += end + 3
+				} else {
+					i = len(src)
+				}
+			}
+		}
+	}
+	return hujson.Parse(src)
+}
+
 // Decode parses a JSON or JSONC document into out. src is not modified.
 func Decode(src []byte, out any) error {
-	v, err := hujson.Parse(bytes.Clone(src)) // Standardize rewrites the bytes it parsed
+	v, err := parse(bytes.Clone(src)) // Standardize rewrites the bytes it parsed
 	if err != nil {
 		return err
 	}
@@ -31,7 +73,7 @@ func Set(src []byte, path []string, name string, value any) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		src = []byte("{}\n")
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +118,7 @@ func Append(src []byte, path []string, value any) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		src = []byte("{}\n")
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +140,7 @@ func RemoveWhere(src []byte, path []string, match func(any) bool) ([]byte, error
 		if len(bytes.TrimSpace(src)) == 0 {
 			return src, nil
 		}
-		root, err := hujson.Parse(src)
+		root, err := parse(src)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +190,7 @@ func Delete(src []byte, path []string, name string) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		return src, nil
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}

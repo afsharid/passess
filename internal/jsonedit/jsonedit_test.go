@@ -185,3 +185,51 @@ func TestNestedPathAndErrors(t *testing.T) {
 		t.Fatal("broken JSON was accepted")
 	}
 }
+
+// A hostile config that nests a million levels must come back as an error:
+// hujson.Parse recurses per level and a stack overflow is fatal.
+func TestDeepNestingIsRefused(t *testing.T) {
+	const n = 1_000_000
+	deep := strings.Repeat("[", n) + strings.Repeat("]", n)
+	deepObj := strings.Repeat(`{"passess-fake":`, n) + "1" + strings.Repeat("}", n)
+	for name, doc := range map[string]string{"arrays": deep, "objects": deepObj} {
+		t.Run(name, func(t *testing.T) {
+			src := []byte(doc)
+			var out any
+			if err := Decode(src, &out); err == nil {
+				t.Error("Decode accepted deep nesting")
+			}
+			if _, err := Set(src, nil, "k", 1); err == nil {
+				t.Error("Set accepted deep nesting")
+			}
+			if _, err := Append(src, nil, 1); err == nil {
+				t.Error("Append accepted deep nesting")
+			}
+			if _, err := RemoveWhere(src, nil, func(any) bool { return true }); err == nil {
+				t.Error("RemoveWhere accepted deep nesting")
+			}
+			if _, err := Delete(src, nil, "k"); err == nil {
+				t.Error("Delete accepted deep nesting")
+			}
+		})
+	}
+}
+
+// Brackets inside strings and comments do not count as nesting, and nesting
+// up to the limit still parses.
+func TestDepthCountSkipsStringsAndComments(t *testing.T) {
+	filler := strings.Repeat("[", maxDepth+10)
+	doc := `{"a": "` + filler + `\"` + filler + `", // ` + filler + "\n" + `/* ` + filler + ` */ "b": 1}`
+	var out map[string]any
+	if err := Decode([]byte(doc), &out); err != nil {
+		t.Fatalf("brackets in strings and comments rejected: %v", err)
+	}
+	ok := strings.Repeat("[", maxDepth) + strings.Repeat("]", maxDepth)
+	if err := Decode([]byte(ok), new(any)); err != nil {
+		t.Errorf("nesting at the limit rejected: %v", err)
+	}
+	over := strings.Repeat("[", maxDepth+1) + strings.Repeat("]", maxDepth+1)
+	if err := Decode([]byte(over), new(any)); err == nil {
+		t.Error("nesting over the limit accepted")
+	}
+}
