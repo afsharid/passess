@@ -594,7 +594,7 @@ func TestProtectedDir(t *testing.T) {
 	}
 }
 
-// The owner's volume is case-insensitive, so a name in another case is the
+// The default macOS volume is case-insensitive, so a name in another case is the
 // same file or program.
 func TestCaseFolded(t *testing.T) {
 	shellVerdicts(t, []string{

@@ -177,7 +177,7 @@ var credentialPaths = func() []string {
 }()
 
 // prog is the name a program is known by: its base name in lower case, since
-// the owner's volume runs PASSESS and Cat as passess and cat.
+// a case-insensitive volume, the macOS default, runs PASSESS and Cat as passess and cat.
 func prog(path string) string { return strings.ToLower(filepath.Base(path)) }
 
 // where is the directory relative paths resolve against. dir is "" when it
@@ -228,8 +228,8 @@ func inConfig(p string, env Env) bool {
 	return false
 }
 
-// within says whether p is dir or below it. Case does not count: the owner's
-// volume does not tell .AWS from .aws, so neither does the policy.
+// within says whether p is dir or below it. Case does not count: a case-insensitive
+// volume, the macOS default, does not tell .AWS from .aws, so neither does the policy.
 func within(p, dir string) bool {
 	rel, err := filepath.Rel(strings.ToLower(dir), strings.ToLower(p))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
