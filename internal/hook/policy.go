@@ -950,14 +950,26 @@ func pasted(text string, env Env) string {
 	if rs == nil {
 		return ""
 	}
+	refused := func(rule string) string {
+		return fmt.Sprintf("passess: this message looks like it contains a %s credential, so it was not sent: whatever reaches the model "+
+			"also reaches its logs and this transcript. Store it with `passess add NAME --keychain` (you type it into the keychain), "+
+			"then ask the agent to use `passess exec -s NAME -- command`. If it was a real credential that already went somewhere, rotate it.", rule)
+	}
+	// A private key spans lines, from its BEGIN line to its END line, so that
+	// rule reads the whole text.
+	if strings.Contains(strings.ToLower(text), "-----begin") {
+		for _, m := range rs.Line("prompt", text) {
+			if m.Rule == "private-key" {
+				return refused(m.Rule)
+			}
+		}
+	}
 	for _, line := range strings.Split(text, "\n") {
 		for _, m := range rs.Line("prompt", line) {
 			if m.Rule == "generic-api-key" {
 				continue // too loose for a prompt: hashes and IDs look like it
 			}
-			return fmt.Sprintf("passess: this message looks like it contains a %s credential, so it was not sent: whatever reaches the model "+
-				"also reaches its logs and this transcript. Store it with `passess add NAME --keychain` (you type it into the keychain), "+
-				"then ask the agent to use `passess exec -s NAME -- command`. If it was a real credential that already went somewhere, rotate it.", m.Rule)
+			return refused(m.Rule)
 		}
 	}
 	return ""

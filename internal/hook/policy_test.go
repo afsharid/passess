@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -338,4 +339,49 @@ func TestCdScope(t *testing.T) {
 		`echo $(cd /tmp); cat README.md`, `if true; then cd /tmp; fi; cat README.md`, `cd ~/.config/passess; (cd /tmp); cat README.md`,
 		`cd ~/.aws; ls; (cd /tmp); echo x > out.txt`, `{ cd /tmp; } & cat README.md`,
 	})
+}
+
+// A pasted private key is refused however its lines are laid out, without
+// the reason showing it.
+func TestPromptPrivateKeyBlock(t *testing.T) {
+	env := testEnv(t)
+	body := func(n int) []string {
+		var lines []string
+		sum := sha256.Sum256([]byte("passess-fake-key-body"))
+		for i := 0; i < n; i++ {
+			sum = sha256.Sum256(sum[:])
+			lines = append(lines, base64.StdEncoding.EncodeToString(append(sum[:], sum[:16]...)))
+		}
+		return lines
+	}
+	pem := func(kind, nl string) string {
+		return "here is the key I use:" + nl + "-----BEGIN " + kind + "-----" + nl + strings.Join(body(3), nl) + nl + "-----END " + kind + "-----" + nl + "thanks"
+	}
+	for name, text := range map[string]string{
+		"rsa":     pem("RSA PRIVATE KEY", "\n"),
+		"crlf":    pem("RSA PRIVATE KEY", "\r\n"),
+		"openssh": pem("OPENSSH PRIVATE KEY", "\n"),
+		"oneline": strings.ReplaceAll(pem("RSA PRIVATE KEY", "\n"), "\n", " "),
+		"indent":  "> " + strings.ReplaceAll(pem("EC PRIVATE KEY", "\n"), "\n", "\n> "),
+	} {
+		v := Decide(Event{Kind: Prompt, Text: text}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "private-key") {
+			t.Errorf("%s: not refused: %+v", name, v)
+		}
+		for _, line := range body(3) {
+			if strings.Contains(v.Reason, line) {
+				t.Errorf("%s: the reason shows the key", name)
+			}
+		}
+	}
+	for name, text := range map[string]string{
+		"public":   "-----BEGIN PUBLIC KEY-----\n" + strings.Join(body(3), "\n") + "\n-----END PUBLIC KEY-----",
+		"cert":     "-----BEGIN CERTIFICATE-----\n" + strings.Join(body(3), "\n") + "\n-----END CERTIFICATE-----",
+		"header":   "the file starts with -----BEGIN RSA PRIVATE KEY----- and ends with -----END RSA PRIVATE KEY-----, please parse it",
+		"ordinary": "fix the failing test\nin commit 3fa2c9e1b07d4455aa01\nthanks",
+	} {
+		if v := Decide(Event{Kind: Prompt, Text: text}, env); v.Deny {
+			t.Errorf("%s: refused: %s", name, v.Reason)
+		}
+	}
 }
