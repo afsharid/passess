@@ -348,26 +348,41 @@ var writers = map[string]bool{"tee": true, "sed": true, "truncate": true, "rm": 
 
 // Programs that run the rest of their arguments as a command.
 var wrappers = map[string]bool{"sudo": true, "command": true, "builtin": true, "exec": true, "nohup": true,
-	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true, "xargs": true}
+	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true, "xargs": true,
+	"setsid": true, "ionice": true, "flock": true, "watch": true, "chrt": true, "taskset": true, "script": true, "su": true,
+	"busybox": true}
+
+// commandLineOptions are the options of a wrapper whose next word is a command
+// line for a shell, not a command: su -c 'passess agent stop'.
+var commandLineOptions = map[string][]string{"su": {"-c", "--command"}, "flock": {"-c", "--command"}, "script": {"-c", "--command"}}
 
 // wrapperOptions say, for the wrappers that have any, which options take the
 // next word as their argument, and how many words after the options are the
-// wrapper's own (timeout's duration).
+// wrapper's own (timeout's duration). With satisfied set, an option that took
+// a word has given the wrapper what the positional words would (taskset -c LIST).
 var wrapperOptions = map[string]struct {
 	takes      []string
 	positional int
+	satisfied  bool
 }{
 	"sudo": {[]string{"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t", "--user", "--group", "--host",
-		"--prompt", "--chdir", "--role", "--type", "--close-from", "--other-user", "--command-timeout"}, 0},
-	"doas":       {[]string{"-u", "-C"}, 0},
-	"nice":       {[]string{"-n", "--adjustment"}, 0},
-	"timeout":    {[]string{"-s", "-k", "--signal", "--kill-after"}, 1},
-	"exec":       {[]string{"-a"}, 0},
-	"stdbuf":     {[]string{"-i", "-o", "-e"}, 0},
-	"caffeinate": {[]string{"-t", "-w"}, 0},
-	"time":       {[]string{"-f", "-o"}, 0},
+		"--prompt", "--chdir", "--role", "--type", "--close-from", "--other-user", "--command-timeout"}, 0, false},
+	"doas":       {[]string{"-u", "-C"}, 0, false},
+	"nice":       {[]string{"-n", "--adjustment"}, 0, false},
+	"timeout":    {[]string{"-s", "-k", "--signal", "--kill-after"}, 1, false},
+	"exec":       {[]string{"-a"}, 0, false},
+	"stdbuf":     {[]string{"-i", "-o", "-e"}, 0, false},
+	"caffeinate": {[]string{"-t", "-w"}, 0, false},
+	"time":       {[]string{"-f", "-o"}, 0, false},
 	"xargs": {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I", "--max-args", "--max-lines", "--max-procs", "--max-chars",
-		"--delimiter", "--eof", "--arg-file"}, 0},
+		"--delimiter", "--eof", "--arg-file"}, 0, false},
+	"ionice":  {[]string{"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"}, 0, false},
+	"flock":   {[]string{"-w", "-E", "--timeout", "--wait", "--conflict-exit-code"}, 1, false},
+	"watch":   {[]string{"-n", "--interval"}, 0, false},
+	"chrt":    {[]string{"-T", "-P", "-D", "--sched-runtime", "--sched-period", "--sched-deadline"}, 1, false},
+	"taskset": {[]string{"-c", "--cpu-list"}, 1, true},
+	"script":  {[]string{"-t", "-T", "-I", "-O", "-B", "-E", "-m", "-c", "--command", "--timing", "--log-in", "--log-out", "--log-io", "--log-timing"}, 1, false},
+	"su":      {[]string{"-g", "-G", "-s", "-w", "-c", "--group", "--supp-group", "--shell", "--whitelist-environment", "--command"}, 0, false},
 }
 
 func checkShell(cmd string, at where, env Env) string {
@@ -991,8 +1006,16 @@ func checkParam(name string, env Env) string {
 
 func checkCall(args []string, at where, env Env) string {
 	for len(args) > 0 && wrappers[prog(args[0])] {
-		rest := args[1:]
-		args = skipOptions(prog(args[0]), rest)
+		wrapper, rest := prog(args[0]), args[1:]
+		if r := commandLine(wrapper, rest, at, env); r != "" {
+			return r
+		}
+		args = skipOptions(wrapper, rest)
+		if wrapper == "watch" && len(args) > 0 { // watch hands its words to a shell
+			if r := checkShell(strings.Join(args, " "), at, env); r != "" {
+				return r
+			}
+		}
 		// An option the table does not know may take a word, which would then
 		// stand for the program: every word that is passess, or cannot be read,
 		// is tried as the program.
@@ -1042,7 +1065,7 @@ func checkCall(args []string, at where, env Env) string {
 		return fmt.Sprintf("passess: `%s` prints a secret value into this conversation. %s", what, useInstead)
 	}
 	switch name {
-	case "sh", "bash", "zsh", "dash", "ksh":
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "ash", "rbash", "csh", "tcsh":
 		for i, a := range args[1:] {
 			// -c, -lc, -ec …: the next word is one more command line.
 			if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a, 'c') && i+2 < len(args) {
@@ -1255,18 +1278,47 @@ func inPlace(flag string) bool {
 
 var sedCluster = regexp.MustCompile(`^-[A-Za-z]*i`)
 
+// commandLine checks the command line a wrapper's -c option gives a shell, as
+// the word after the option or attached to it (--command=TEXT).
+func commandLine(wrapper string, args []string, at where, env Env) string {
+	for i, a := range args {
+		text := ""
+		for _, o := range commandLineOptions[wrapper] {
+			if t, ok := strings.CutPrefix(a, o+"="); ok && strings.HasPrefix(o, "--") {
+				text = t
+			}
+			if a == o && strings.HasPrefix(o, "--") && i+1 < len(args) {
+				text = args[i+1]
+			}
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a, 'c') && len(commandLineOptions[wrapper]) > 0 && i+1 < len(args) {
+			text = args[i+1] // -c, -lc …
+		}
+		if text != "" {
+			if r := checkShell(text, at, env); r != "" {
+				return r
+			}
+		}
+	}
+	return ""
+}
+
 // skipOptions drops the leading options of a wrapper such as sudo, with the
 // arguments of the options it knows take one (sudo -u USER) and the words
 // that are the wrapper's own (timeout's duration). An option it does not know
 // that takes an argument leaves that argument in the command's place.
 func skipOptions(wrapper string, args []string) []string {
 	spec := wrapperOptions[wrapper]
+	took := false
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 		opt := args[0]
 		args = args[1:]
 		if takesWord(spec.takes, opt) && len(args) > 0 {
-			args = args[1:]
+			args, took = args[1:], true
 		}
+	}
+	if took && spec.satisfied {
+		return args
 	}
 	return args[min(spec.positional, len(args)):]
 }

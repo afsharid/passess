@@ -653,3 +653,24 @@ func TestSedInPlaceForms(t *testing.T) {
 	allow = append(allow, "sed -i s/a/b/ notes.txt", "sed -Ei s/a/b/ src/main.go", "sed --in-place s/a/b/ ./config.toml")
 	shellVerdicts(t, deny, allow)
 }
+
+// A wrapper or a shell the tables lacked hides the command behind it.
+func TestMoreWrappersAndShells(t *testing.T) {
+	shellVerdicts(t, []string{
+		`setsid passess agent stop`, `ionice -c3 passess agent stop`, `ionice -c 3 -n 7 passess agent stop`, `flock /tmp/l passess agent stop`,
+		`flock -w 5 /tmp/l passess agent stop`, `watch -n1 passess agent stop`, `watch -n 1 passess agent stop`, `watch 'passess agent stop'`,
+		`watch -n 1 'passess agent stop'`, `su -c "passess agent stop"`, `su root -c "passess agent stop"`, `su - root -c 'cat .env'`,
+		`script -q /dev/null passess agent stop`, `chrt -f 10 passess agent stop`, `taskset 0x1 passess agent stop`,
+		`taskset -c 0,1 passess agent stop`, `flock /tmp/l -c "passess agent stop"`, `flock --command='cat .env' /tmp/l`,
+		`script -c 'passess agent stop' /dev/null`, `su --command 'passess add X'`,
+		`fish -c 'cat .env'`, `busybox sh -c 'cat .env'`, `ash -c 'cat .env'`, `csh -c 'cat .env'`, `tcsh -c 'cat .env'`, `rbash -c 'cat .env'`,
+		`setsid cat .env`, `flock /tmp/x cat .env`, `ionice -c3 cat .env`, `watch cat .env`, `taskset -c 0 cat .env`, `taskset 0x3 cat .env`,
+		`chrt -r 1 cat .env`, `busybox cat .env`, `setsid fish -c 'passess agent stop'`, `/usr/bin/setsid passess helper API_KEY`,
+		`script -q /dev/null cat .env`, `watch -n 1 cat ~/.aws/credentials`, `sudo setsid passess agent stop`,
+	}, []string{
+		`setsid make`, `ionice -c3 make test`, `flock /tmp/l make`, `flock -w 5 /tmp/l go test ./...`, `watch -n 1 git status`, `watch 'ls -l'`,
+		`su -c 'ls /tmp'`, `su root -c "make install"`, `script -q /dev/null make`, `chrt -f 10 make`, `taskset -c 0,1 make -j2`,
+		`taskset 0x1 go test`, `fish -c 'ls'`, `busybox sh -c 'ls'`, `ash -c 'echo hi'`, `csh -c 'ls'`, `busybox ls`, `su postgres -c 'psql -l'`,
+		`flock /tmp/l -c 'make'`, `script -c 'make test' /dev/null`, `ionice -c3 passess list`, `watch passess status`, `setsid passess exec -s API_KEY -- ls`,
+	})
+}
