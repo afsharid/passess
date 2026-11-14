@@ -67,7 +67,8 @@ func shellCommand(v any) string {
 
 var patchFile = regexp.MustCompile(`(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
 
-// patchPaths lists the files an apply_patch envelope touches.
+// patchPaths lists the files an apply_patch envelope touches, the destination
+// of a rename included.
 func patchPaths(patch string) []string {
 	var out []string
 	for _, m := range patchFile.FindAllStringSubmatch(patch, -1) {
@@ -299,9 +300,15 @@ func (opencode) Parse(event string, payload []byte, _ func(string) string) (Even
 			if p := str(in.Args, "filePath", "path"); p != "" {
 				ev.Kind, ev.Paths = Read, []string{p}
 			}
-		case "write", "edit", "patch":
+		case "write", "edit", "multiedit", "patch", "apply_patch":
+			var paths []string
 			if p := str(in.Args, "filePath", "path"); p != "" {
-				ev.Kind, ev.Paths = Write, []string{p}
+				paths = append(paths, p)
+			}
+			// patch carries its files in an envelope, as Codex's apply_patch does.
+			paths = append(paths, patchPaths(str(in.Args, "patchText"))...)
+			if len(paths) > 0 {
+				ev.Kind, ev.Paths = Write, paths
 			}
 		}
 	case "tool.execute.after":

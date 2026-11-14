@@ -61,3 +61,32 @@ func TestApplyPatchMoveTo(t *testing.T) {
 		t.Errorf("ordinary rename: %+v", ok)
 	}
 }
+
+// OpenCode's multiedit, and patch or apply_patch given as patchText, write
+// files like write and edit do.
+func TestOpenCodeWriteTools(t *testing.T) {
+	env := testEnv(t)
+	const cfg = "/home/u/.config/passess/config.toml"
+	for name, payload := range map[string]string{
+		"write":       `{"tool":"write","args":{"filePath":"` + cfg + `"},"cwd":"/p"}`,
+		"edit":        `{"tool":"edit","args":{"filePath":"` + cfg + `"},"cwd":"/p"}`,
+		"multiedit":   `{"tool":"multiedit","args":{"filePath":"` + cfg + `"},"cwd":"/p"}`,
+		"patch":       `{"tool":"patch","args":{"filePath":"` + cfg + `"},"cwd":"/p"}`,
+		"patchText":   `{"tool":"patch","args":{"patchText":"*** Begin Patch\n*** Update File: ` + cfg + `\n@@\n-a\n+b\n*** End Patch"},"cwd":"/p"}`,
+		"apply_patch": `{"tool":"apply_patch","args":{"patchText":"*** Begin Patch\n*** Update File: /tmp/x\n*** Move to: ` + cfg + `\n@@\n-a\n+b\n*** End Patch"},"cwd":"/p"}`,
+		"relative":    `{"tool":"multiedit","args":{"filePath":"../.config/passess/config.toml"},"cwd":"/home/u/proj"}`,
+	} {
+		ev := parseEvent(t, "opencode", "tool.execute.before", payload)
+		if ev.Kind != Write || !Decide(ev, env).Deny {
+			t.Errorf("%s: %+v", name, ev)
+		}
+	}
+	for _, payload := range []string{
+		`{"tool":"multiedit","args":{"filePath":"src/a.go"},"cwd":"/home/u/proj"}`,
+		`{"tool":"patch","args":{"patchText":"*** Begin Patch\n*** Update File: src/a.go\n@@\n-a\n+b\n*** End Patch"},"cwd":"/home/u/proj"}`,
+	} {
+		if v := Decide(parseEvent(t, "opencode", "tool.execute.before", payload), env); v.Deny {
+			t.Errorf("ordinary write denied: %s", payload)
+		}
+	}
+}
