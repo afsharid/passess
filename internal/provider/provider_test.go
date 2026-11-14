@@ -11,8 +11,11 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
@@ -208,5 +211,55 @@ func TestKeychainStoreKeepsValueOffArgv(t *testing.T) {
 	}
 	if err := p.Store(context.Background(), "passess", "demo", secret.FromString("two\nlines-passess-fake")); err == nil {
 		t.Fatal("a multi-line value was accepted")
+	}
+}
+
+// A backend CLI that does not finish within the bound is killed with
+// everything it started, and the error names the CLI, never what it printed.
+func TestExecRunnerBoundsACLICall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are unix only")
+	}
+	pidFile := t.TempDir() + "/child.pid"
+	r := ExecRunner{Look: func(string) (string, error) { return "/bin/sh", nil }, Timeout: 300 * time.Millisecond}
+	script := "echo passess-fake-partial-output; sleep 60 & echo $! > " + pidFile + "; wait"
+	start := time.Now()
+	_, err := r.Run(context.Background(), Cmd{Name: "fakecli", Args: []string{"-c", script}, Env: []string{"PATH=/usr/bin:/bin"}})
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("Run took %s; the bound did not apply", time.Since(start))
+	}
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "fakecli") {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Contains(err.Error(), "passess-fake-partial-output") {
+		t.Fatalf("the error carries the CLI's output: %v", err)
+	}
+	raw, rerr := os.ReadFile(pidFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the CLI's child %d still runs after the bound", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Control: a CLI that finishes in time returns its output, and a caller's own
+// cancellation is still the caller's error.
+func TestExecRunnerBoundLeavesOrdinaryCallsAlone(t *testing.T) {
+	r := ExecRunner{Look: func(string) (string, error) { return "/bin/sh", nil }}
+	res, err := r.Run(context.Background(), Cmd{Name: "fakecli", Args: []string{"-c", "printf passess-fake-ok; exit 3"}, Env: []string{"PATH=/usr/bin:/bin"}})
+	if err != nil || string(res.Stdout) != "passess-fake-ok" || res.Exit != 3 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.Run(ctx, Cmd{Name: "fakecli", Args: []string{"-c", "sleep 5"}, Env: []string{"PATH=/usr/bin:/bin"}}); err == nil || errors.Is(err, ErrUnavailable) && strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("a cancelled caller: %v", err)
 	}
 }
