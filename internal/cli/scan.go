@@ -72,6 +72,9 @@ func runScan(st *Streams, args []string) int {
 	// the secret. A coding agent runs the scan without it.
 	if !*noKnown {
 		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			if *scrub {
+				return failf(st, ExitNoPerm, "passess scan --scrub needs the values you configured, so only the user can run it, in a terminal or Passess.app")
+			}
 			return failf(st, ExitNoPerm, "passess scan resolves every secret you configured to search for its value; from %s, run it with --no-known, or ask the user to run it in a terminal or Passess.app", detect.Label(agents[0]))
 		}
 	}

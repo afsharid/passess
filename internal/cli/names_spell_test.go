@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/afsharid/passess/internal/agent"
 )
 
 // u turns {200d} into that rune, so the test table shows each invisible
@@ -110,5 +112,21 @@ func TestScanPathShowsWhatTheNameHolds(t *testing.T) {
 		if !strings.Contains(out, "/"+tc.shown+"/.env") {
 			t.Errorf("%q: the path is not shown as named:\n%s%s", tc.dir, out, errOut)
 		}
+	}
+}
+
+// --scrub is for the user only, so the refusal does not send an agent to
+// --no-known, which --scrub rejects.
+func TestScanScrubRefusalDoesNotLoop(t *testing.T) {
+	noHarness(t)
+	underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "zsh"}, agent.Proc{Name: "claude"})
+	_, errOut, code := run(t, "scan", "--scrub")
+	if code != ExitNoPerm || strings.Contains(errOut, "--no-known") || !strings.Contains(errOut, "--scrub") || !strings.Contains(errOut, "user") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	// Control: the plain scan still names --no-known.
+	_, errOut, code = run(t, "scan")
+	if code != ExitNoPerm || !strings.Contains(errOut, "--no-known") {
+		t.Fatalf("exit %d: %s", code, errOut)
 	}
 }
