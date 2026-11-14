@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"text/tabwriter"
 
+	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/provider"
 )
 
@@ -33,6 +35,17 @@ type checkOutput struct {
 	Config  string    `json:"config"`
 	OK      bool      `json:"ok"`
 	Secrets []checked `json:"secrets"`
+}
+
+// notConnected is the first coding agent among agents that the secret is not
+// connected to, "" when it is connected to all of them (checkClients' rule).
+func notConnected(s config.Secret, agents []string) string {
+	for _, a := range agents {
+		if !s.ConnectedTo(a) {
+			return a
+		}
+	}
+	return ""
 }
 
 func runCheck(st *Streams, args []string) int {
@@ -64,6 +77,7 @@ func runCheck(st *Streams, args []string) int {
 
 	res, zero := newResolver(st, u)
 	defer zero()
+	agents := callerAgents(st.Getenv, selfChain())
 	out := checkOutput{Config: u.Path, OK: true, Secrets: []checked{}}
 	for _, n := range names {
 		c := checked{Name: n}
@@ -71,6 +85,11 @@ func runCheck(st *Streams, args []string) int {
 		switch {
 		case !ok:
 			c.State, c.Detail = stateUndefined, fmt.Sprintf("add a [secrets.%s] table to %s", n, u.Path)
+		case notConnected(s, agents) != "":
+			// Not resolved: which secrets an agent may use is the user's to
+			// decide, and a state is a fact about the backend. check returns
+			// no value, so it asks for no approval.
+			c.State, c.Detail = stateUnavailable, "not connected to "+detect.Label(notConnected(s, agents))
 		default:
 			_, from, err := res.SecretFrom(context.Background(), s)
 			switch {

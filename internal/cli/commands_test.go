@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/afsharid/passess/internal/agent"
+	"github.com/afsharid/passess/internal/detect"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -147,6 +150,7 @@ func TestAddKeychainRefusesUnderAHarness(t *testing.T) {
 }
 
 func TestDoctor(t *testing.T) {
+	noHarness(t) // a person at a terminal gets the credential test; see TestDoctorDoesNotLoadBackendTokensUnderAnAgent
 	writeConfig(t, `version = 1
 [secrets.A]
 ref = "env://PASSESS_TEST_A"
@@ -202,4 +206,132 @@ func TestDoctorActions(t *testing.T) {
 	if p := problems(); len(p) != 1 || p[0].Action != "install-tool" || p[0].Target != "op" {
 		t.Fatalf("op missing: %+v", p)
 	}
+}
+
+// check never resolves a secret the calling agent is not connected to: it
+// reports it unavailable, and asks for no approval since it returns no value.
+// A person at a terminal, an agent the secret is connected to, and a secret
+// open to every client see the states as before.
+func TestCheckGatesSecretsByClients(t *testing.T) {
+	writeConfig(t, `version = 1
+[secrets.GATED]
+ref = "env://PASSESS_TEST_GATED_TOKEN"
+clients = ["codex"]
+approve = true
+[secrets.OPEN]
+ref = "env://PASSESS_TEST_GATED_TOKEN"
+[secrets.CODEX_ONLY]
+ref = "env://PASSESS_TEST_GATED_TOKEN"
+clients = ["codex", "kiro"]
+`)
+	t.Setenv("PASSESS_TEST_GATED_TOKEN", execValue)
+	states := func(t *testing.T) map[string]checked {
+		t.Helper()
+		out, errOut, _ := run(t, "check", "--json")
+		if strings.Contains(out, execValue) || strings.Contains(errOut, execValue) {
+			t.Fatal("check printed a value")
+		}
+		var got checkOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		m := map[string]checked{}
+		for _, c := range got.Secrets {
+			m[c.Name] = c
+		}
+		return m
+	}
+
+	t.Run("agent not in clients", func(t *testing.T) {
+		noHarness(t)
+		underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "zsh"}, agent.Proc{Name: "kiro-cli-chat"}, agent.Proc{PID: 1, Name: "launchd"})
+		got := states(t)
+		if c := got["GATED"]; c.State != stateUnavailable || c.Detail != "not connected to "+detect.Label("kiro") || c.From != "" {
+			t.Errorf("GATED = %+v", c)
+		}
+		if got["OPEN"].State != stateOK || got["CODEX_ONLY"].State != stateOK {
+			t.Errorf("secrets open to this agent: %+v", got)
+		}
+	})
+	t.Run("agent by marker", func(t *testing.T) {
+		noHarness(t)
+		t.Setenv("CLAUDECODE", "1")
+		if c := states(t)["GATED"]; c.State != stateUnavailable || !strings.Contains(c.Detail, "not connected to") {
+			t.Errorf("GATED = %+v", c)
+		}
+	})
+	t.Run("agent in clients", func(t *testing.T) {
+		noHarness(t)
+		t.Setenv("CODEX_THREAD_ID", "t")
+		if c := states(t)["GATED"]; c.State != stateOK {
+			t.Errorf("GATED = %+v", c)
+		}
+	})
+	t.Run("person at a terminal", func(t *testing.T) {
+		noHarness(t)
+		for n, c := range states(t) {
+			if c.State != stateOK {
+				t.Errorf("%s = %+v", n, c)
+			}
+		}
+	})
+}
+
+// Under a coding agent doctor does not load a backend's bootstrap token: it
+// says the credential is configured, not whether it works. A person at a
+// terminal still gets the test. Here the token's source is empty, so loading
+// it would fail.
+func TestDoctorDoesNotLoadBackendTokensUnderAnAgent(t *testing.T) {
+	cfgBody := `version = 1
+[backends.vault]
+address = "https://vault.example.com:8200"
+token = "env://PASSESS_TEST_UNSET_BOOT_TOKEN"
+[backends.bws]
+access_token = "env://PASSESS_TEST_UNSET_BOOT_TOKEN"
+[secrets.V]
+ref = "vault://secret/app#token"
+[secrets.B]
+ref = "bws://dev/KEY"
+`
+	backends := func(t *testing.T) map[string]backendStatus {
+		t.Helper()
+		out, _, _ := run(t, "doctor", "--json")
+		var got doctorOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		m := map[string]backendStatus{}
+		for _, b := range got.Backends {
+			m[b.Scheme] = b
+		}
+		return m
+	}
+	t.Run("agent", func(t *testing.T) {
+		noHarness(t)
+		writeConfig(t, cfgBody)
+		t.Setenv("CLAUDECODE", "1")
+		for _, s := range []string{"vault", "bws"} {
+			b := backends(t)[s]
+			if !b.OK || !strings.Contains(b.Detail, "configured") {
+				t.Errorf("%s = %+v", s, b)
+			}
+		}
+	})
+	t.Run("agent by ancestor", func(t *testing.T) {
+		noHarness(t)
+		writeConfig(t, cfgBody)
+		underChain(t, agent.Proc{Name: "passess"}, agent.Proc{Name: "kiro-cli-chat"}, agent.Proc{PID: 1, Name: "launchd"})
+		if b := backends(t)["vault"]; !b.OK || !strings.Contains(b.Detail, "configured") {
+			t.Errorf("vault = %+v", b)
+		}
+	})
+	t.Run("person at a terminal", func(t *testing.T) {
+		noHarness(t)
+		writeConfig(t, cfgBody)
+		for _, s := range []string{"vault", "bws"} {
+			if b := backends(t)[s]; b.OK {
+				t.Errorf("%s = %+v: a person gets the real test", s, b)
+			}
+		}
+	})
 }

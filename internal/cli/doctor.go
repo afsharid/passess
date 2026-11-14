@@ -146,6 +146,7 @@ func diagnose(st *Streams) doctorOutput {
 	}
 	res, zero := newResolver(st, u)
 	defer zero()
+	agents := callerAgents(st.Getenv, selfChain())
 	schemes := make([]string, 0, len(used))
 	for s := range used {
 		schemes = append(schemes, s)
@@ -161,6 +162,13 @@ func diagnose(st *Streams) doctorOutput {
 				out.Backends = append(out.Backends, b)
 				continue
 			}
+		}
+		if len(agents) > 0 && bootstrapToken(scheme) {
+			// Testing the credential would load it into this process, in a
+			// call a coding agent makes: say that it is set, not that it works.
+			b.OK, b.Detail = true, credentialNote(scheme, u, st.Getenv)
+			out.Backends = append(out.Backends, b)
+			continue
 		}
 		if err := res.Available(context.Background(), scheme); err != nil {
 			b.Detail = err.Error()
@@ -180,6 +188,36 @@ func diagnose(st *Streams) doctorOutput {
 		out.Backends = append(out.Backends, b)
 	}
 	return finish(out)
+}
+
+// bootstrapToken reports whether the backend's Available loads a credential
+// of its own: Vault's token, the bws machine token, the bw session.
+func bootstrapToken(scheme string) bool {
+	return scheme == ref.Vault || scheme == ref.BWS || scheme == ref.Bitwarden
+}
+
+// credentialNote says where a backend's credential is set, without reading it.
+func credentialNote(scheme string, u *config.User, getenv func(string) string) string {
+	const untested = "; not tested from a coding agent"
+	var configured *ref.Ref
+	var envs []string
+	switch scheme {
+	case ref.Vault:
+		configured, envs = u.Backends.Vault.Token, []string{"VAULT_TOKEN", "BAO_TOKEN"}
+	case ref.BWS:
+		configured, envs = u.Backends.BWS.AccessToken, []string{"BWS_ACCESS_TOKEN"}
+	case ref.Bitwarden:
+		configured, envs = u.Backends.BW.Session, []string{"BW_SESSION"}
+	}
+	if configured != nil {
+		return "credential configured in " + configured.String() + untested
+	}
+	for _, e := range envs {
+		if getenv(e) != "" {
+			return "credential configured in " + e + untested
+		}
+	}
+	return "credential not checked from a coding agent"
 }
 
 func finish(out doctorOutput) doctorOutput {
