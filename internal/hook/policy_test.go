@@ -608,3 +608,16 @@ func TestCaseFolded(t *testing.T) {
 		`cat .ENV.EXAMPLE`, `Make test`, `cat ~/.CONFIG/other/config.toml`,
 	})
 }
+
+// ~NAME is the home directory of NAME: HOME when NAME is the base name of
+// HOME, some other directory not known here when it is not.
+func TestTildeUser(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat ~u/.aws/credentials`, `echo x >> ~u/.config/passess/config.toml`, `cd ~u/.config/passess && echo x >> config.toml`,
+		`cat ~u/.ssh/id_rsa`, `cat ~u/.local/state/passess/backups/x`, `cd ~u && cd .aws && cat credentials`,
+		`cat ~root/.aws/credentials`, `cat ~root/.ssh/id_rsa`, `echo x >> ~root/.config/passess/config.toml`,
+	}, []string{
+		`cat ~u/proj/main.go`, `ls ~u`, `cd ~u/proj && cat config.toml`, `cat ~root/notes.txt`, `ls ~root/.config`, `cd ~root/proj && make`,
+		`cat ~u/.aws/config`, `cat ~root/proj/.env.example`,
+	})
+}

@@ -189,12 +189,25 @@ type where struct {
 	blind bool
 }
 
+// otherTilde says whether p starts with ~NAME for a NAME that is not the base
+// name of home: the home directory of another user, which is not known here.
+func otherTilde(p, home string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(p, "~"), "/")
+	return strings.HasPrefix(p, "~") && name != "" && name != filepath.Base(home)
+}
+
+// abs is the path p names: ~ and ~NAME for the user whose home is home count
+// as home. A ~NAME of any other user is left as it is.
 func abs(p, cwd, home string) string {
 	switch {
 	case p == "~":
 		p = home
 	case strings.HasPrefix(p, "~/"):
 		p = filepath.Join(home, p[2:])
+	case strings.HasPrefix(p, "~") && home != "" && !otherTilde(p, home):
+		_, rest, _ := strings.Cut(p, "/")
+		p = filepath.Join(home, rest)
+	case otherTilde(p, home):
 	case !filepath.IsAbs(p) && cwd != "":
 		p = filepath.Join(cwd, p)
 	}
@@ -222,9 +235,13 @@ func within(p, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
-// unplaced says p is a relative name with no directory to be relative to, and
-// that it may be in a protected one: where it lands is not known.
-func unplaced(p string, at where) bool {
+// unplaced says p is a name with no directory to be relative to, and that it
+// may be in a protected one: where it lands is not known. A relative name is
+// that when the directory is lost; ~NAME of another user always is.
+func unplaced(p string, at where, home string) bool {
+	if otherTilde(p, home) {
+		return true
+	}
 	return at.dir == "" && at.blind && p != "" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~")
 }
 
@@ -277,7 +294,7 @@ func configWrite(p string, at where, env Env) string {
 	switch {
 	case inConfig(abs(p, at.dir, env.Home), env):
 		return configReason(p)
-	case unplaced(p, at) && strings.HasPrefix(strings.ToLower(filepath.Base(p)), "config.toml"):
+	case unplaced(p, at, env.Home) && strings.HasPrefix(strings.ToLower(filepath.Base(p)), "config.toml"):
 		return "passess: " + p + " may be the passess config (" + lostCd + "), which decides which program receives which secret. " +
 			"Write it by its full path in a command of its own, or tell the user what you need and let them do it in Passess.app " +
 			"or with `passess add` or `passess set`."
@@ -289,7 +306,7 @@ func configWrite(p string, at where, env Env) string {
 func deniedPath(p string, at where, env Env) string {
 	full := abs(p, at.dir, env.Home)
 	base := filepath.Base(full)
-	if unplaced(p, at) && slices.Contains(credentialNames, strings.ToLower(base)) {
+	if unplaced(p, at, env.Home) && slices.Contains(credentialNames, strings.ToLower(base)) {
 		return "may hold credentials (" + lostCd + ")"
 	}
 	switch {
