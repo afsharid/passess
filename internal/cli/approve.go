@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/afsharid/passess/internal/agent"
 	"github.com/afsharid/passess/internal/buildinfo"
@@ -105,10 +106,15 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	if !remember {
 		keys = nil
 	}
-	ask := agent.AskFor{Secrets: missing, Program: family, Path: prog.Path, Argv: redactArgv(req.Argv, nil), Dir: req.Dir,
-		Harness: detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v })}
+	// The requester chose the argv, the directory and the program's name;
+	// the question shows them with control characters made visible, so no
+	// approver, terminal or app, acts on bytes the requester picked.
+	ask := agent.AskFor{Secrets: missing, Program: visible(family), Path: visible(prog.Path), Argv: visibleAll(redactArgv(req.Argv, nil)), Dir: visible(req.Dir),
+		Harness: visible(detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v }))}
 	if anchored {
-		ask.Anchor = &anchor
+		shown := anchor
+		shown.Name = visible(shown.Name)
+		ask.Anchor = &shown
 	}
 	if remember {
 		ask.Until = now.Add(u.Agent.ApprovalTTL)
@@ -611,15 +617,63 @@ func approveLoop(st *Streams, c *agent.Conn, in io.Reader, out io.Writer) int {
 func printAsk(w io.Writer, a agent.AskFor) {
 	who := "a caller passess cannot identify"
 	if a.Anchor != nil {
-		who = fmt.Sprintf("%s (pid %d)", a.Anchor.Name, a.Anchor.PID)
+		who = fmt.Sprintf("%s (pid %d)", visible(a.Anchor.Name), a.Anchor.PID)
 	}
 	if a.Harness != "" {
-		who += ", which says it is " + a.Harness
+		who += ", which says it is " + visible(a.Harness)
 	}
-	fmt.Fprintf(w, "\n%s wants %s for %s\n  in %s\n  $ %s\n", who, strings.Join(a.Secrets, ", "), a.Program, a.Dir, shellLine(a.Argv))
+	fmt.Fprintf(w, "\n%s wants %s for %s\n  in %s\n  $ %s\n", who, visible(strings.Join(a.Secrets, ", ")), visible(a.Program), visible(a.Dir), visible(shellLine(a.Argv)))
 	if a.Until.IsZero() {
 		fmt.Fprint(w, "Allow for this command? [y/N] ")
 	} else {
 		fmt.Fprintf(w, "Allow until %s? [y/N] ", a.Until.Local().Format("Mon 15:04"))
 	}
+}
+
+// visible spells out the control, format and line-separator characters in
+// text a requester chose, as \n, \x1b or \u202e, so a prompt shows them
+// instead of acting on them: an escape sequence can redraw the lines above
+// it, and a bidi mark can reorder the line. Text that holds none comes back
+// unchanged.
+func visible(s string) string {
+	clean := true
+	for _, r := range s {
+		if hidden(r) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case !hidden(r):
+			b.WriteRune(r)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x100:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+	}
+	return b.String()
+}
+
+func visibleAll(words []string) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = visible(w)
+	}
+	return out
+}
+
+func hidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
 }
