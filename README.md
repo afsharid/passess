@@ -312,7 +312,7 @@ run it, so it asks you.
 
 `passess http`, the remote MCP bridge and the Vault client ignore the caller's proxy
 variables (`HTTPS_PROXY` and the rest) and `SSL_CERT_FILE` / `SSL_CERT_DIR`, so they
-trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`; no
+trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`, an absolute path; no
 setting names a proxy.
 
 ## A harness's own API key
