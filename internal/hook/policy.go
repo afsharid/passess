@@ -1119,13 +1119,17 @@ func checkCall(args []string, at where, env Env) string {
 	case "passess":
 		switch {
 		case len(args) > 1 && args[1] == "",
-			// the same where a second word decides, or a flag that makes a command apply
-			len(args) > 2 && args[2] == "" && (args[1] == "agent" || args[1] == "mcp" || args[1] == "profile"),
-			slices.Contains([]string{"migrate", "install", "uninstall"}, sub(1)) && slices.Contains(args[2:], ""):
+			// the same where a second word decides
+			len(args) > 2 && args[2] == "" && (args[1] == "agent" || args[1] == "mcp" || args[1] == "profile"):
 			// $V, $(…) or a brace expansion as the subcommand: what runs cannot
 			// be told from the text, and every subcommand an agent may run is plain.
 			return "passess: write the passess subcommand out as plain text; one built from a variable or a substitution " +
 				"cannot be checked, so it is refused."
+		case slices.Contains([]string{"migrate", "install", "uninstall"}, sub(1)) && slices.Contains(args[2:], ""):
+			// a word built at run time may be --apply, which makes the command act
+			return "passess: an argument of `passess " + sub(1) + "` built from a variable or a substitution could be --apply, " +
+				"which makes it act and is the user's to give; write the arguments out, with a path spelled in full, " +
+				"or show the user the dry run and let them apply it."
 		case sub(1) == "agent" && (sub(2) == "stop" || sub(2) == "serve"):
 			return "passess: `passess agent " + sub(2) + "` is the user's to run: the agent asks the user before a secret " +
 				"marked approve goes anywhere, and replacing or stopping it would skip that. Tell the user if the agent needs it."

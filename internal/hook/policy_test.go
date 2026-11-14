@@ -674,3 +674,21 @@ func TestMoreWrappersAndShells(t *testing.T) {
 		`flock /tmp/l -c 'make'`, `script -c 'make test' /dev/null`, `ionice -c3 passess list`, `watch passess status`, `setsid passess exec -s API_KEY -- ls`,
 	})
 }
+
+// Variable arguments to migrate, install and uninstall are refused for the
+// reason that one could be --apply, not for being a subcommand.
+func TestUnreadableApplyArgument(t *testing.T) {
+	env := testEnv(t)
+	for _, c := range []string{`passess migrate env "$F"`, `passess migrate scan "$DIR"`, `passess install --harness "$H" --dry-run`, `passess uninstall "$X"`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "--apply") || strings.Contains(v.Reason, "subcommand") {
+			t.Errorf("%s: %+v", c, v)
+		}
+	}
+	for _, c := range []string{`passess $V`, `passess agent $S`, `passess "$@"`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "subcommand") {
+			t.Errorf("%s: %+v", c, v)
+		}
+	}
+}
