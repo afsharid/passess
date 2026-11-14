@@ -116,6 +116,11 @@ func (v *Vault) client() (*http.Client, error) {
 	}
 	tr := outbound.Transport()
 	if v.CACert != "" {
+		// A relative path would be read from the working directory of
+		// whoever resolves, which a repository can fill.
+		if !filepath.IsAbs(v.CACert) {
+			return nil, fmt.Errorf("%w: backends.vault.ca_cert must be an absolute path, not %q", ErrUnavailable, v.CACert)
+		}
 		pem, err := os.ReadFile(v.CACert)
 		if err != nil {
 			return nil, fmt.Errorf("%w: backends.vault.ca_cert: %w", ErrUnavailable, err)

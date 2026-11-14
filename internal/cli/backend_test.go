@@ -268,3 +268,39 @@ func TestAddKeychainValueStdin(t *testing.T) {
 		t.Fatalf("under an agent: exit %d, stored %q", code, stored)
 	}
 }
+
+// A relative --ca-cert would be read from the directory of whoever resolves
+// the vault, so it is refused; an absolute one is stored, and an empty one
+// goes back to the system roots.
+func TestBackendVaultCACertMustBeAbsolute(t *testing.T) {
+	noHarness(t)
+	cfg := filepath.Join(t.TempDir(), "passess", "config.toml")
+	t.Setenv("PASSESS_CONFIG", cfg)
+	run := func(args ...string) (string, int) {
+		t.Helper()
+		var out, errb strings.Builder
+		code := Main(args, strings.NewReader(""), &out, &errb)
+		return errb.String(), code
+	}
+	for _, p := range []string{"ca.pem", "./ca.pem", "../ca.pem", "~/ca.pem"} {
+		if errOut, code := run("backend", "vault", "--ca-cert", p); code != ExitUsage || !strings.Contains(errOut, "absolute") {
+			t.Errorf("--ca-cert %q: exit %d, %q", p, code, errOut)
+		}
+	}
+	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "ca_cert") {
+		t.Fatalf("a refused path was stored:\n%s", data)
+	}
+	abs := filepath.Join(t.TempDir(), "ca.pem")
+	if errOut, code := run("backend", "vault", "--ca-cert", abs); code != 0 {
+		t.Fatalf("absolute: exit %d, %q", code, errOut)
+	}
+	if data, _ := os.ReadFile(cfg); !strings.Contains(string(data), "ca_cert") {
+		t.Fatalf("the absolute path was not stored:\n%s", data)
+	}
+	if errOut, code := run("backend", "vault", "--ca-cert", ""); code != 0 {
+		t.Fatalf("empty: exit %d, %q", code, errOut)
+	}
+	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "ca_cert") {
+		t.Fatalf("empty did not clear it:\n%s", data)
+	}
+}
