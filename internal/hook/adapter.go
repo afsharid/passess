@@ -65,7 +65,7 @@ func shellCommand(v any) string {
 	return ""
 }
 
-var patchFile = regexp.MustCompile(`(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
+var patchFile = regexp.MustCompile(`(?m)^[ \t]*\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
 
 // patchPaths lists the files an apply_patch envelope touches, the destination
 // of a rename included.

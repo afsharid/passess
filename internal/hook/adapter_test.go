@@ -90,3 +90,48 @@ func TestOpenCodeWriteTools(t *testing.T) {
 		}
 	}
 }
+
+// An apply_patch envelope given to a shell command, by heredoc or through a
+// pipe, writes the files it names, and a header may be indented.
+func TestApplyPatchInShell(t *testing.T) {
+	env := testEnv(t)
+	const cfg = "/home/u/.config/passess/config.toml"
+	envelope := func(body string) string { return "*** Begin Patch\n" + body + "\n@@\n-a\n+b\n*** End Patch" }
+	jsonText := strings.NewReplacer("\n", `\n`, "\r", `\r`, "\t", `\t`).Replace
+	for name, body := range map[string]string{
+		"add": "*** Add File: " + cfg, "update": "*** Update File: " + cfg, "move to": "*** Update File: /tmp/x\n*** Move to: " + cfg,
+		"relative": "*** Update File: /tmp/x\n*** Move to: ../.config/passess/config.toml", "tilde": "*** Add File: ~/.config/passess/config.toml",
+		"indented": "  *** Add File: " + cfg, "indented move": "*** Update File: /tmp/x\n\t*** Move to: " + cfg, "crlf": "*** Add File: " + cfg + "\r",
+	} {
+		heredoc := "apply_patch <<'EOF'\n" + envelope(body) + "\nEOF"
+		for _, cmd := range []string{heredoc, "cat <<'EOF' | apply_patch\n" + envelope(body) + "\nEOF", "applypatch <<'EOF'\n" + envelope(body) + "\nEOF"} {
+			if v := Decide(Event{Kind: Shell, Command: cmd, CWD: "/home/u/proj"}, env); !v.Deny {
+				t.Errorf("shell %s: allowed: %q", name, cmd)
+			}
+		}
+		// the same envelope through the harnesses' shell tools
+		bash := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"` + jsonText(heredoc) + `"},"cwd":"/home/u/proj"}`
+		if v := Decide(parseEvent(t, "claude", "PreToolUse", bash), env); !v.Deny {
+			t.Errorf("claude Bash %s: allowed", name)
+		}
+		argv := `{"tool_name":"shell","tool_input":{"command":["bash","-lc","` + jsonText(heredoc) + `"]},"cwd":"/home/u/proj"}`
+		if v := Decide(parseEvent(t, "codex", "PreToolUse", argv), env); !v.Deny {
+			t.Errorf("codex shell %s: allowed", name)
+		}
+	}
+	for _, body := range []string{"*** Add File: src/a.go", "*** Update File: a.go\n*** Move to: b.go", "  *** Add File: docs/x.md"} {
+		cmd := "apply_patch <<'EOF'\n" + envelope(body) + "\nEOF"
+		if v := Decide(Event{Kind: Shell, Command: cmd, CWD: "/home/u/proj"}, env); v.Deny {
+			t.Errorf("ordinary patch denied: %s: %s", body, v.Reason)
+		}
+	}
+	// a patch text in a command that is not apply_patch is only text
+	if v := Decide(Event{Kind: Shell, Command: "echo '*** Add File: " + cfg + "'", CWD: "/home/u/proj"}, env); v.Deny {
+		t.Errorf("echo of a header denied: %s", v.Reason)
+	}
+	// the tool payload with an indented header
+	tool := `{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"` + jsonText("*** Begin Patch\n*** Update File: /tmp/x\n  *** Move to: "+cfg+"\n*** End Patch") + `"},"cwd":"/home/u/proj"}`
+	if v := Decide(parseEvent(t, "codex", "PreToolUse", tool), env); !v.Deny {
+		t.Error("indented Move to allowed")
+	}
+}

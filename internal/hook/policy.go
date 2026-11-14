@@ -485,6 +485,14 @@ func checkShell(cmd string, at where, env Env) string {
 				if prog(program) != "passess" && len(args) > 0 {
 					others = true
 				}
+				if reason == "" && (prog(program) == "apply_patch" || prog(program) == "applypatch") {
+					// the envelope arrives on its input or as an argument: the command text holds it
+					for _, p := range patchPaths(cmd) {
+						if reason = configWrite(p, here(), env); reason != "" {
+							break
+						}
+					}
+				}
 				for _, a := range n.Assigns {
 					cdpath = cdpath || setsCDPath(a)
 					if reason == "" && a.Name != nil {
