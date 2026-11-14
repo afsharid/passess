@@ -33,10 +33,21 @@ public struct BackendSettings: Decodable, Equatable {
         }
     }
 
+    /// How passess itself reaches a server: passess http, a remote MCP
+    /// server and Vault.
+    public struct Net: Decodable, Equatable {
+        public var proxy: String
+    }
+
     public var op: OP
     public var vault: Vault
     public let bw: BW
     public var bws: BWS
+    /// Absent in the answer of a passess older than the setting.
+    public var net: Net?
+
+    /// The proxy passess goes through, "" for none.
+    public var proxy: String { net?.proxy ?? "" }
 }
 
 /// One server in `passess mcp list --json`. Mirrors mcpView in

@@ -62,6 +62,12 @@ if case let .revoke(secret, program, pid) = agentCard(liveAgent, approving: true
 let backendSettings = load(BackendSettings.self, "backends.json")
 expect(backendSettings.op.account == "my.1password.com" && backendSettings.vault.token == "keychain://passess/vault"
        && backendSettings.bw.session.isEmpty, "backends: \(backendSettings)")
+expect(backendSettings.net != nil && backendSettings.proxy.isEmpty, "backends: no proxy is an empty one")
+let backendJSON = #"{"op": {"account": ""}, "vault": {"address": "", "namespace": "", "ca_cert": "", "token": ""}, "bw": {"session": ""}, "bws": {"server_url": "", "access_token": ""}"#
+let withProxy = try! JSONDecoder().decode(BackendSettings.self, from: Data((backendJSON + #", "net": {"proxy": "http://proxy.example:3128"}}"#).utf8))
+expect(withProxy.proxy == "http://proxy.example:3128", "backends: the proxy is read")
+let beforeProxy = try! JSONDecoder().decode(BackendSettings.self, from: Data((backendJSON + "}").utf8))
+expect(beforeProxy.net == nil && beforeProxy.proxy.isEmpty, "backends: an answer without net, from an older passess, still decodes")
 let servers = load([MCPServer].self, "mcp-list.json")
 expect(servers.map(\.name) == ["copilot", "github"] && servers[0].isRemote && !servers[1].isRemote
        && servers[1].env?["GITHUB_PERSONAL_ACCESS_TOKEN"] == "GITHUB_TOKEN", "mcp servers: \(servers)")
