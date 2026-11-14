@@ -3,6 +3,8 @@ package hook
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -513,4 +515,81 @@ func TestFunctionBodiesAndCoproc(t *testing.T) {
 		`f() { g; }; g() { f; }; f`, `f() { cat README.md; }; cd ~/.aws; f`, `f() { cd /tmp; }; cd ~/.aws; f; cat credentials`,
 		`f() { echo x >> config.toml; }; cd ~/.config/passess; (cd /tmp; f)`,
 	})
+}
+
+// Lines of testdata/ordinary.txt the policy refuses from any session
+// directory, each for a reason of its own. refusedAlways are ones main refused
+// too: passess behind a variable, a key or harness file, passess's own state.
+// refusedOnPurpose are ones main allowed: a word that could be --apply or a
+// subcommand built from a variable, and passess named after a wrapper, which
+// the policy takes for the program since it cannot tell it from data.
+var (
+	refusedAlways = []string{
+		`p() { passess "$@"; }; p list`, `passess "$@"`, `passess $SUBCOMMAND`, `cat ~/.codex/config.toml`,
+		`cat cert.pem`, `cat public.pem`, `export $(cat .env.example | xargs)`, `tail -f ~/.local/state/passess/agent.log`,
+	}
+	refusedOnPurpose = []string{
+		`passess migrate env "$F"`, `passess migrate env $(ls .env*)`, `passess migrate --dry-run "$DIR"`, `passess migrate scan "$DIR"`,
+		`passess install --dry-run "$X"`, `passess install --harness "$H" --dry-run`, `passess uninstall --dry-run "$X"`,
+		`passess agent "$@"`,
+		`sudo echo passess add`, `nice grep passess remove file.txt`, `timeout 5 $TOOL helper`, `timeout 10 grep -rn passess remove docs`,
+		`nice -n 10 rg passess add`, `xargs echo passess add`, `nohup echo passess agent stop`,
+	}
+	// refusedHere are refused only in the session directory named: HOME holds
+	// .npmrc, and `cd ..` from ~/.docker/x reaches the file ~/.docker/config.json.
+	// (`cd a && make && cd .. && cat .npmrc` from HOME reads HOME's .npmrc if make
+	// succeeds, but where the shell is when make fails is not known, so it passes.)
+	refusedHere = map[string][]string{
+		"/home/u":           {`cat .npmrc`, `[ -f .npmrc ] && grep registry .npmrc`},
+		"/home/u/.docker/x": {`cd .. && cat config.json`},
+	}
+)
+
+// testdata/ordinary.txt is a table of ordinary commands, %% on a line of its
+// own between them. None may be refused wherever the session runs: in a
+// project, under ~/.claude, in HOME, or in a directory of a credential tool.
+// It is the guard against refusing ordinary work.
+func TestOrdinaryCommandsAreNotRefused(t *testing.T) {
+	b, err := os.ReadFile("testdata/ordinary.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmds := strings.Split(strings.TrimRight(string(b), "\n"), "\n%%\n")
+	if len(cmds) < 150 {
+		t.Fatalf("the table holds %d commands", len(cmds))
+	}
+	env := testEnv(t)
+	for _, cwd := range []string{"/home/u/proj", "/home/u/.claude/spares/spare-x", "/home/u", "/home/u/.aws/x",
+		"/home/u/.docker/x", "/home/u/.local/share/opencode/proj"} {
+		for _, c := range cmds {
+			v := Decide(Event{Kind: Shell, Command: c, CWD: cwd}, env)
+			listed := slices.Contains(refusedAlways, c) || slices.Contains(refusedOnPurpose, c) || slices.Contains(refusedHere[cwd], c)
+			if v.Deny != listed {
+				t.Errorf("cwd %s: refused=%v, want %v: %s: %s", cwd, v.Deny, listed, c, v.Reason)
+			}
+		}
+	}
+}
+
+// A credential directory is protected with the directories above it, not the
+// ones below it; the passess config and state are protected with everything
+// below them too.
+func TestProtectedDir(t *testing.T) {
+	env := testEnv(t)
+	for d, want := range map[string]bool{
+		"/home/u/.claude": true, "/home/u/.aws": true, "/home/u/.config/gh": true, "/home/u": true, "/home/u/.config": true, "/": true,
+		"/home/u/.claude/spares/x": false, "/home/u/.aws/x": false, "/home/u/.docker/x/y": false, "/home/u/.local/share/opencode/p": false,
+		"/home/u/proj": false, "/tmp": false, "": false,
+		"/home/u/.config/passess": true, "/home/u/.config/passess/sub": true, "/home/u/.local/state/passess/backups/x": true,
+	} {
+		if got := protectedDir(d, env, true); got != want {
+			t.Errorf("protectedDir(%q) = %v, want %v", d, got, want)
+		}
+	}
+	// the directory a session began in is not taken for one above a protected directory
+	for d, want := range map[string]bool{"/home/u": false, "/": false, "/home/u/.config": false, "/home/u/.aws": true, "/home/u/.config/passess/x": true} {
+		if got := protectedDir(d, env, false); got != want {
+			t.Errorf("protectedDir(%q) without ancestors = %v, want %v", d, got, want)
+		}
+	}
 }

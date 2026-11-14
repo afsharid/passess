@@ -226,30 +226,31 @@ func unplaced(p string, at where) bool {
 const lostCd = "the hook could not follow a cd before it and cannot tell which directory it is in"
 
 // protectedDir says whether d is a directory where a relative name could be
-// one the hook guards: the passess config or state directory, a directory
-// that holds a credential file (HOME holds .npmrc and .netrc), or a directory
-// above one of them, which a cd can still reach.
-func protectedDir(d string, env Env) bool {
+// one the hook guards: the passess config or state directory or one within
+// them, a directory that holds a credential file (HOME holds .npmrc and
+// .netrc), or, when above is set, a directory above one of them, which a cd can
+// still reach. A directory below a credential directory holds no credential
+// file by that name: ~/.claude/spares/x is ordinary, as is a project under ~/.aws.
+func protectedDir(d string, env Env, above bool) bool {
 	if d == "" {
 		return false
 	}
-	dirs := append([]string{env.StateDir}, env.ConfigDirs...)
+	for _, p := range append([]string{env.StateDir}, env.ConfigDirs...) {
+		if p != "" && (within(d, p) || (above && within(p, d))) {
+			return true
+		}
+	}
 	home := false
 	if env.Home != "" {
 		for _, c := range credentialPaths {
 			if dir := filepath.Dir(filepath.Join(env.Home, c)); dir == env.Home {
 				home = true
-			} else {
-				dirs = append(dirs, dir)
+			} else if d == dir || (above && within(dir, d)) {
+				return true
 			}
 		}
 	}
-	for _, p := range dirs {
-		if p != "" && (within(d, p) || within(p, d)) {
-			return true
-		}
-	}
-	return home && (d == env.Home || within(env.Home, d))
+	return home && above && within(env.Home, d)
 }
 
 // credentialNames are the base names of the credential files under HOME; a
@@ -361,9 +362,13 @@ func checkShell(cmd string, at where, env Env) string {
 	// relative sensitive name is still refused.
 	cur, stack, risk := at.dir, []string(nil), at.blind
 	here := func() where { return where{cur, cur == "" && risk} }
+	// guarded says whether the directory the shell may have left was protected.
+	// The one the session began in is not taken for one above a protected
+	// directory, since that would refuse most commands run from HOME or from /.
+	guarded := func(d string) bool { return protectedDir(d, env, d != at.dir) }
 	// unknown drops the directory. dirs are the last ones it may have been.
 	unknown := func(sticky bool, dirs ...string) {
-		risk = sticky || slices.ContainsFunc(dirs, func(d string) bool { return protectedDir(d, env) })
+		risk = sticky || slices.ContainsFunc(dirs, guarded)
 		cur, stack = "", nil
 	}
 	// A cd moves the shell only where the shell runs it. In a subshell, a
@@ -456,7 +461,7 @@ func checkShell(cmd string, at where, env Env) string {
 				}
 				next, st := afterCd(args, cur, stack, env.Home)
 				if next == "" && cur != "" { // a cd to a directory not known here
-					risk = protectedDir(cur, env)
+					risk = guarded(cur)
 				}
 				cur, stack = next, st
 				switch filepath.Base(program) {
@@ -540,7 +545,7 @@ func evalReaches(args []string, cur string, env Env) bool {
 				words = append(words, s)
 			}
 			dir, stack = afterCd(words, dir, stack, env.Home)
-			hit = protectedDir(dir, env)
+			hit = protectedDir(dir, env, true)
 		}
 		return !hit
 	})
