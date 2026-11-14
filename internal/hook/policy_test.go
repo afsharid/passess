@@ -329,15 +329,16 @@ func TestCdScope(t *testing.T) {
 		`(cd ~/.config/passess && echo x >> notes)`, `(cd ~/.config/passess; tee notes)`, `{ cd ~/.aws; } && cat credentials`,
 		`cd ~/.config/passess && { echo x >> config.toml; }`, `cd ~/.aws && cd . && cat credentials`,
 		// a directory that may or may not be entered is not known afterwards
-		`false && cd /tmp; echo x >> config.toml`, `if true; then cd /tmp; fi; cat < credentials`,
 		`f() { cd ~/.config/passess; }; f; echo x >> config.toml`,
 		`builtin cd ~/.config/passess; echo x >> notes`, `command cd ~/.aws && cat credentials`,
-		`eval 'cd ~/.aws'; cat credentials`, `source ./go.sh; cat credentials`, `. ./go.sh; echo x >> config.toml`,
 	}, []string{
 		`cd /tmp && ls`, `cd /tmp && cd sub && echo x > out.txt`, `(cd /tmp); echo x >> config.toml`, `(cd /tmp); cat credentials`,
 		`cd /tmp; echo x >> config.toml`, `cd /tmp | cat; echo x > out.txt`, `false && cd /tmp; echo x > out.txt`,
 		`echo $(cd /tmp); cat README.md`, `if true; then cd /tmp; fi; cat README.md`, `cd ~/.config/passess; (cd /tmp); cat README.md`,
 		`cd ~/.aws; ls; (cd /tmp); echo x > out.txt`, `{ cd /tmp; } & cat README.md`,
+		// the directory is lost from an ordinary one: see TestUnknownDirectory
+		`false && cd /tmp; echo x >> config.toml`, `if true; then cd /tmp; fi; cat < credentials`,
+		`source ./go.sh; cat credentials`, `. ./go.sh; echo x >> config.toml`,
 	})
 }
 
@@ -384,4 +385,78 @@ func TestPromptPrivateKeyBlock(t *testing.T) {
 			t.Errorf("%s: refused: %s", name, v.Reason)
 		}
 	}
+}
+
+// When a cd cannot be followed, a relative sensitive name is refused only if
+// the directory before it was a protected one; from an ordinary directory it
+// passes, as it did before the cd.
+func TestUnknownDirectory(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cd ~/.config/passess && npm i && cd /tmp && echo x >> config.toml`,
+		`cd ~/.config/passess; cd "$X"; echo x >> config.toml`,
+		`cd ~/.aws; source ./go.sh; cat credentials`, `cd ~/.aws; eval "$(foo)"; cat < credentials`,
+		`cd ~/.aws && ls && cd "$X"; cat credentials`,
+		`cd ~/.config/passess; if x; then cd "$D"; fi; echo x >> config.toml`,
+		`cd ~/.config/gh; for d in a b; do cd $d; done; cat hosts.yml`,
+		`cd ~; cd "$X"; cat .npmrc`, `cd ~/.config; cd "$X"; echo x >> config.toml`,
+		`cd ~/.local/state/passess; cd "$X"; cat auth.json`,
+		// a branch that ends in a protected directory
+		`if x; then cd ~/.config/passess; fi; echo x >> config.toml`, `false && cd ~/.aws; cat credentials`,
+		`eval 'cd ~/.aws'; cat credentials`, `eval cd ~/.config/passess; echo x >> config.toml`,
+		`cd /tmp; cd ~/.aws; cd "$X"; cat credentials`,
+		// the cd moves into a protected directory after an unknown one
+		`cd "$X"; cd ~/.aws && cat credentials`,
+		// what runs inside keeps what is known about the directory
+		`cd ~/.aws; cd "$X"; bash -c 'cat credentials'`, `cd ~/.aws; cd "$X"; find . -exec cat credentials \;`,
+		`cd ~/.aws; pushd "$X"; popd; cat credentials`, `cd ~/.config; cd passess; echo x >> config.toml`,
+	}, []string{
+		`cd "$X"; bash -c 'cat credentials'`, `cd "$X"; pushd /tmp; popd; cat credentials`,
+		`cd frontend && npm i && cd .. && echo x > config.toml`, `mkdir -p a && cd a && echo x > config.toml`,
+		`cd "$(git rev-parse --show-toplevel)" && cat .npmrc`,
+		`cd "$(git rev-parse --show-toplevel)" && echo x >> .cargo/config.toml`,
+		`cd "$(dirname "$0")" && cat config.json`, `source .venv/bin/activate && jq . config.json`,
+		`. ./env.sh; touch config.toml`, `eval "$(direnv export bash)"; cat config.json`,
+		`if [ -d x ]; then cd x; fi; cat .npmrc`, `for d in a b; do cd $d; done; cat .npmrc`, `cd x || true; cat .npmrc`,
+		`cd "$X" && cp config.toml.example config.toml`, `cd "$X" && grep config.toml Makefile`,
+		`cd "$X" && diff config.toml config.toml.bak`,
+		`cd /tmp; cd "$X"; echo x > config.toml`, `cd "$X"; cd /tmp; echo x > config.toml`,
+		`if x; then cd /tmp; fi; cat credentials`, `eval 'cd /tmp'; cat credentials`,
+	})
+	env := testEnv(t)
+	for _, c := range []string{`cd ~/.config/passess; cd "$X"; echo x >> config.toml`, `cd ~/.aws; cd "$X"; cat credentials`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !strings.Contains(v.Reason, "could not follow") {
+			t.Errorf("reason does not say the cd was not followed: %s: %s", c, v.Reason)
+		}
+	}
+	// a shell started where nothing is known stays careful
+	for _, c := range []string{`echo x >> config.toml`, `cat credentials`} {
+		if v := Decide(Event{Kind: Shell, Command: c}, env); !v.Deny {
+			t.Errorf("allowed with no directory: %s", c)
+		}
+	}
+	if v := Decide(Event{Kind: Shell, Command: `cd "$X"; cat credentials`}, env); !v.Deny {
+		t.Error("allowed after an unknown cd from no directory")
+	}
+}
+
+// A function body is checked where the function is called, with the
+// directory in effect there; a coproc is a subshell.
+func TestFunctionBodiesAndCoproc(t *testing.T) {
+	shellVerdicts(t, []string{
+		`f() { echo x >> config.toml; }; cd ~/.config/passess; f`, `f() { cat credentials; }; cd ~/.aws; f`,
+		`cd ~/.config/passess; coproc cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; coproc { cd /tmp; }; echo x >> config.toml`,
+		`f() { cat credentials; }; cd ~/.aws && f`, `f() { cat credentials; }; cd ~/.aws; (f)`,
+		`f() { echo x >> config.toml; }; g() { f; }; cd ~/.config/passess; g`,
+		`function f { cat credentials; }; cd ~/.aws; f`, `f() { cat credentials; }; cd ~/.aws; echo $(f)`,
+		`f() { cd ~/.aws; }; f; cat credentials`, `f() { echo x >> config.toml; }; cd ~/.config/passess; f; f`,
+		`f() { cat credentials; }; cd ~/.aws; cat x | f`, `f() { cat credentials; }; if x; then cd ~/.aws; f; fi`,
+		`f() { passess agent stop; }; f`, `f() { echo $GITHUB_TOKEN; }`,
+	}, []string{
+		`f() { echo x >> config.toml; }; f`, `f() { cat credentials; }; cd /tmp; f`, `f() { cd /tmp; }; f; echo x >> config.toml`,
+		`coproc cd /tmp; echo x > config.toml`, `cd /tmp; coproc { cd /; }; cat credentials`, `f() { f; }; f`,
+		`f() { g; }; g() { f; }; f`, `f() { cat README.md; }; cd ~/.aws; f`, `f() { cd /tmp; }; cd ~/.aws; f; cat credentials`,
+		`f() { echo x >> config.toml; }; cd ~/.config/passess; (cd /tmp; f)`,
+	})
 }

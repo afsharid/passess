@@ -83,19 +83,19 @@ type Env struct {
 func Decide(ev Event, env Env) Verdict {
 	switch ev.Kind {
 	case Shell:
-		if r := checkShell(ev.Command, ev.CWD, env); r != "" {
+		if r := checkShell(ev.Command, where{ev.CWD, true}, env); r != "" {
 			return Verdict{Deny: true, Reason: r}
 		}
 	case Read:
 		for _, p := range ev.Paths {
-			if why := deniedPath(p, ev.CWD, env); why != "" {
+			if why := deniedPath(p, where{ev.CWD, true}, env); why != "" {
 				return Verdict{Deny: true, Reason: readReason(p, why)}
 			}
 		}
 	case Write:
 		for _, p := range ev.Paths {
-			if writesConfig(p, ev.CWD, env) {
-				return Verdict{Deny: true, Reason: configReason(p)}
+			if r := configWrite(p, where{ev.CWD, true}, env); r != "" {
+				return Verdict{Deny: true, Reason: r}
 			}
 		}
 	case MCP:
@@ -175,6 +175,15 @@ var credentialPaths = func() []string {
 	return out
 }()
 
+// where is the directory relative paths resolve against. dir is "" when it
+// is not known; blind then says that a relative name may still be in a
+// protected directory: none was known to begin with, or the last one known was
+// protected (see protectedDir).
+type where struct {
+	dir   string
+	blind bool
+}
+
 func abs(p, cwd, home string) string {
 	switch {
 	case p == "~":
@@ -206,10 +215,40 @@ func within(p, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
-// unplaced says p is a relative name with no directory to be relative to:
-// where it lands is not known.
-func unplaced(p, cwd string) bool {
-	return cwd == "" && p != "" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~")
+// unplaced says p is a relative name with no directory to be relative to, and
+// that it may be in a protected one: where it lands is not known.
+func unplaced(p string, at where) bool {
+	return at.dir == "" && at.blind && p != "" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~")
+}
+
+// lostCd says why a relative name is refused when the directory is not known.
+const lostCd = "the hook could not follow a cd before it and cannot tell which directory it is in"
+
+// protectedDir says whether d is a directory where a relative name could be
+// one the hook guards: the passess config or state directory, a directory
+// that holds a credential file (HOME holds .npmrc and .netrc), or a directory
+// above one of them, which a cd can still reach.
+func protectedDir(d string, env Env) bool {
+	if d == "" {
+		return false
+	}
+	dirs := append([]string{env.StateDir}, env.ConfigDirs...)
+	home := false
+	if env.Home != "" {
+		for _, c := range credentialPaths {
+			if dir := filepath.Dir(filepath.Join(env.Home, c)); dir == env.Home {
+				home = true
+			} else {
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	for _, p := range dirs {
+		if p != "" && (within(d, p) || within(p, d)) {
+			return true
+		}
+	}
+	return home && (d == env.Home || within(env.Home, d))
 }
 
 // credentialNames are the base names of the credential files under HOME; a
@@ -224,19 +263,26 @@ var credentialNames = func() []string {
 	return out
 }()
 
-// writesConfig says whether writing p changes the passess config. A relative
-// name that is not placed counts when it is the config file's name.
-func writesConfig(p, cwd string, env Env) bool {
-	return inConfig(abs(p, cwd, env.Home), env) ||
-		(unplaced(p, cwd) && strings.HasPrefix(filepath.Base(p), "config.toml"))
+// configWrite says why writing p changes the passess config, or "". A
+// relative name that is not placed counts when it is the config file's name.
+func configWrite(p string, at where, env Env) string {
+	switch {
+	case inConfig(abs(p, at.dir, env.Home), env):
+		return configReason(p)
+	case unplaced(p, at) && strings.HasPrefix(filepath.Base(p), "config.toml"):
+		return "passess: " + p + " may be the passess config (" + lostCd + "), which decides which program receives which secret. " +
+			"Write it by its full path in a command of its own, or tell the user what you need and let them do it in Passess.app " +
+			"or with `passess add` or `passess set`."
+	}
+	return ""
 }
 
 // deniedPath says why reading p would expose credentials, or "".
-func deniedPath(p, cwd string, env Env) string {
-	full := abs(p, cwd, env.Home)
+func deniedPath(p string, at where, env Env) string {
+	full := abs(p, at.dir, env.Home)
 	base := filepath.Base(full)
-	if unplaced(p, cwd) && slices.Contains(credentialNames, base) {
-		return "may hold credentials"
+	if unplaced(p, at) && slices.Contains(credentialNames, base) {
+		return "may hold credentials (" + lostCd + ")"
 	}
 	switch {
 	case envFile.MatchString(strings.TrimRight(base, "*")) && !envTemplate.MatchString(base):
@@ -297,7 +343,7 @@ var wrapperOptions = map[string]struct {
 	"xargs":      {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I"}, 0},
 }
 
-func checkShell(cmd, cwd string, env Env) string {
+func checkShell(cmd string, at where, env Env) string {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return "" // not ours to judge; the harness runs what it can
@@ -307,96 +353,127 @@ func checkShell(cmd, cwd string, env Env) string {
 	steered := ""   // a path setting assigned other than inline on a passess call
 	// cur is the directory relative paths resolve against: where the harness
 	// ran the command, then wherever a literal cd or pushd earlier in the same
-	// command line moved it. "" once that is unknown.
-	cur, stack := cwd, []string(nil)
+	// command line moved it. "" once that is unknown; risk then says that the
+	// last directory known was a protected one (or none was known), so a
+	// relative sensitive name is still refused.
+	cur, stack, risk := at.dir, []string(nil), at.blind
+	here := func() where { return where{cur, cur == "" && risk} }
+	// unknown drops the directory. dirs are the last ones it may have been.
+	unknown := func(sticky bool, dirs ...string) {
+		risk = sticky || slices.ContainsFunc(dirs, func(d string) bool { return protectedDir(d, env) })
+		cur, stack = "", nil
+	}
 	// A cd moves the shell only where the shell runs it. In a subshell, a
 	// pipeline, a background job or a substitution it is undone when that ends;
-	// in a branch or a function that may not run it leaves the directory
-	// unknown. path holds the nodes being walked, scopes the ones that bound a cd.
-	var path []syntax.Node
-	var scopes []cdScope
-	syntax.Walk(file, func(node syntax.Node) bool {
-		if node == nil { // the children of the last node on path are done
-			left := path[len(path)-1]
-			path = path[:len(path)-1]
-			if len(scopes) > 0 && scopes[len(scopes)-1].node == left {
-				sc := scopes[len(scopes)-1]
-				scopes = scopes[:len(scopes)-1]
+	// in a branch that may not run it leaves the directory unknown. A function
+	// body runs where the function is called, so it is walked again at each
+	// call. path holds the nodes being walked, scopes the ones that bound a cd.
+	funcs := map[string]*syntax.Stmt{}
+	running := map[string]bool{}
+	calls := 0
+	var run func(root syntax.Node)
+	run = func(root syntax.Node) {
+		var path []syntax.Node
+		var scopes []cdScope
+		syntax.Walk(root, func(node syntax.Node) bool {
+			if node == nil { // the children of the last node on path are done
+				left := path[len(path)-1]
+				path = path[:len(path)-1]
+				if len(scopes) > 0 && scopes[len(scopes)-1].node == left {
+					sc := scopes[len(scopes)-1]
+					scopes = scopes[:len(scopes)-1]
+					switch {
+					case sc.undone:
+						cur, stack, risk = sc.cur, sc.stack, sc.blind
+					case cur != sc.cur || !slices.Equal(stack, sc.stack):
+						unknown(sc.blind || (cur == "" && risk), sc.cur, cur)
+					}
+				}
+				return true
+			}
+			if reason != "" {
+				return false
+			}
+			var parent syntax.Node
+			if len(path) > 0 {
+				parent = path[len(path)-1]
+			}
+			if undone, bounded := cdScopeOf(parent, node, env); bounded {
+				scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack), cur == "" && risk})
+			}
+			path = append(path, node)
+			switch n := node.(type) {
+			case *syntax.ParamExp:
+				if n.Param != nil {
+					reason = checkParam(n.Param.Value, env)
+				}
+			case *syntax.FuncDecl:
+				if n.Name != nil {
+					funcs[n.Name.Value] = n.Body
+				}
+			case *syntax.Redirect:
+				p, ok := literal(n.Word, env)
 				switch {
-				case sc.undone:
-					cur, stack = sc.cur, sc.stack
-				case cur != sc.cur || !slices.Equal(stack, sc.stack):
-					cur, stack = "", nil
+				case !ok:
+				case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
+					if why := deniedPath(p, here(), env); why != "" {
+						reason = readReason(p, why)
+					}
+				default: // > >> &> into the config
+					reason = configWrite(p, here(), env)
 				}
-			}
-			return true
-		}
-		if reason != "" {
-			return false
-		}
-		var parent syntax.Node
-		if len(path) > 0 {
-			parent = path[len(path)-1]
-		}
-		if undone, bounded := cdScopeOf(parent, node, env); bounded {
-			scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack)})
-		}
-		path = append(path, node)
-		switch n := node.(type) {
-		case *syntax.ParamExp:
-			if n.Param != nil {
-				reason = checkParam(n.Param.Value, env)
-			}
-		case *syntax.Redirect:
-			p, ok := literal(n.Word, env)
-			switch {
-			case !ok:
-			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
-				if why := deniedPath(p, cur, env); why != "" {
-					reason = readReason(p, why)
+			case *syntax.CallExpr:
+				var args []string
+				for _, w := range n.Args {
+					ws, _ := literal(w, env) // a non-literal word stays "" and matches nothing
+					args = append(args, ws)
 				}
-			case writesConfig(p, cur, env): // > >> &> into the config
-				reason = configReason(p)
-			}
-		case *syntax.CallExpr:
-			var args []string
-			for _, w := range n.Args {
-				s, _ := literal(w, env) // a non-literal word stays "" and matches nothing
-				args = append(args, s)
-			}
-			program := ""
-			if len(args) > 0 {
-				program = args[0]
-			}
-			if filepath.Base(program) != "passess" && len(args) > 0 {
-				others = true
-			}
-			for _, a := range n.Assigns {
-				if reason == "" && a.Name != nil {
-					reason = checkAssign(a.Name.Value, program)
-					if pathSettings[a.Name.Value] && filepath.Base(program) != "passess" {
+				program := ""
+				if len(args) > 0 {
+					program = args[0]
+				}
+				if filepath.Base(program) != "passess" && len(args) > 0 {
+					others = true
+				}
+				for _, a := range n.Assigns {
+					if reason == "" && a.Name != nil {
+						reason = checkAssign(a.Name.Value, program)
+						if pathSettings[a.Name.Value] && filepath.Base(program) != "passess" {
+							steered = a.Name.Value
+						}
+					}
+				}
+				if reason == "" {
+					reason = checkCall(args, here(), env)
+				}
+				if body := funcs[program]; reason == "" && body != nil && !running[program] && calls < maxFuncCalls {
+					calls++
+					running[program] = true
+					run(body)
+					delete(running, program)
+				}
+				next, st := afterCd(args, cur, stack, env.Home)
+				if next == "" && cur != "" { // a cd to a directory not known here
+					risk = protectedDir(cur, env)
+				}
+				cur, stack = next, st
+				switch filepath.Base(program) {
+				case "eval", "source", ".": // they run commands, a cd among them, in this shell
+					reach := filepath.Base(program) == "eval" && evalReaches(args[1:], cur, env)
+					unknown((cur == "" && risk) || reach, cur)
+				}
+			case *syntax.DeclClause: // export, declare, typeset, local, readonly
+				reason = checkDecl(n, env)
+				for _, a := range n.Args {
+					if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
 						steered = a.Name.Value
 					}
 				}
 			}
-			if reason == "" {
-				reason = checkCall(args, cur, env)
-			}
-			cur, stack = afterCd(args, cur, stack, env.Home)
-			switch filepath.Base(program) {
-			case "eval", "source", ".": // they run commands, a cd among them, in this shell
-				cur, stack = "", nil
-			}
-		case *syntax.DeclClause: // export, declare, typeset, local, readonly
-			reason = checkDecl(n, env)
-			for _, a := range n.Args {
-				if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
-					steered = a.Name.Value
-				}
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+	run(file)
 	// HOME and the like set apart from the passess call, by export or for a
 	// shell that runs it, still reach it: the whole text is searched.
 	if reason == "" && steered != "" && strings.Contains(cmd, "passess") {
@@ -417,16 +494,17 @@ type cdScope struct {
 	undone bool // the cd is undone at its end; else the directory is unknown if it moved
 	cur    string
 	stack  []string
+	blind  bool // the directory was unknown then, and relative sensitive names counted
 }
 
 // cdScopeOf says whether node, a child of parent, bounds a cd, and how.
 func cdScopeOf(parent, node syntax.Node, env Env) (undone, bounded bool) {
 	switch n := node.(type) {
-	case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
-		return true, true
+	case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.CoprocClause, *syntax.FuncDecl:
+		return true, true // a function body does not run where it is defined
 	case *syntax.BinaryCmd:
 		return true, n.Op == syntax.Pipe || n.Op == syntax.PipeAll
-	case *syntax.FuncDecl, *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause, *syntax.CaseClause:
+	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause, *syntax.CaseClause:
 		return false, true
 	case *syntax.Stmt:
 		if n.Background || n.Coprocess {
@@ -439,6 +517,32 @@ func cdScopeOf(parent, node syntax.Node, env Env) (undone, bounded bool) {
 		}
 	}
 	return false, false
+}
+
+// maxFuncCalls bounds how many function calls in one command line are walked.
+const maxFuncCalls = 64
+
+// evalReaches says whether the text eval runs, made of the literal words among
+// args, has a cd into a protected directory: the shell moves there.
+func evalReaches(args []string, cur string, env Env) bool {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(strings.Join(args, " ")), "")
+	if err != nil {
+		return false
+	}
+	dir, stack, hit := cur, []string(nil), false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if c, ok := node.(*syntax.CallExpr); ok && !hit {
+			var words []string
+			for _, w := range c.Args {
+				s, _ := literal(w, env)
+				words = append(words, s)
+			}
+			dir, stack = afterCd(words, dir, stack, env.Home)
+			hit = protectedDir(dir, env)
+		}
+		return !hit
+	})
+	return hit
 }
 
 // cdChain says whether s is cd, pushd or popd, or such commands joined by &&.
@@ -688,7 +792,7 @@ func checkParam(name string, env Env) string {
 		name, name, name, name, name)
 }
 
-func checkCall(args []string, cwd string, env Env) string {
+func checkCall(args []string, at where, env Env) string {
 	for len(args) > 0 && wrappers[filepath.Base(args[0])] {
 		args = skipOptions(filepath.Base(args[0]), args[1:])
 	}
@@ -699,7 +803,7 @@ func checkCall(args []string, cwd string, env Env) string {
 		// A program built from a variable or a substitution may be passess.
 		// The refusals no other program shares apply to it: `$P agent stop`.
 		if len(args) > 1 && (args[1] == "helper" || (len(args) > 2 && args[1] == "agent" && slices.Contains([]string{"stop", "serve", "approve"}, args[2]))) {
-			return checkCall(append([]string{"passess"}, args[1:]...), cwd, env)
+			return checkCall(append([]string{"passess"}, args[1:]...), at, env)
 		}
 		return ""
 	}
@@ -732,11 +836,11 @@ func checkCall(args []string, cwd string, env Env) string {
 		for i, a := range args[1:] {
 			// -c, -lc, -ec …: the next word is one more command line.
 			if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a, 'c') && i+2 < len(args) {
-				return checkShell(args[i+2], cwd, env)
+				return checkShell(args[i+2], at, env)
 			}
 		}
 	case "eval":
-		return checkShell(strings.Join(args[1:], " "), cwd, env)
+		return checkShell(strings.Join(args[1:], " "), at, env)
 	case "find":
 		// -exec COMMAND … ; and -exec COMMAND … + run COMMAND.
 		for i, a := range args {
@@ -747,7 +851,7 @@ func checkCall(args []string, cwd string, env Env) string {
 			for end < len(args) && args[end] != ";" && args[end] != "+" {
 				end++
 			}
-			if r := checkCall(args[i+1:end], cwd, env); r != "" {
+			if r := checkCall(args[i+1:end], at, env); r != "" {
 				return r
 			}
 		}
@@ -778,7 +882,7 @@ func checkCall(args []string, cwd string, env Env) string {
 				return r
 			}
 		}
-		return checkCall(rest, cwd, env)
+		return checkCall(rest, at, env)
 	case "passess":
 		switch {
 		case len(args) > 1 && args[1] == "":
@@ -890,9 +994,12 @@ func checkCall(args []string, cwd string, env Env) string {
 	// Commands that write the files they name: none may touch the config.
 	if writers[name] || copiers[name] {
 		for _, a := range args[1:] {
-			if a != "" && !strings.HasPrefix(a, "-") && writesConfig(a, cwd, env) {
+			if a == "" || strings.HasPrefix(a, "-") {
+				continue
+			}
+			if r := configWrite(a, at, env); r != "" {
 				if name != "sed" || slices.ContainsFunc(args[1:], func(f string) bool { return strings.HasPrefix(f, "-i") }) {
-					return configReason(a)
+					return r
 				}
 			}
 		}
@@ -908,7 +1015,7 @@ func checkCall(args []string, cwd string, env Env) string {
 			operands = operands[:len(operands)-1] // cp .env.example .env writes .env, it does not read it
 		}
 		for _, a := range operands {
-			if why := deniedPath(a, cwd, env); why != "" {
+			if why := deniedPath(a, at, env); why != "" {
 				return readReason(a, why)
 			}
 		}
