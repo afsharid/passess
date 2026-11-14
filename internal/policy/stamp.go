@@ -42,5 +42,10 @@ func (p Program) Unchanged() error {
 	if err != nil || now != p.stamp {
 		return fmt.Errorf("%w: %s; run the command again", ErrChanged, p.Path)
 	}
+	for _, i := range p.interps {
+		if now, err := stampOf(i.path); err != nil || now != i.stamp {
+			return fmt.Errorf("%w: %s; run the command again", ErrChanged, i.path)
+		}
+	}
 	return nil
 }

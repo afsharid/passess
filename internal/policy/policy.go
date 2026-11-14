@@ -112,7 +112,14 @@ type Program struct {
 	Families []string // Name's family plus any it counts as
 	Why      map[string]string
 
-	stamp fileStamp // the file Inspect judged; see Unchanged
+	stamp   fileStamp // the file Inspect judged; see Unchanged
+	interps []stamped // the interpreters its #! lines lead to; see Unchanged
+}
+
+// stamped is a file Inspect read besides the program itself.
+type stamped struct {
+	path  string
+	stamp fileStamp
 }
 
 // ErrNotFound means argv[0] could not be found or is not executable.
@@ -156,17 +163,60 @@ func Inspect(argv0 string, lookPath func(string) (string, error)) (Program, erro
 	if typed != own {
 		add(typed, "")
 	}
-	for _, interp := range shebang(resolved) {
-		add(Family(interp), fmt.Sprintf("runs under %s", interp))
-	}
+	p.interpreters(resolved, lookPath, add, 0)
 	if f, orig := copyOf(resolved, lookPath); f != "" {
 		add(f, fmt.Sprintf("is a copy of %s", orig))
 	}
 	return p, nil
 }
 
-// shebang returns the interpreter named on a script's #! line. For
-// "#!/usr/bin/env X" that is X: env only launches it there.
+// maxShebangDepth bounds how many #! hops Inspect follows: a script whose
+// interpreter is a script whose interpreter is a script. Linux follows five.
+const maxShebangDepth = 5
+
+// interpreters adds the family of every interpreter the #! line of path leads
+// to. It judges the file the line names, not the name: a copy or a link of a
+// shell under another name is that shell, and a script named there is judged
+// by its own #! line in turn. The files are stamped for Unchanged.
+func (p *Program) interpreters(path string, lookPath func(string) (string, error), add func(f, why string), depth int) {
+	for _, interp := range shebang(path) {
+		name := filepath.Base(interp)
+		add(Family(name), fmt.Sprintf("runs under %s", name))
+		target := interp
+		if !strings.Contains(interp, "/") {
+			t, err := lookPath(interp) // env searches PATH for it
+			if err != nil {
+				continue
+			}
+			target = t
+		}
+		resolved, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			continue
+		}
+		if abs, err := filepath.Abs(resolved); err == nil {
+			resolved = abs
+		}
+		if resolved == path {
+			continue
+		}
+		if stamp, err := stampOf(resolved); err == nil {
+			p.interps = append(p.interps, stamped{resolved, stamp})
+		}
+		if rname := filepath.Base(resolved); rname != name {
+			add(Family(rname), fmt.Sprintf("runs under %s", name))
+		}
+		if f, orig := copyOf(resolved, lookPath); f != "" {
+			add(f, fmt.Sprintf("runs under %s, a copy of %s", name, orig))
+		}
+		if depth < maxShebangDepth {
+			p.interpreters(resolved, lookPath, add, depth+1)
+		}
+	}
+}
+
+// shebang returns the interpreter named on a script's #! line, as written.
+// For "#!/usr/bin/env X" that is X: env only launches it there.
 func shebang(path string) []string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -181,16 +231,15 @@ func shebang(path string) []string {
 	if len(fields) == 0 {
 		return nil
 	}
-	interp := filepath.Base(fields[0])
-	if interp == "env" {
+	if filepath.Base(fields[0]) == "env" {
 		for _, arg := range fields[1:] {
 			if strings.HasPrefix(arg, "-") || strings.Contains(arg, "=") {
 				continue
 			}
-			return []string{filepath.Base(arg)}
+			return []string{arg}
 		}
 	}
-	return []string{interp}
+	return []string{fields[0]}
 }
 
 // referenceDirs are searched for the real interpreters whatever PATH says.

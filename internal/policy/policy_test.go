@@ -359,3 +359,137 @@ func TestProjectAllowDoesNotHandShellsTheSecret(t *testing.T) {
 		t.Errorf("project allow [gh] let cat through")
 	}
 }
+
+// interpFixture writes a copy and a symlink of the system sh, and returns
+// their paths with a directory to put scripts in.
+func interpFixture(t *testing.T) (dir, copied, linked string) {
+	t.Helper()
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	shPath, _ = filepath.EvalSymlinks(shPath)
+	data, err := os.ReadFile(shPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = t.TempDir()
+	copied = filepath.Join(dir, "myint")
+	if err := os.WriteFile(copied, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked = filepath.Join(dir, "myln")
+	if err := os.Symlink(shPath, linked); err != nil {
+		t.Fatal(err)
+	}
+	return dir, copied, linked
+}
+
+func writeScript(t *testing.T, path, firstLine string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(firstLine+"\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A script is judged by the file its #! line names, not by that file's name:
+// a copy or a link of a shell under another name is still a shell.
+func TestShebangInterpreterIsInspected(t *testing.T) {
+	dir, copied, linked := interpFixture(t)
+	viaCopy := filepath.Join(dir, "t1")
+	writeScript(t, viaCopy, "#!"+copied)
+	viaLink := filepath.Join(dir, "t2")
+	writeScript(t, viaLink, "#!"+linked)
+	chained := filepath.Join(dir, "t3")
+	writeScript(t, chained, "#!"+viaCopy)
+	viaEnv := filepath.Join(dir, "t4")
+	writeScript(t, viaEnv, "#!/usr/bin/env myint")
+	viaEnvS := filepath.Join(dir, "t5")
+	writeScript(t, viaEnvS, "#!/usr/bin/env -S myln -e")
+	lookPath := func(name string) (string, error) {
+		switch name {
+		case "myint":
+			return copied, nil
+		case "myln":
+			return linked, nil
+		}
+		return exec.LookPath(name)
+	}
+	for _, path := range []string{viaCopy, viaLink, chained, viaEnv, viaEnvS} {
+		p, err := Inspect(path, lookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, allow := range [][]string{nil, {filepath.Base(path)}} {
+			if d := Check("TOKEN", p, allow); d.Allowed {
+				t.Errorf("%s with allow=%v reached a shell (families %v)", filepath.Base(path), allow, p.Families)
+			}
+		}
+	}
+}
+
+func TestShebangControlsStayAllowed(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	plain := filepath.Join(dir, "plain")
+	writeScript(t, plain, "#!"+cat)
+	missing := filepath.Join(dir, "nothing")
+	writeScript(t, missing, "#!"+filepath.Join(dir, "missing-interpreter"))
+	loop := filepath.Join(dir, "loop")
+	writeScript(t, loop, "#!"+loop)
+	for _, path := range []string{plain, missing, loop} {
+		p, err := Inspect(path, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); !d.Allowed {
+			t.Errorf("%s was refused (families %v): %+v", filepath.Base(path), p.Families, d)
+		}
+	}
+}
+
+// A script's interpreter swapped after the check must be caught too.
+func TestUnchangedCatchesInterpreterSwap(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	cat, _ = filepath.EvalSymlinks(cat)
+	data, err := os.ReadFile(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp := filepath.Join(dir, "myint")
+	if err := os.WriteFile(interp, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+interp)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("untouched: %v", err)
+	}
+	shPath, _ := exec.LookPath("sh")
+	shPath, _ = filepath.EvalSymlinks(shPath)
+	sh, err := os.ReadFile(shPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, sh, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, interp); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err == nil {
+		t.Fatal("a swapped interpreter went unnoticed")
+	}
+}
