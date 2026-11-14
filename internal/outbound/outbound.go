@@ -42,7 +42,9 @@ func systemRoots() *x509.CertPool {
 
 // loadRoots reads the system roots with the certificate variables unset, then
 // puts them back so a child process still inherits them. Go caches the first
-// load for the process, so this runs before the first TLS handshake.
+// load for the process, so this assumes it is the first x509 system-root load
+// in the process: every TLS client that carries a secret takes its transport
+// from this package, so nothing else loads the roots before it.
 func loadRoots() *x509.CertPool {
 	type saved struct {
 		key, val string
