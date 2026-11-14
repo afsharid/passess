@@ -139,6 +139,14 @@ func (p Program) label() (name, family string) {
 	return p.runs, p.runs
 }
 
+// RunsAs is the family the program runs as: the applet for a multi-call
+// binary, else the family of the file's own name. An approval and the audit
+// log name a program by it.
+func (p Program) RunsAs() string {
+	_, family := p.label()
+	return family
+}
+
 // ErrNotFound means argv[0] could not be found or is not executable.
 var ErrNotFound = errors.New("command not found")
 

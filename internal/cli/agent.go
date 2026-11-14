@@ -706,7 +706,7 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 	if code != 0 {
 		return code
 	}
-	entry.Program = policy.Family(prog.Name)
+	entry.Program = prog.RunsAs()
 	// Before acquire: a command waiting on the user must not pin a generation
 	// past its lifetime.
 	if code = s.approval(st, u, wanted.names(), prog, req, anchor, anchored, frames); code != 0 {
@@ -773,7 +773,7 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 	quit := make(chan struct{})
 	defer close(quit)
 	code = s.approval(st, u, names, prog, req, anchor, anchored, clientFrames(c, quit))
-	e := auditEntry{Kind: "ask", PID: c.Peer.PID, Secrets: names, Program: policy.Family(prog.Name), Dir: req.Dir,
+	e := auditEntry{Kind: "ask", PID: c.Peer.PID, Secrets: names, Program: prog.RunsAs(), Dir: req.Dir,
 		Argv: redactArgv(req.Argv, nil), Harness: detect.Harness(st.Getenv), Outcome: outcomeOf(code, false), Status: &code}
 	if anchored {
 		e.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)

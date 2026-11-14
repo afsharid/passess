@@ -73,7 +73,7 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	}
 	slices.Sort(need)
 	need = slices.Compact(need)
-	family := policy.Family(prog.Name)
+	family := prog.RunsAs()
 	remember := anchored && u.Agent.ApprovalTTL > 0
 	now := time.Now()
 
