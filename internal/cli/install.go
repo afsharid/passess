@@ -666,7 +666,7 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 			fmt.Fprintf(st.Stdout, "  backup: %s\n", r.Backup)
 		}
 		for _, e := range r.Errors {
-			fmt.Fprintf(st.Stdout, "  error: %s\n", e)
+			fmt.Fprintf(st.Stdout, "  error: %s\n", printable(e))
 		}
 	}
 	if !out.Applied && pending && verb != "status" {

@@ -37,3 +37,16 @@ func TestScanRefusalSaysWhatToDoOnce(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
 }
+
+// An error a harness reports can carry the entry's name or a path it was
+// given; install and status print it without control or bidi characters.
+func TestHarnessErrorsPrintWithoutControls(t *testing.T) {
+	var out strings.Builder
+	st := &Streams{Stdout: &out, Stderr: &out}
+	printHarnesses(st, "status", harnessOutput{Harnesses: []harnessReport{{Label: "Claude Code", Config: "c.json", Hooks: "none",
+		Errors: []string{"claude mcp add srv\x1b[2Jx\u202e: exit 1"}}}})
+	if !strings.Contains(out.String(), "error: claude mcp add srv") {
+		t.Fatalf("the error is not shown:\n%s", out.String())
+	}
+	noTerminalControls(t, "printHarnesses", out.String())
+}

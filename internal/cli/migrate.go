@@ -495,7 +495,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		return failf(st, ExitUnavailable, "%v; passess config is updated, finish with `passess install %s --apply --force` (backup: %s)",
 			err, harnessID, backup)
 	}
-	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), server)
+	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), printable(server))
 	accounts := make([]string, len(moves))
 	for i, mv := range moves {
 		accounts[i] = mv.account
