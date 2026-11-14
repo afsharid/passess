@@ -591,9 +591,11 @@ func TestRelativeShebangUsesTheProcessDirectory(t *testing.T) {
 // repointed after the check changes where the kernel goes.
 func TestUnchangedCatchesInterpreterLinkRetarget(t *testing.T) {
 	dir := t.TempDir()
-	cat, err := exec.LookPath("cat")
+	// A plain program of its own: where cat is an applet of a multi-call
+	// binary, a link to it under another name is that binary, not cat.
+	cat, err := os.Executable()
 	if err != nil {
-		t.Skip("no cat on PATH")
+		t.Fatal(err)
 	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
@@ -636,9 +638,11 @@ func TestUnchangedCatchesInterpreterLinkRetarget(t *testing.T) {
 // A link in a directory on the way counts the same as the final link.
 func TestUnchangedCatchesDirectoryLinkRetarget(t *testing.T) {
 	dir := t.TempDir()
-	cat, err := exec.LookPath("cat")
+	// A plain program of its own: where cat is an applet of a multi-call
+	// binary, a link to it under another name is that binary, not cat.
+	cat, err := os.Executable()
 	if err != nil {
-		t.Skip("no cat on PATH")
+		t.Fatal(err)
 	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
