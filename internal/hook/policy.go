@@ -78,6 +78,9 @@ type Env struct {
 	// memoize them, since a result is redacted string by string.
 	Rules func() *scan.Rules
 	Known func() *redact.Redactor // credential values in the harness's environment
+	// depth counts the command lines being checked inside one another (eval,
+	// sh -c, watch, su -c); checkShell bounds it.
+	depth int
 }
 
 // Decide applies the policy to one event.
@@ -458,7 +461,18 @@ var wrapperOptions = map[string]struct {
 	"su":      {[]string{"-g", "-G", "-s", "-w", "-c", "--group", "--supp-group", "--shell", "--whitelist-environment", "--command"}, 0, false},
 }
 
+// maxShellDepth bounds how many command lines are checked inside one another.
+// Each level parses the text again, so `eval eval eval …` costs the square of
+// its length without a bound; no ordinary command nests so deep.
+const maxShellDepth = 16
+
+const nestedReason = "passess: that command line runs shells inside shells too deeply for its text to be checked, so it is refused. " +
+	"Write the command out without the extra eval, sh -c or watch."
+
 func checkShell(cmd string, at where, env Env) string {
+	if env.depth++; env.depth > maxShellDepth {
+		return nestedReason
+	}
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return "" // not ours to judge; the harness runs what it can
@@ -493,6 +507,13 @@ func checkShell(cmd string, at where, env Env) string {
 	funcs := map[string]*syntax.Stmt{}
 	running := map[string]bool{}
 	calls := 0
+	// chains remembers cdChain for the parts of a long `cd a && cd b && …`, which
+	// each ask about everything left of them.
+	chains := map[*syntax.Stmt]bool{}
+	// patched are the files of the apply_patch envelope in the command text, read
+	// when the first call to apply_patch needs them.
+	var patched []string
+	readPatched := false
 	var run func(root syntax.Node)
 	run = func(root syntax.Node) {
 		var path []syntax.Node
@@ -522,7 +543,7 @@ func checkShell(cmd string, at where, env Env) string {
 			if len(path) > 0 {
 				parent = path[len(path)-1]
 			}
-			if undone, bounded := cdScopeOf(parent, node, env); bounded {
+			if undone, bounded := cdScopeOf(parent, node, chains, env); bounded {
 				scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack), old, cur == "" && risk})
 			}
 			path = append(path, node)
@@ -569,7 +590,10 @@ func checkShell(cmd string, at where, env Env) string {
 				}
 				if reason == "" && (prog(program) == "apply_patch" || prog(program) == "applypatch") {
 					// the envelope arrives on its input or as an argument: the command text holds it
-					for _, p := range patchPaths(cmd) {
+					if !readPatched {
+						patched, readPatched = patchPaths(cmd), true
+					}
+					for _, p := range patched {
 						if reason = configWrite(p, here(), env); reason != "" {
 							break
 						}
@@ -644,7 +668,7 @@ type cdScope struct {
 }
 
 // cdScopeOf says whether node, a child of parent, bounds a cd, and how.
-func cdScopeOf(parent, node syntax.Node, env Env) (undone, bounded bool) {
+func cdScopeOf(parent, node syntax.Node, chains map[*syntax.Stmt]bool, env Env) (undone, bounded bool) {
 	switch n := node.(type) {
 	case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.CoprocClause, *syntax.FuncDecl:
 		return true, true // a function body does not run where it is defined
@@ -659,7 +683,7 @@ func cdScopeOf(parent, node syntax.Node, env Env) (undone, bounded bool) {
 		// The right side of && and || runs only when the left side lets it. A
 		// chain of cds on the left is the usual `cd a && cd b`: taken as run.
 		if b, ok := parent.(*syntax.BinaryCmd); ok && b.Y == n {
-			return false, b.Op == syntax.OrStmt || !cdChain(b.X, env)
+			return false, b.Op == syntax.OrStmt || !cdChain(b.X, chains, env)
 		}
 	}
 	return false, false
@@ -692,7 +716,12 @@ func evalReaches(args []string, cur string, env Env) bool {
 }
 
 // cdChain says whether s is cd, pushd or popd, or such commands joined by &&.
-func cdChain(s *syntax.Stmt, env Env) bool {
+// chains holds the answers already given, so a chain is walked once.
+func cdChain(s *syntax.Stmt, chains map[*syntax.Stmt]bool, env Env) (chain bool) {
+	if known, ok := chains[s]; ok {
+		return known
+	}
+	defer func() { chains[s] = chain }()
 	switch c := s.Cmd.(type) {
 	case *syntax.CallExpr:
 		if len(c.Args) == 0 {
@@ -704,7 +733,7 @@ func cdChain(s *syntax.Stmt, env Env) bool {
 			return true
 		}
 	case *syntax.BinaryCmd:
-		return c.Op == syntax.AndStmt && cdChain(c.X, env) && cdChain(c.Y, env)
+		return c.Op == syntax.AndStmt && cdChain(c.X, chains, env) && cdChain(c.Y, chains, env)
 	}
 	return false
 }
@@ -722,6 +751,10 @@ var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_R
 func setsCDPath(a *syntax.Assign) bool {
 	return a.Name != nil && a.Name.Value == "CDPATH" && a.Value != nil
 }
+
+// maxDirLen bounds the directory afterCd follows: the longest path the
+// system calls take.
+const maxDirLen = 4096
 
 // afterCd returns the working directory after a cd, pushd or popd with args,
 // and the pushd stack; other commands leave both as they are, and isCd says
@@ -753,6 +786,9 @@ func afterCd(args []string, cur string, stack []string, old, home string, cdpath
 			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) || (cdpath && searched(ops[0])) {
 				next = "" // relative to a directory not known here, or one CDPATH may move
 			}
+		}
+		if len(next) > maxDirLen {
+			next = "" // no shell goes so deep, and a long chain of cd would cost the square of its length
 		}
 		if filepath.Base(args[0]) == "pushd" {
 			stack = append(stack, cur)
@@ -1095,13 +1131,24 @@ func checkParam(name string, env Env) string {
 }
 
 func checkCall(args []string, at where, env Env) string {
+	// Each word list after a wrapper is part of the one before it, so what a
+	// pass over the first one covers is not gone over again: a chain of n
+	// wrappers would cost n times the length of the line.
+	var cmdLines []string // the wrappers whose -c options were looked for
+	watched, scanned := false, false
 	for len(args) > 0 && wrappers[prog(args[0])] {
 		wrapper, rest := prog(args[0]), args[1:]
-		if r := commandLine(wrapper, rest, at, env); r != "" {
-			return r
+		if !slices.Contains(cmdLines, wrapper) {
+			cmdLines = append(cmdLines, wrapper)
+			if r := commandLine(wrapper, rest, at, env); r != "" {
+				return r
+			}
 		}
 		args = skipOptions(wrapper, rest)
-		if wrapper == "watch" && len(args) > 0 { // watch hands its words to a shell
+		// watch hands its words to a shell. That check reaches the watch and the
+		// wrappers after it, which it parses again in turn.
+		if wrapper == "watch" && len(args) > 0 && !watched {
+			watched = true
 			if r := checkShell(strings.Join(args, " "), at, env); r != "" {
 				return r
 			}
@@ -1109,10 +1156,13 @@ func checkCall(args []string, at where, env Env) string {
 		// An option the table does not know may take a word, which would then
 		// stand for the program: every word that is passess, or cannot be read,
 		// is tried as the program.
-		for i, w := range rest {
-			if w == "" || prog(w) == "passess" {
-				if r := checkCall(rest[i:], at, env); r != "" {
-					return r
+		if !scanned {
+			scanned = true
+			for i, w := range rest {
+				if w == "" || prog(w) == "passess" {
+					if r := checkCall(rest[i:], at, env); r != "" {
+						return r
+					}
 				}
 			}
 		}
