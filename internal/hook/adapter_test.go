@@ -1,6 +1,9 @@
 package hook
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func parseEvent(t *testing.T, harness, event, payload string) Event {
 	t.Helper()
@@ -30,5 +33,31 @@ func TestClaudeShellTools(t *testing.T) {
 		if v := Decide(parseEvent(t, "claude", "PreToolUse", payload), env); v.Deny {
 			t.Errorf("%s ls denied: %s", tool, v.Reason)
 		}
+	}
+}
+
+// The destination of a Codex apply_patch rename is a file the patch writes.
+func TestApplyPatchMoveTo(t *testing.T) {
+	env := testEnv(t)
+	const cfg = "/home/u/.config/passess/config.toml"
+	patch := func(body string) string {
+		b := strings.NewReplacer("\n", `\n`).Replace("*** Begin Patch\n" + body + "\n@@\n-a\n+b\n*** End Patch")
+		return `{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"` + b + `"},"cwd":"/home/u/proj"}`
+	}
+	for name, body := range map[string]string{
+		"add":      "*** Add File: " + cfg,
+		"update":   "*** Update File: " + cfg,
+		"move to":  "*** Update File: /tmp/evil.toml\n*** Move to: " + cfg,
+		"relative": "*** Update File: /tmp/evil.toml\n*** Move to: ../.config/passess/config.toml",
+	} {
+		for _, h := range []string{"claude", "codex"} {
+			if v := Decide(parseEvent(t, h, "PreToolUse", patch(body)), env); !v.Deny {
+				t.Errorf("%s %s: allowed", h, name)
+			}
+		}
+	}
+	ok := parseEvent(t, "codex", "PreToolUse", patch("*** Update File: src/a.go\n*** Move to: src/b.go"))
+	if len(ok.Paths) != 2 || Decide(ok, env).Deny {
+		t.Errorf("ordinary rename: %+v", ok)
 	}
 }
