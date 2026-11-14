@@ -1,0 +1,16 @@
+*.go
+**/*.md
+.env.example
+.env.sample
+*.{ts,tsx}
+**/*.env.example
+!.env
+!**/.env*
+*
+**/*
+README*
+src/**/*.go
+config.toml
+Makefile
+*.txt
+docs/*.md

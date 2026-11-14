@@ -44,6 +44,7 @@ type Event struct {
 	Tool     string   // the harness's tool name, for messages
 	Command  string   // Shell
 	Paths    []string // Read, Write
+	Globs    []string // Read: patterns that choose which files a search reads
 	Text     string   // Prompt text, or Result output as text
 	Response any      // Result output as the harness shaped it (decoded JSON)
 	CWD      string
@@ -94,6 +95,11 @@ func Decide(ev Event, env Env) Verdict {
 		for _, p := range ev.Paths {
 			if why := deniedPath(p, where{ev.CWD, true}, env); why != "" {
 				return Verdict{Deny: true, Reason: readReason(p, why)}
+			}
+		}
+		for _, g := range ev.Globs {
+			if why := deniedGlob(g, where{ev.CWD, true}, env); why != "" {
+				return Verdict{Deny: true, Reason: readReason(g, why)}
 			}
 		}
 	case Write:
@@ -399,6 +405,70 @@ func deniedPath(p string, at where, env Env) string {
 		}
 	}
 	return ""
+}
+
+// deniedGlob says why a search whose files a glob chooses would expose
+// credentials, or "": the glob names a file deniedPath refuses (.env,
+// **/.env*, .env.*, *.pem, {.env,x}). A glob that only could match such a
+// file, as * does, is an ordinary search. An exclusion (!…) names nothing to
+// read.
+func deniedGlob(g string, at where, env Env) string {
+	if strings.HasPrefix(g, "!") {
+		return ""
+	}
+	for _, alt := range expandBraces(g) {
+		dir, seg := alt[:strings.LastIndexByte(alt, '/')+1], alt[strings.LastIndexByte(alt, '/')+1:]
+		// With wildcards, the literal text before the first one and after the last
+		// stands for the name: .env.* is .env.x, *.pem is .pem.
+		names := []string{seg}
+		if first := strings.IndexAny(seg, "*?["); first >= 0 {
+			head, tail := seg[:first], seg[strings.LastIndexAny(seg, "*?]")+1:]
+			names = []string{head + tail, head + "x" + tail}
+		}
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			if why := deniedPath(dir+name, at, env); why != "" {
+				return why
+			}
+		}
+	}
+	return ""
+}
+
+// expandBraces is the globs a glob with {a,b} alternatives stands for. One
+// with more than maxAlternatives is left as it is.
+func expandBraces(g string) []string {
+	open := strings.IndexByte(g, '{')
+	if open < 0 {
+		return []string{g}
+	}
+	depth, last := 0, open+1
+	var alts []string
+	for i := open; i < len(g); i++ {
+		switch g[i] {
+		case '{':
+			depth++
+		case ',':
+			if depth == 1 {
+				alts, last = append(alts, g[last:i]), i+1
+			}
+		case '}':
+			if depth--; depth == 0 {
+				alts = append(alts, g[last:i])
+				var out []string
+				for _, a := range alts {
+					out = append(out, expandBraces(g[:open]+a+g[i+1:])...)
+					if len(out) > maxAlternatives {
+						return []string{g}
+					}
+				}
+				return out
+			}
+		}
+	}
+	return []string{g} // no closing brace
 }
 
 func readReason(p, why string) string {
