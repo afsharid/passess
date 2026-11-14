@@ -443,12 +443,23 @@ func (m *migration) mcp(harnessID, server string) int {
 		return ExitOK
 	}
 
-	block := mcpBlock(server, raw, envMap, vars, headers, harnessID)
+	// Only env and header values are classified; a credential can sit in the
+	// arguments or the URL too. A coding agent gets the block without them,
+	// since the harness file they come from is one its hooks keep it out of.
+	shown := raw
+	agents := callerAgents(st.Getenv, selfChain())
+	if len(agents) > 0 {
+		shown = withheld(raw)
+	}
+	block := mcpBlock(server, shown, envMap, vars, headers, harnessID)
 	for _, mv := range moves {
 		fmt.Fprintf(st.Stdout, "  %s -> %s at keychain://%s/%s\n", mv.from, mv.secret, keychainService, mv.account)
 	}
 	fmt.Fprintf(st.Stdout, "\nNew entry for %s:\n%s", cfgPath, block)
 	fmt.Fprintf(st.Stdout, "\n%s will start it as `passess mcp-exec %s`.\n", adapter.Label(), server)
+	if len(agents) > 0 {
+		fmt.Fprintf(st.Stdout, "The arguments and URL are withheld from %s: they may hold a value; the user sees them when they run this themselves.\n", agents[0])
+	}
 	if !m.apply {
 		fmt.Fprintln(st.Stdout, "Dry run: nothing changed.")
 		return ExitOK
@@ -495,6 +506,17 @@ func (m *migration) mcp(harnessID, server string) int {
 
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
+}
+
+// withheld is raw without the arguments and URL it would show an agent.
+func withheld(raw harness.Raw) harness.Raw {
+	if len(raw.Args) > 0 {
+		raw.Args = []string{"(arguments withheld)"}
+	}
+	if raw.URL != "" {
+		raw.URL = "(url withheld)"
+	}
+	return raw
 }
 
 // mcpBlock renders [mcp.NAME]; it holds names and non-secret values only.
