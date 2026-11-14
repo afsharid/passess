@@ -115,7 +115,7 @@ func (c claude) Parse(event string, payload []byte, _ func(string) string) (Even
 	switch event {
 	case "PreToolUse":
 		switch in.ToolName {
-		case "Bash", "shell", "local_shell", "exec_command", "unified_exec":
+		case "Bash", "Monitor", "shell", "local_shell", "exec_command", "unified_exec":
 			ev.Kind, ev.Command = Shell, shellCommand(in.ToolInput["command"])
 		case "Read", "NotebookRead":
 			ev.Kind, ev.Paths = Read, []string{str(in.ToolInput, "file_path", "notebook_path")}

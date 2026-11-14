@@ -51,7 +51,7 @@ var openCodePlugin string
 // HookSpecs are the harnesses passess registers its hook handler with.
 // Kiro keeps hooks inside agent profiles and is left to the user.
 func HookSpecs() []HookSpec {
-	tools := "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit|mcp__.*"
+	tools := "Bash|Monitor|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit|mcp__.*"
 	return []HookSpec{
 		{ID: "claude", Harness: "claude", Path: ".claude/settings.json", Style: HookGroups, Create: true, Events: []HookEvent{
 			{"PreToolUse", tools}, {"PostToolUse", "*"}, {"UserPromptSubmit", ""}, {"SessionStart", ""}},
