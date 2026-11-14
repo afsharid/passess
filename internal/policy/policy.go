@@ -110,6 +110,7 @@ type Program struct {
 	Path     string   // resolved absolute path
 	Name     string   // basename of Path
 	Families []string // Name's family plus any it counts as
+	runs     string   // the family the program runs as; see label
 	Why      map[string]string
 
 	stamp   fileStamp // the file Inspect judged; see Unchanged
@@ -124,6 +125,18 @@ type stamped struct {
 	written string
 	path    string
 	stamp   fileStamp
+}
+
+// label is the name a refusal gives for p and the family its allow-list entry
+// must match: the applet a multi-call binary runs as, else the file's own.
+func (p Program) label() (name, family string) {
+	if p.runs == "" {
+		return p.Name, Family(p.Name)
+	}
+	if p.runs == Family(p.Name) {
+		return p.Name, p.runs
+	}
+	return p.runs, p.runs
 }
 
 // ErrNotFound means argv[0] could not be found or is not executable.
@@ -175,9 +188,10 @@ func InspectIn(argv0, dir string, lookPath func(string) (string, error)) (Progra
 		}
 	}
 	typed, own := Family(argv0), Family(p.Name)
-	if multiCall(own) && !multiCall(typed) {
-		own = typed // busybox runs the applet argv[0] names
+	if multiCall(own) && !multiCall(typed) && in.systemApplet(filepath.Base(argv0), resolved) {
+		own = typed // busybox runs the applet argv[0] names, for a name the system installs it under
 	}
+	p.runs = own
 	add(own, "")
 	if typed != own {
 		add(typed, "")
@@ -629,8 +643,9 @@ func CheckConfigured(secret string, p Program, allow []string) Decision {
 			}
 		}
 	}
-	return Decision{Family: Family(p.Name), Reason: fmt.Sprintf(
-		"%s is not in the allow list of %s (%s)", p.Name, secret, strings.Join(allow, ", "))}
+	name, family := p.label()
+	return Decision{Family: family, Reason: fmt.Sprintf(
+		"%s is not in the allow list of %s (%s)", name, secret, strings.Join(allow, ", "))}
 }
 
 // ReservedFamily is not a program: in an allow list it lets `passess helper`
@@ -667,9 +682,9 @@ func Check(secret string, p Program, allow []string) Decision {
 		return Decision{Family: f, Reason: fmt.Sprintf(
 			"%s can print or transform its environment, so it gets no secrets unless allowed", who)}
 	}
-	if allow != nil && !allowed[Family(p.Name)] {
-		return Decision{Family: Family(p.Name), Reason: fmt.Sprintf(
-			"%s is not in the allow list of %s (%s)", p.Name, secret, strings.Join(allow, ", "))}
+	if name, family := p.label(); allow != nil && !allowed[family] {
+		return Decision{Family: family, Reason: fmt.Sprintf(
+			"%s is not in the allow list of %s (%s)", name, secret, strings.Join(allow, ", "))}
 	}
 	return Decision{Allowed: true}
 }

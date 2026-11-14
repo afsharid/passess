@@ -120,9 +120,13 @@ func TestDisguisesAreSeenThrough(t *testing.T) {
 }
 
 // TestMultiCallBinary builds a busybox-like layout: applets are symlinks to
-// one binary, so the applet name decides, and busybox itself stays denied.
+// one binary the system installs under those names, so the applet name
+// decides, and busybox itself stays denied.
 func TestMultiCallBinary(t *testing.T) {
 	dir := t.TempDir()
+	saved := referenceDirs
+	referenceDirs = []string{dir}
+	t.Cleanup(func() { referenceDirs = saved })
 	box := filepath.Join(dir, "busybox")
 	if err := os.WriteFile(box, []byte("\x7fELF not really busybox"), 0o755); err != nil {
 		t.Fatal(err)
@@ -769,5 +773,156 @@ func TestInspectLooksUpReferencesOnce(t *testing.T) {
 	}
 	if limit := len(lookups) + 4; calls > limit {
 		t.Errorf("Inspect made %d PATH lookups for a #!/bin/sh script, want at most %d", calls, limit)
+	}
+}
+
+// fakeBusybox builds the Alpine layout in a temp directory the test makes the
+// system's: sh, ls and cat are links to one multi-call file, installed next
+// to busybox itself. other holds a link the system did not make.
+func fakeBusybox(t *testing.T) (sys, other string, look func(string) (string, error)) {
+	t.Helper()
+	root := t.TempDir()
+	sys, other = filepath.Join(root, "bin"), filepath.Join(root, "home")
+	for _, d := range []string{sys, other} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	box := filepath.Join(sys, "busybox")
+	if err := os.WriteFile(box, []byte("\x7fELF not really busybox passess-fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, applet := range []string{"sh", "ls", "cat"} {
+		if err := os.Symlink("busybox", filepath.Join(sys, applet)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"tool", "ls"} { // not installed by the system under these names here
+		if err := os.Symlink(box, filepath.Join(other, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := referenceDirs
+	referenceDirs = []string{sys}
+	t.Cleanup(func() { referenceDirs = saved })
+	look = func(name string) (string, error) {
+		if strings.Contains(name, "/") {
+			return name, nil
+		}
+		return filepath.Join(sys, name), nil
+	}
+	return sys, other, look
+}
+
+// On a system where sh, ls and cat are applets of busybox, the allow list is
+// compared with the applet the program runs as, not with "busybox": allow=[sh]
+// lets sh in and allow=[ls] lets ls in, while busybox itself and a link the
+// system did not make stay the multi-call binary. Run on Alpine, this test and
+// TestShellIsRefusedUnlessAllowed and TestOrdinaryProgram hold on the real thing.
+func TestMultiCallAppletDecidesTheAllowList(t *testing.T) {
+	sys, other, look := fakeBusybox(t)
+	cases := []struct {
+		path  string
+		allow []string
+		ok    bool
+	}{
+		{filepath.Join(sys, "sh"), nil, false},
+		{filepath.Join(sys, "sh"), []string{"gh"}, false},
+		{filepath.Join(sys, "sh"), []string{"busybox"}, false},
+		{filepath.Join(sys, "sh"), []string{"sh"}, true},
+		{filepath.Join(sys, "sh"), []string{"bash"}, true}, // every shell is sh
+		{filepath.Join(sys, "ls"), nil, true},
+		{filepath.Join(sys, "ls"), []string{"ls"}, true},
+		{filepath.Join(sys, "ls"), []string{"cat"}, false},
+		{filepath.Join(sys, "ls"), []string{"busybox"}, false},
+		{filepath.Join(sys, "cat"), []string{"cat"}, true},
+		{filepath.Join(sys, "cat"), []string{"ls"}, false},
+		{filepath.Join(sys, "busybox"), nil, false},
+		{filepath.Join(sys, "busybox"), []string{"sh"}, false},
+		{filepath.Join(sys, "busybox"), []string{"ls"}, false},
+		{filepath.Join(sys, "busybox"), []string{"busybox"}, true},
+		{filepath.Join(other, "tool"), nil, false},
+		{filepath.Join(other, "tool"), []string{"tool"}, false},
+		{filepath.Join(other, "tool"), []string{"sh"}, false},
+		{filepath.Join(other, "tool"), []string{"busybox"}, true},
+		// The system installs this file as ls, so a link named ls runs the ls applet.
+		{filepath.Join(other, "ls"), nil, true},
+		{filepath.Join(other, "ls"), []string{"busybox"}, false},
+	}
+	for _, c := range cases {
+		p, err := Inspect(c.path, look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, c.allow); d.Allowed != c.ok {
+			t.Errorf("Check %s allow=%v: allowed=%v, want %v (%+v, families %v)", c.path, c.allow, d.Allowed, c.ok, d, p.Families)
+		}
+	}
+
+	// A program the user configured has no default refusal, only its allow list.
+	configured := []struct {
+		path  string
+		allow []string
+		ok    bool
+	}{
+		{filepath.Join(sys, "sh"), []string{"sh"}, true},
+		{filepath.Join(sys, "ls"), []string{"ls"}, true},
+		{filepath.Join(sys, "sh"), []string{"ls"}, false},
+		{filepath.Join(sys, "ls"), []string{"busybox"}, false},
+		{filepath.Join(sys, "busybox"), []string{"busybox"}, true},
+		{filepath.Join(sys, "busybox"), []string{"sh"}, false},
+	}
+	for _, c := range configured {
+		p, err := Inspect(c.path, look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := CheckConfigured("TOKEN", p, c.allow)
+		if d.Allowed != c.ok {
+			t.Errorf("CheckConfigured %s allow=%v: allowed=%v, want %v (%+v)", c.path, c.allow, d.Allowed, c.ok, d)
+		}
+		if !d.Allowed && strings.Contains(d.Reason, "busybox is not") && filepath.Base(c.path) != "busybox" {
+			t.Errorf("CheckConfigured %s names busybox, not the applet: %q", c.path, d.Reason)
+		}
+	}
+}
+
+// A script whose #! line names a system applet runs that applet; under a
+// name the system does not install it stays busybox.
+func TestMultiCallAppletOnAShebangLine(t *testing.T) {
+	sys, other, look := fakeBusybox(t)
+	dir := t.TempDir()
+	for name, line := range map[string]string{
+		"viaSh":   "#!" + filepath.Join(sys, "sh"),
+		"viaLs":   "#!" + filepath.Join(sys, "ls"),
+		"viaTool": "#!" + filepath.Join(other, "tool"),
+		"viaLink": "#!" + filepath.Join(other, "ls"),
+	} {
+		writeScript(t, filepath.Join(dir, name), line)
+	}
+	cases := []struct {
+		script string
+		allow  []string
+		ok     bool
+	}{
+		{"viaSh", nil, false},
+		{"viaSh", []string{"viaSh"}, false},
+		{"viaSh", []string{"viaSh", "sh"}, true},
+		{"viaSh", []string{"viaSh", "busybox"}, false},
+		{"viaLs", nil, true},
+		{"viaLs", []string{"viaLs"}, true},
+		{"viaTool", nil, false},
+		{"viaTool", []string{"viaTool", "sh"}, false},
+		{"viaTool", []string{"viaTool", "busybox"}, true},
+		{"viaLink", []string{"viaLink"}, true}, // named ls, which the system installs it as
+	}
+	for _, c := range cases {
+		p, err := Inspect(filepath.Join(dir, c.script), look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, c.allow); d.Allowed != c.ok {
+			t.Errorf("Check %s allow=%v: allowed=%v, want %v (%+v, families %v)", c.script, c.allow, d.Allowed, c.ok, d, p.Families)
+		}
 	}
 }
