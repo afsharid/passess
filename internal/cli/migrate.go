@@ -294,7 +294,7 @@ func printAfterMove(st *Streams, backup, rotate string, accounts []string) {
 			fmt.Fprintf(st.Stdout, "  %s\n", shellLine(argv))
 		}
 	}
-	fmt.Fprintln(st.Stdout, "`passess scan` lists any other copy that still holds them (harness backups, dotfiles, transcripts with --transcripts).")
+	fmt.Fprintln(st.Stdout, "`passess scan` lists any other copy that still holds them (harness backups, dotfiles, transcripts with --transcripts); the user runs it, an agent adds --no-known.")
 }
 
 func quoteList(names []string) string {
@@ -439,7 +439,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		headers[h] = prefix + "{{" + name + "}}"
 	}
 	if len(moves) == 0 {
-		fmt.Fprintf(st.Stdout, "%s's entry %s holds nothing that looks like a secret; `passess install --force` can still move it.\n", adapter.Label(), server)
+		fmt.Fprintf(st.Stdout, "%s's entry %s holds nothing that looks like a secret; `passess install --force` can still move it.\n", adapter.Label(), printable(server))
 		return ExitOK
 	}
 
@@ -453,10 +453,10 @@ func (m *migration) mcp(harnessID, server string) int {
 	}
 	block := mcpBlock(server, shown, envMap, vars, headers, harnessID)
 	for _, mv := range moves {
-		fmt.Fprintf(st.Stdout, "  %s -> %s at keychain://%s/%s\n", mv.from, mv.secret, keychainService, mv.account)
+		fmt.Fprintf(st.Stdout, "  %s\n", printable(fmt.Sprintf("%s -> %s at keychain://%s/%s", mv.from, mv.secret, keychainService, mv.account)))
 	}
-	fmt.Fprintf(st.Stdout, "\nNew entry for %s:\n%s", cfgPath, block)
-	fmt.Fprintf(st.Stdout, "\n%s will start it as `passess mcp-exec %s`.\n", adapter.Label(), server)
+	fmt.Fprintf(st.Stdout, "\nNew entry for %s:\n%s", cfgPath, printableLines(string(block)))
+	fmt.Fprintf(st.Stdout, "\n%s will start it as `passess mcp-exec %s`.\n", adapter.Label(), printable(server))
 	if len(agents) > 0 {
 		fmt.Fprintf(st.Stdout, "The arguments and URL are withheld from %s: they may hold a value; the user sees them when they run this themselves.\n", agents[0])
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/ref"
@@ -70,8 +71,8 @@ func runScan(st *Streams, args []string) int {
 	// a file holds which value: a guess oracle for a caller that may not use
 	// the secret. A coding agent runs the scan without it.
 	if !*noKnown {
-		if code := refuseUnderAgent(st, "scan", "resolves every secret you configured to search for its value; use --no-known, or run it yourself"); code != 0 {
-			return code
+		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			return failf(st, ExitNoPerm, "passess scan resolves every secret you configured to search for its value; from %s, run it with --no-known, or ask the user to run it in a terminal or Passess.app", detect.Label(agents[0]))
 		}
 	}
 	augmentPath(st.Getenv)

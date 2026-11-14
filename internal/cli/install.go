@@ -636,7 +636,7 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 		}
 		for _, e := range r.Unmanaged {
 			if len(e.Leaks) > 0 {
-				fmt.Fprintf(st.Stdout, "  %-14s %-10s credentials in clear: %s\n", e.Name, "LEAK", strings.Join(e.Leaks, ", "))
+				fmt.Fprintf(st.Stdout, "  %-14s %-10s credentials in clear: %s\n", printable(e.Name), "LEAK", printable(strings.Join(e.Leaks, ", ")))
 			}
 		}
 		for _, a := range r.Actions {
