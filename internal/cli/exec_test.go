@@ -27,6 +27,9 @@ func TestMain(m *testing.M) {
 	if listen := os.Getenv("PASSESS_TEST_RELAY"); listen != "" { // this binary as dialApprover's relay
 		os.Exit(relay(listen, os.Getenv("PASSESS_TEST_RELAY_TO")))
 	}
+	if dump := os.Getenv("PASSESS_TEST_ENVDUMP"); dump != "" && len(os.Args) > 2 && os.Args[1] == "agent" && os.Args[2] == "serve" {
+		os.Exit(dumpEnvNames(dump)) // this binary as the daemon `agent start` starts: it records its environment
+	}
 	dir, err := os.MkdirTemp("", "passess-cli-test")
 	if err != nil {
 		panic(err)
@@ -50,6 +53,20 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// dumpEnvNames writes the names, never the values, of this process's
+// environment to path, one per line, and returns the exit code.
+func dumpEnvNames(path string) int {
+	var b strings.Builder
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		b.WriteString(name + "\n")
+	}
+	if os.WriteFile(path, []byte(b.String()), 0o600) != nil {
+		return 1
+	}
+	return 0
 }
 
 // setup writes a user config and points passess at it. X may go to sh; Y has
