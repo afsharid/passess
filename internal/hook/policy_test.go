@@ -638,3 +638,18 @@ func TestCdPathAndPrevious(t *testing.T) {
 		`cd ~/.aws; cd /tmp; cd -; cd /tmp; cat credentials`, `cd /tmp; cd ~/.aws; cd -; cat credentials`,
 	})
 }
+
+// sed edits a file in place with a flag of any cluster of short options, or
+// with --in-place.
+func TestSedInPlaceForms(t *testing.T) {
+	const cfg = "~/.config/passess/config.toml"
+	var deny, allow []string
+	for _, flags := range []string{"-i", "-i.bak", "-ibak", "-Ei", "-ni", "-ri", "-nEi", "-Ei.bak", "--in-place", "--in-place=.bak", "--in", "-i -e", "-s -i"} {
+		deny = append(deny, "sed "+flags+" s/a/b/ "+cfg, "cd ~/.config/passess && sed "+flags+" s/a/b/ config.toml")
+	}
+	for _, flags := range []string{"-n", "-E", "-e", "-s", "-z", "-nE", "--quiet", "--regexp-extended", "-e s/i/x/", "--expression=s/i/x/"} {
+		allow = append(allow, "sed "+flags+" s/a/b/ "+cfg, "cd ~/.config/passess && sed "+flags+" p config.toml")
+	}
+	allow = append(allow, "sed -i s/a/b/ notes.txt", "sed -Ei s/a/b/ src/main.go", "sed --in-place s/a/b/ ./config.toml")
+	shellVerdicts(t, deny, allow)
+}

@@ -1211,7 +1211,7 @@ func checkCall(args []string, at where, env Env) string {
 				continue
 			}
 			if r := configWrite(a, at, env); r != "" {
-				if name != "sed" || slices.ContainsFunc(args[1:], func(f string) bool { return strings.HasPrefix(f, "-i") }) {
+				if name != "sed" || slices.ContainsFunc(args[1:], inPlace) {
 					return r
 				}
 			}
@@ -1242,6 +1242,18 @@ func checkCall(args []string, at where, env Env) string {
 	}
 	return ""
 }
+
+// inPlace says whether a sed flag edits files in place: -i in a cluster of
+// short flags (-i, -Ei, -ni.bak), or --in-place, in full or shortened.
+func inPlace(flag string) bool {
+	if long, ok := strings.CutPrefix(flag, "--"); ok {
+		long, _, _ = strings.Cut(long, "=")
+		return long != "" && strings.HasPrefix("in-place", long)
+	}
+	return sedCluster.MatchString(flag)
+}
+
+var sedCluster = regexp.MustCompile(`^-[A-Za-z]*i`)
 
 // skipOptions drops the leading options of a wrapper such as sudo, with the
 // arguments of the options it knows take one (sudo -u USER) and the words
