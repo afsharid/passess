@@ -249,7 +249,25 @@ var writers = map[string]bool{"tee": true, "sed": true, "truncate": true, "rm": 
 
 // Programs that run the rest of their arguments as a command.
 var wrappers = map[string]bool{"sudo": true, "command": true, "builtin": true, "exec": true, "nohup": true,
-	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true}
+	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true, "xargs": true}
+
+// wrapperOptions say, for the wrappers that have any, which options take the
+// next word as their argument, and how many words after the options are the
+// wrapper's own (timeout's duration).
+var wrapperOptions = map[string]struct {
+	takes      []string
+	positional int
+}{
+	"sudo":       {[]string{"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t", "--user", "--group"}, 0},
+	"doas":       {[]string{"-u", "-C"}, 0},
+	"nice":       {[]string{"-n", "--adjustment"}, 0},
+	"timeout":    {[]string{"-s", "-k", "--signal", "--kill-after"}, 1},
+	"exec":       {[]string{"-a"}, 0},
+	"stdbuf":     {[]string{"-i", "-o", "-e"}, 0},
+	"caffeinate": {[]string{"-t", "-w"}, 0},
+	"time":       {[]string{"-f", "-o"}, 0},
+	"xargs":      {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I"}, 0},
+}
 
 func checkShell(cmd, cwd string, env Env) string {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(cmd), "")
@@ -559,9 +577,17 @@ func checkParam(name string, env Env) string {
 
 func checkCall(args []string, cwd string, env Env) string {
 	for len(args) > 0 && wrappers[filepath.Base(args[0])] {
-		args = skipOptions(args[1:])
+		args = skipOptions(filepath.Base(args[0]), args[1:])
 	}
-	if len(args) == 0 || args[0] == "" {
+	if len(args) == 0 {
+		return ""
+	}
+	if args[0] == "" {
+		// A program built from a variable or a substitution may be passess.
+		// The refusals no other program shares apply to it: `$P agent stop`.
+		if len(args) > 1 && (args[1] == "helper" || (len(args) > 2 && args[1] == "agent" && slices.Contains([]string{"stop", "serve", "approve"}, args[2]))) {
+			return checkCall(append([]string{"passess"}, args[1:]...), cwd, env)
+		}
 		return ""
 	}
 	name := filepath.Base(args[0])
@@ -598,6 +624,20 @@ func checkCall(args []string, cwd string, env Env) string {
 		}
 	case "eval":
 		return checkShell(strings.Join(args[1:], " "), cwd, env)
+	case "find":
+		// -exec COMMAND … ; and -exec COMMAND … + run COMMAND.
+		for i, a := range args {
+			if a != "-exec" && a != "-execdir" && a != "-ok" && a != "-okdir" {
+				continue
+			}
+			end := i + 1
+			for end < len(args) && args[end] != ";" && args[end] != "+" {
+				end++
+			}
+			if r := checkCall(args[i+1:end], cwd, env); r != "" {
+				return r
+			}
+		}
 	case "env":
 		rest := args[1:]
 		var set []string
@@ -770,14 +810,20 @@ func checkCall(args []string, cwd string, env Env) string {
 	return ""
 }
 
-// skipOptions drops the leading options of a wrapper such as sudo. An
-// option's argument (sudo -u USER) is taken for the command: a gap that is
-// acceptable for a second line of defense, which this is.
-func skipOptions(args []string) []string {
+// skipOptions drops the leading options of a wrapper such as sudo, with the
+// arguments of the options it knows take one (sudo -u USER) and the words
+// that are the wrapper's own (timeout's duration). An option it does not know
+// that takes an argument leaves that argument in the command's place.
+func skipOptions(wrapper string, args []string) []string {
+	spec := wrapperOptions[wrapper]
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		opt := args[0]
 		args = args[1:]
+		if slices.Contains(spec.takes, opt) && len(args) > 0 {
+			args = args[1:]
+		}
 	}
-	return args
+	return args[min(spec.positional, len(args)):]
 }
 
 // --- prompts, results, session start ---

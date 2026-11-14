@@ -270,6 +270,25 @@ func shellVerdicts(t *testing.T, deny, allow []string) {
 	}
 }
 
+// A program or subcommand spelled with escapes, built from a variable, or
+// behind a wrapper's option argument is still passess.
+func TestProgramNameSpellings(t *testing.T) {
+	shellVerdicts(t, []string{
+		`\passess agent stop`, `passess agent st\op`, `passess a\dd X --ref keychain://passess/X`, `\passess helper API_KEY`,
+		`P=passess; $P agent stop`, `P=passess; "$P" agent stop`, `$(command -v passess) agent serve`, `$P helper API_KEY`,
+		`timeout 5 passess agent stop`, `timeout -s KILL 5 passess agent stop`, `timeout --signal=KILL 5 passess agent stop`,
+		`nice -n 10 passess agent stop`, `sudo -u root passess helper API_KEY`, `sudo -g adm -u root passess agent stop`,
+		`doas -u root passess agent stop`, `exec -a x passess agent stop`, `time -p passess agent stop`,
+		`xargs -n1 passess agent stop`, `echo x | xargs -I {} passess agent approve`,
+		`find . -exec passess agent stop \;`, `find . -name x -execdir passess helper API_KEY +`,
+		`env \passess agent stop`, `bash -c '\passess agent stop'`,
+	}, []string{
+		`timeout 5 make test`, `nice -n 10 make`, `sudo -u root ls`, `exec -a x make`, `xargs -n1 echo`, `xargs grep TODO`,
+		`find . -name x -exec echo {} \;`, `find . -type f -exec grep -l TODO {} +`, `$MAKE test`, `$GIT add .`, `$NPM remove left-pad`,
+		`$P agent status`, `\ls`, `echo a\ b`, `\passess list`, `passess a\gent status`,
+	})
+}
+
 // The shell removes the backslashes of an unquoted word, and of a quoted one
 // before $ ` " \ and a newline: the guards read the word the shell does.
 func TestBackslashEscapedWords(t *testing.T) {
