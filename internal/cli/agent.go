@@ -155,7 +155,7 @@ func printInfo(w io.Writer, in *agent.Info) {
 	fmt.Fprintf(w, "  running  %d command(s); %d since it started\n", in.Jobs, in.Served)
 	fmt.Fprintf(w, "  approve  %d approver(s) connected, %d question(s) open\n", in.Approvers, in.Pending)
 	for _, a := range in.Approvals {
-		fmt.Fprintf(w, "           %s for %s, asked by %s (pid %d), until %s\n", a.Secret, a.Program, a.Anchor.Name, a.Anchor.PID,
+		fmt.Fprintf(w, "           %s for %s, asked by %s (pid %d), until %s\n", visible(a.Secret), visible(a.Program), visible(a.Anchor.Name), a.Anchor.PID,
 			a.Until.Local().Format("Mon 15:04"))
 	}
 }
@@ -276,7 +276,16 @@ func agentStart(st *Streams) int {
 	// The agent runs from / so it pins no directory; relative paths in its
 	// environment would then point elsewhere, so it gets them absolute.
 	cmd.Dir = "/"
-	cmd.Env = append(os.Environ(), "PASSESS_CONFIG="+absolute(cfg), "PASSESS_AGENT_SOCK="+absolute(path))
+	// The daemon builds its backends from this environment once and serves
+	// every later client with them, so a coding agent that starts it must not
+	// pick the vault address or a backend token.
+	env, dropped := agentEnv(os.Environ(), len(callerAgents(st.Getenv, selfChain())) > 0)
+	if len(dropped) > 0 {
+		fmt.Fprintf(st.Stderr, "passess agent: started from a coding agent, so %s of this environment are not passed on; "+
+			"the agent reads backend settings from the config and the keychain. Start it in a terminal to pass them.\n",
+			strings.Join(dropped, ", "))
+	}
+	cmd.Env = append(env, "PASSESS_CONFIG="+absolute(cfg), "PASSESS_AGENT_SOCK="+absolute(path))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return failf(st, ExitSoftware, "%v", err)
@@ -295,6 +304,28 @@ func agentStart(st *Streams) int {
 		}
 	}
 	return failf(st, ExitSoftware, "the agent did not answer within 5 s; see %s", logPath)
+}
+
+// backendEnvPrefixes start the names of the variables that choose a backend's
+// address, account or credential: Vault and OpenBao, 1Password, bws and bw.
+var backendEnvPrefixes = []string{"VAULT_", "BAO_", "OP_", "BWS_", "BW_", "BITWARDENCLI_"}
+
+// agentEnv is the environment the agent daemon starts with. When an agent
+// started it, variables that choose a backend are left out and their names
+// returned; a person at a terminal passes them all.
+func agentEnv(environ []string, fromAgent bool) (env, dropped []string) {
+	if !fromAgent {
+		return environ, nil
+	}
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.ContainsFunc(backendEnvPrefixes, func(p string) bool { return strings.HasPrefix(name, p) }) {
+			dropped = append(dropped, name)
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env, dropped
 }
 
 func agentServe(st *Streams) int {
@@ -636,7 +667,7 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 			entry.Secrets = append(entry.Secrets, w.Name)
 		}
 	}
-	chain, _ := agent.Ancestry(c.Peer.PID)
+	chain := peerChain(c.Peer.PID)
 	anchor, anchored := agent.Anchor(chain)
 	if anchored {
 		entry.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
@@ -671,11 +702,11 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 	defer close(quit)
 	frames := clientFrames(c, quit)
 
-	prog, code := checkExec(st, u, proj, req.Argv, wanted, lookPathIn(req.Env, req.Dir))
+	prog, code := checkExec(st, u, proj, req.Argv, wanted, req.Dir, lookPathIn(req.Env, req.Dir))
 	if code != 0 {
 		return code
 	}
-	entry.Program = policy.Family(prog.Name)
+	entry.Program = prog.RunsAs()
 	// Before acquire: a command waiting on the user must not pin a generation
 	// past its lifetime.
 	if code = s.approval(st, u, wanted.names(), prog, req, anchor, anchored, frames); code != 0 {
@@ -733,16 +764,16 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 		}
 		names = append(names, w.Name)
 	}
-	prog, err := policy.Inspect(req.Argv[0], lookPathIn(req.Env, req.Dir))
+	prog, err := policy.InspectIn(req.Argv[0], req.Dir, lookPathIn(req.Env, req.Dir))
 	if err != nil {
 		return failf(st, ExitNotFound, "%v", err)
 	}
-	chain, _ := agent.Ancestry(c.Peer.PID)
+	chain := peerChain(c.Peer.PID)
 	anchor, anchored := agent.Anchor(chain)
 	quit := make(chan struct{})
 	defer close(quit)
 	code = s.approval(st, u, names, prog, req, anchor, anchored, clientFrames(c, quit))
-	e := auditEntry{Kind: "ask", PID: c.Peer.PID, Secrets: names, Program: policy.Family(prog.Name), Dir: req.Dir,
+	e := auditEntry{Kind: "ask", PID: c.Peer.PID, Secrets: names, Program: prog.RunsAs(), Dir: req.Dir,
 		Argv: redactArgv(req.Argv, nil), Harness: detect.Harness(st.Getenv), Outcome: outcomeOf(code, false), Status: &code}
 	if anchored {
 		e.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)

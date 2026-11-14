@@ -207,6 +207,49 @@ func TestApprovalIsRememberedForTheCaller(t *testing.T) {
 	}
 }
 
+// A request's argv and dir reach an approver through a frame it reads in at
+// most 64 KiB (the app, 1 MiB): a long command line is cut in the question,
+// and the approver still reads it.
+func TestOversizedQuestionStaysReadable(t *testing.T) {
+	setupApprovals(t, `approval_timeout = "5s"`)
+	startAgent(t)
+	first := connectApprover(t, allowAll)
+	long := make([]string, 20000)
+	for i := range long {
+		long[i] = "word"
+	}
+	args := append([]string{"exec", "-s", "X", "--", "sh", "-c", "echo ran", "sh"}, long...)
+	type result struct {
+		out, errOut string
+		code        int
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, errOut, code := run(t, args...)
+		done <- result{out, errOut, code}
+	}()
+	select {
+	case r := <-done:
+		if r.code != 0 || r.out != "ran\n" {
+			t.Fatalf("exit %d, %q, %q", r.code, r.out, r.errOut)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the command waited for an approver that could not read the question")
+	}
+	select {
+	case q := <-first.notify:
+		n := 0
+		for _, w := range q.Argv {
+			n += len(w)
+		}
+		if n > 8<<10 || q.Argv[len(q.Argv)-1] != "[…cut]" || q.Argv[0] != "sh" {
+			t.Fatalf("argv of %d bytes, %d words, ends %q", n, len(q.Argv), q.Argv[len(q.Argv)-1])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the approver never read the question")
+	}
+}
+
 func TestApprovalDeniedAndTimedOut(t *testing.T) {
 	setupApprovals(t, `approval_timeout = "300ms"`)
 	startAgent(t)
@@ -397,6 +440,10 @@ func TestApproveRefusesInsideAHarnessAndWithoutATerminal(t *testing.T) {
 
 func TestApproverGate(t *testing.T) {
 	p := func(name string, pid int) agent.Proc { return agent.Proc{PID: pid, Name: name} }
+	// A chain cut short may hide the harness above the cut.
+	if err := approverGate([]agent.Proc{p("passess", 3), {PID: 2, Name: "zsh", PPID: 7}}); err == nil {
+		t.Error("an approver whose chain ends before pid 1 was let in")
+	}
 	if err := approverGate([]agent.Proc{p("passess", 3), p("zsh", 2), p("claude", 1)}); err == nil {
 		t.Error("an approver started by Claude Code was let in")
 	}
@@ -572,5 +619,37 @@ func TestAllowDoesNotOutliveLock(t *testing.T) {
 		if n != 0 {
 			t.Fatalf("run %d: %d Allows survived the lock", i, n)
 		}
+	}
+}
+
+// A peer passess cannot identify (no pid, pid 1, a process that has gone) has
+// no chain to read: it counts as an unidentified caller, an approver is
+// refused, and nothing is remembered for it.
+func TestPeerChainFailsClosed(t *testing.T) {
+	none := func(string) string { return "" }
+	child := exec.Command("true")
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	gone := child.Process.Pid // reaped: no such process
+	for _, pid := range []int{0, 1, gone} {
+		chain := peerChain(pid)
+		if got := callerAgents(none, chain); len(got) != 1 || got[0] != agent.Unidentified {
+			t.Errorf("pid %d: callers %v", pid, got)
+		}
+		if err := approverGate(chain); err == nil {
+			t.Errorf("pid %d: an approver that cannot be identified was let in", pid)
+		}
+		if _, ok := agent.Anchor(chain); ok {
+			t.Errorf("pid %d: an Allow would be remembered for it", pid)
+		}
+	}
+	if err := approverGate(nil); err == nil {
+		t.Error("an empty chain was let in as an approver")
+	}
+	// Control: a live process is read as it is.
+	chain := peerChain(os.Getpid())
+	if len(chain) == 0 || chain[0].PID != os.Getpid() || agent.Truncated(chain) {
+		t.Errorf("this process: %+v", chain)
 	}
 }

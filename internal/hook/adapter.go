@@ -65,9 +65,10 @@ func shellCommand(v any) string {
 	return ""
 }
 
-var patchFile = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$`)
+var patchFile = regexp.MustCompile(`(?m)^[ \t]*\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
 
-// patchPaths lists the files an apply_patch envelope touches.
+// patchPaths lists the files an apply_patch envelope touches, the destination
+// of a rename included.
 func patchPaths(patch string) []string {
 	var out []string
 	for _, m := range patchFile.FindAllStringSubmatch(patch, -1) {
@@ -84,6 +85,33 @@ func pathArgs(args map[string]any) []string {
 		lk := strings.ToLower(k)
 		if s, ok := v.(string); ok && s != "" && (strings.Contains(lk, "path") || strings.Contains(lk, "file")) {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// globArgs collects the patterns that choose which files a search reads: the
+// glob and include arguments, given as a string or as a list. The search
+// pattern itself is not one.
+func globArgs(args map[string]any) []string {
+	var out []string
+	for k, v := range args {
+		switch strings.ToLower(k) {
+		case "glob", "globs", "include", "includes":
+		default:
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			if x != "" {
+				out = append(out, x)
+			}
+		case []any:
+			for _, e := range x {
+				if s, ok := e.(string); ok && s != "" {
+					out = append(out, s)
+				}
+			}
 		}
 	}
 	return out
@@ -115,13 +143,19 @@ func (c claude) Parse(event string, payload []byte, _ func(string) string) (Even
 	switch event {
 	case "PreToolUse":
 		switch in.ToolName {
-		case "Bash", "shell", "local_shell", "exec_command", "unified_exec":
+		case "Bash", "Monitor", "shell", "local_shell", "exec_command", "unified_exec":
 			ev.Kind, ev.Command = Shell, shellCommand(in.ToolInput["command"])
 		case "Read", "NotebookRead":
 			ev.Kind, ev.Paths = Read, []string{str(in.ToolInput, "file_path", "notebook_path")}
 		case "Grep":
-			if p := str(in.ToolInput, "path"); p != "" {
-				ev.Kind, ev.Paths = Read, []string{p}
+			// The files are the ones the path and the glob choose; with neither,
+			// the search covers the working directory and no file is named.
+			p, g := str(in.ToolInput, "path"), globArgs(in.ToolInput)
+			if p != "" || len(g) > 0 {
+				ev.Kind, ev.Globs = Read, g
+				if p != "" {
+					ev.Paths = []string{p}
+				}
 			}
 		case "Write", "Edit", "MultiEdit", "NotebookEdit":
 			ev.Kind, ev.Paths = Write, []string{str(in.ToolInput, "file_path", "notebook_path")}
@@ -189,9 +223,13 @@ func (gemini) Parse(event string, payload []byte, _ func(string) string) (Event,
 				for _, p := range ps {
 					if s, ok := p.(string); ok {
 						ev.Paths = append(ev.Paths, s)
+						ev.Globs = append(ev.Globs, s) // an entry may be a glob: **/.env.*
 					}
 				}
 			}
+			ev.Globs = append(ev.Globs, globArgs(in.ToolInput)...)
+		case "search_file_content", "grep_search":
+			ev.Kind, ev.Paths, ev.Globs = Read, pathArgs(in.ToolInput), globArgs(in.ToolInput)
 		case "write_file", "replace":
 			ev.Kind, ev.Paths = Write, pathArgs(in.ToolInput)
 		}
@@ -296,12 +334,22 @@ func (opencode) Parse(event string, payload []byte, _ func(string) string) (Even
 		case "bash":
 			ev.Kind, ev.Command = Shell, str(in.Args, "command")
 		case "read", "grep", "list":
-			if p := str(in.Args, "filePath", "path"); p != "" {
-				ev.Kind, ev.Paths = Read, []string{p}
+			p, g := str(in.Args, "filePath", "path"), globArgs(in.Args)
+			if p != "" || len(g) > 0 {
+				ev.Kind, ev.Globs = Read, g
+				if p != "" {
+					ev.Paths = []string{p}
+				}
 			}
-		case "write", "edit", "patch":
+		case "write", "edit", "multiedit", "patch", "apply_patch":
+			var paths []string
 			if p := str(in.Args, "filePath", "path"); p != "" {
-				ev.Kind, ev.Paths = Write, []string{p}
+				paths = append(paths, p)
+			}
+			// patch carries its files in an envelope, as Codex's apply_patch does.
+			paths = append(paths, patchPaths(str(in.Args, "patchText"))...)
+			if len(paths) > 0 {
+				ev.Kind, ev.Paths = Write, paths
 			}
 		}
 	case "tool.execute.after":
@@ -410,7 +458,7 @@ func (antigravity) Parse(event string, payload []byte, _ func(string) string) (E
 			ev.CWD = c
 		}
 	case "view_file", "view_file_outline", "view_code_item", "grep_search":
-		ev.Kind, ev.Paths = Read, pathArgs(in.ToolCall.Args)
+		ev.Kind, ev.Paths, ev.Globs = Read, pathArgs(in.ToolCall.Args), globArgs(in.ToolCall.Args)
 	case "write_to_file", "replace_file_content", "multi_replace_file_content":
 		ev.Kind, ev.Paths = Write, pathArgs(in.ToolCall.Args)
 	}

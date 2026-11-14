@@ -294,7 +294,7 @@ func printAfterMove(st *Streams, backup, rotate string, accounts []string) {
 			fmt.Fprintf(st.Stdout, "  %s\n", shellLine(argv))
 		}
 	}
-	fmt.Fprintln(st.Stdout, "`passess scan` lists any other copy that still holds them (harness backups, dotfiles, transcripts with --transcripts).")
+	fmt.Fprintln(st.Stdout, "`passess scan` lists any other copy that still holds them (harness backups, dotfiles, transcripts with --transcripts); the user runs it, an agent adds --no-known.")
 }
 
 func quoteList(names []string) string {
@@ -439,16 +439,27 @@ func (m *migration) mcp(harnessID, server string) int {
 		headers[h] = prefix + "{{" + name + "}}"
 	}
 	if len(moves) == 0 {
-		fmt.Fprintf(st.Stdout, "%s's entry %s holds nothing that looks like a secret; `passess install --force` can still move it.\n", adapter.Label(), server)
+		fmt.Fprintf(st.Stdout, "%s's entry %s holds nothing that looks like a secret; `passess install --force` can still move it.\n", adapter.Label(), printable(server))
 		return ExitOK
 	}
 
-	block := mcpBlock(server, raw, envMap, vars, headers, harnessID)
-	for _, mv := range moves {
-		fmt.Fprintf(st.Stdout, "  %s -> %s at keychain://%s/%s\n", mv.from, mv.secret, keychainService, mv.account)
+	// Only env and header values are classified; a credential can sit in the
+	// arguments or the URL too. A coding agent gets the block without them,
+	// since the harness file they come from is one its hooks keep it out of.
+	shown := raw
+	agents := callerAgents(st.Getenv, selfChain())
+	if len(agents) > 0 {
+		shown = withheld(raw)
 	}
-	fmt.Fprintf(st.Stdout, "\nNew entry for %s:\n%s", cfgPath, block)
-	fmt.Fprintf(st.Stdout, "\n%s will start it as `passess mcp-exec %s`.\n", adapter.Label(), server)
+	block := mcpBlock(server, shown, envMap, vars, headers, harnessID)
+	for _, mv := range moves {
+		fmt.Fprintf(st.Stdout, "  %s\n", printable(fmt.Sprintf("%s -> %s at keychain://%s/%s", mv.from, mv.secret, keychainService, mv.account)))
+	}
+	fmt.Fprintf(st.Stdout, "\nNew entry for %s:\n%s", cfgPath, printableLines(string(block)))
+	fmt.Fprintf(st.Stdout, "\n%s will start it as `passess mcp-exec %s`.\n", adapter.Label(), printable(server))
+	if len(agents) > 0 {
+		fmt.Fprintf(st.Stdout, "The arguments and URL are withheld from %s: they may hold a value; the user sees them when they run this themselves.\n", agents[0])
+	}
 	if !m.apply {
 		fmt.Fprintln(st.Stdout, "Dry run: nothing changed.")
 		return ExitOK
@@ -484,7 +495,7 @@ func (m *migration) mcp(harnessID, server string) int {
 		return failf(st, ExitUnavailable, "%v; passess config is updated, finish with `passess install %s --apply --force` (backup: %s)",
 			err, harnessID, backup)
 	}
-	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), server)
+	fmt.Fprintf(st.Stdout, "\n%s now starts %s through passess.\n", adapter.Label(), printable(server))
 	accounts := make([]string, len(moves))
 	for i, mv := range moves {
 		accounts[i] = mv.account
@@ -495,6 +506,17 @@ func (m *migration) mcp(harnessID, server string) int {
 
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
+}
+
+// withheld is raw without the arguments and URL it would show an agent.
+func withheld(raw harness.Raw) harness.Raw {
+	if len(raw.Args) > 0 {
+		raw.Args = []string{"(arguments withheld)"}
+	}
+	if raw.URL != "" {
+		raw.URL = "(url withheld)"
+	}
+	return raw
 }
 
 // mcpBlock renders [mcp.NAME]; it holds names and non-secret values only.

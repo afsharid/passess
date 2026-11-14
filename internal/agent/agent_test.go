@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +253,85 @@ func TestSocketPath(t *testing.T) {
 	}
 	if _, err := SocketPath(env(nil)); err == nil {
 		t.Error("no HOME was accepted")
+	}
+}
+
+func TestAskForBounded(t *testing.T) {
+	words := make([]string, 20000)
+	for i := range words {
+		words[i] = "word"
+	}
+	hostile := strings.Repeat("\xff", 3000) // each byte escapes to six in JSON
+	q := AskFor{ID: "1", Secrets: []string{"X"}, Program: "sh", Path: "/bin/" + strings.Repeat("p", 5000),
+		Argv: append([]string{"sh"}, append(words, hostile)...), Dir: "/" + strings.Repeat("d", 100000)}.Bounded()
+	b, err := json.Marshal(Frame{Ask: &q})
+	if err != nil || len(b) > maxFrame {
+		t.Fatalf("a bounded question is %d bytes (%v), past the %d an approver reads", len(b), err, maxFrame)
+	}
+	if q.Argv[0] != "sh" || q.Argv[len(q.Argv)-1] != askCut || !strings.HasSuffix(q.Dir, askCut) || !strings.HasSuffix(q.Path, askCut) {
+		t.Errorf("the cuts are not marked: %q … %q", q.Argv[len(q.Argv)-1], q.Dir[len(q.Dir)-10:])
+	}
+	// Control: what fits is left alone.
+	small := AskFor{ID: "2", Argv: []string{"sh", "-c", "echo ran"}, Dir: "/work", Path: "/bin/sh"}
+	if got := small.Bounded(); !reflect.DeepEqual(got, small) {
+		t.Errorf("an ordinary question changed: %+v", got)
+	}
+	// A cut ends on a character.
+	if got := cutString(strings.Repeat("é", 10), 5); got != "éé"+askCut {
+		t.Errorf("cut mid-character: %q", got)
+	}
+}
+
+// The words of a command line and the secrets of a question are bounded by
+// number, not only by bytes: an empty word adds no bytes but costs three in
+// JSON. The worst question (every word and secret at its limit, every byte
+// escaped into six) fits the frame an approver reads.
+func TestAskForBoundedByCount(t *testing.T) {
+	for _, c := range []struct{ name, word string }{{"empty words", ""}, {"one-byte words", "a"}} {
+		argv := make([]string, 300000)
+		for i := range argv {
+			argv[i] = c.word
+		}
+		q := AskFor{ID: "1", Secrets: []string{"X"}, Program: "sh", Path: "/bin/sh", Argv: argv, Dir: "/work"}.Bounded()
+		b, err := json.Marshal(Frame{Ask: &q})
+		if err != nil || len(b) > maxFrame {
+			t.Errorf("%s: a bounded question is %d bytes (%v), past the %d an approver reads", c.name, len(b), err, maxFrame)
+		}
+		if q.Argv[len(q.Argv)-1] != askCut {
+			t.Errorf("%s: the cut is not marked", c.name)
+		}
+	}
+	// Control: an ordinary command line with many short words is left alone.
+	ok := make([]string, 100)
+	for i := range ok {
+		ok[i] = "-v"
+	}
+	if got := (AskFor{Argv: ok}).Bounded(); !reflect.DeepEqual(got.Argv, ok) {
+		t.Errorf("100 ordinary words changed: %d words", len(got.Argv))
+	}
+
+	// The worst case: every field full and every byte escaped.
+	secrets := make([]string, 5000)
+	for i := range secrets {
+		secrets[i] = strings.Repeat("S", 5000)
+	}
+	hostile := strings.Repeat("\xff", 100000)
+	words := make([]string, 1000)
+	for i := range words {
+		words[i] = hostile[:50]
+	}
+	q := AskFor{ID: strings.Repeat("9", 20), Secrets: secrets, Program: strings.Repeat("\xff", 255), Path: hostile, Argv: words, Dir: hostile,
+		Harness: strings.Repeat("\xff", 64), Anchor: &Proc{PID: 1 << 30, Name: strings.Repeat("\xff", 16)}}.Bounded()
+	b, err := json.Marshal(Frame{Ask: &q})
+	if err != nil || len(b) > maxFrame {
+		t.Fatalf("the worst question is %d bytes (%v), past the %d an approver reads", len(b), err, maxFrame)
+	}
+	if len(q.Secrets) == 0 || q.Secrets[len(q.Secrets)-1] != askCut {
+		t.Errorf("the cut of the secrets is not marked: %d secrets", len(q.Secrets))
+	}
+	// Control: a few secrets are left alone.
+	few := AskFor{Secrets: []string{"A", "B", "C"}}
+	if got := few.Bounded(); !reflect.DeepEqual(got, few) {
+		t.Errorf("three secrets changed: %v", got.Secrets)
 	}
 }

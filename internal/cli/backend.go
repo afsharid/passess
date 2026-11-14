@@ -162,6 +162,9 @@ func setBackend(st *Streams, backend string, args []string) int {
 		if strings.ContainsAny(v, "\n\r\x00") {
 			return failf(st, ExitUsage, "--%s must be one line", strings.ReplaceAll(key, "_", "-"))
 		}
+		if key == "ca_cert" && v != "" && !filepath.IsAbs(v) {
+			return failf(st, ExitUsage, "--ca-cert takes an absolute path: a relative one is read from whichever directory passess runs in")
+		}
 		if (key == "address" || key == "server_url") && v != "" {
 			if u, err := url.Parse(v); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 				return failf(st, ExitUsage, "--%s takes an http(s) URL", strings.ReplaceAll(key, "_", "-"))

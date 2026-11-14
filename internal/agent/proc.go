@@ -22,11 +22,16 @@ func (p Proc) Alive() bool {
 	return err == nil && p.Same(q)
 }
 
+// maxAncestry is the most processes Ancestry walks.
+const maxAncestry = 64
+
 // Ancestry returns the process pid and its ancestors, nearest first, up to
-// but not including pid 1.
+// but not including pid 1. A chain that ends before pid 1 (the cap, or an
+// ancestor that exited meanwhile) is Truncated; callers check that, since
+// the walk reports no error for it.
 func Ancestry(pid int) ([]Proc, error) {
 	var chain []Proc
-	for pid > 1 && len(chain) < 64 {
+	for pid > 1 && len(chain) < maxAncestry {
 		p, err := procInfo(pid)
 		if err != nil {
 			if len(chain) == 0 {
@@ -39,6 +44,23 @@ func Ancestry(pid int) ([]Proc, error) {
 	}
 	return chain, nil
 }
+
+// Truncated reports whether chain stops short of pid 1: the last process it
+// holds has a parent that is not in it. Who started that parent is unknown, so
+// a harness may be among them. A process cannot choose its ancestors but can
+// add enough of its own to push the harness past the cap.
+func Truncated(chain []Proc) bool {
+	return len(chain) > 0 && chain[len(chain)-1].PPID > 1
+}
+
+// Unreadable stands in for the chain of a process passess cannot read (no pid,
+// pid 1, a process that has gone): one process whose parent is unknown. Truncated
+// reports it, and Anchor finds no anchor in it, so nothing is remembered.
+func Unreadable(pid int) []Proc { return []Proc{{PID: pid, PPID: 2, Name: "unknown"}} }
+
+// Unidentified stands for the coding agent a truncated chain may hide, where
+// a name is needed: it is in no clients list, so a secret with one refuses it.
+const Unidentified = "an unidentified caller"
 
 // shells are the programs an anchor search looks through: a harness runs
 // each command in one, and a shell says nothing about who asked.

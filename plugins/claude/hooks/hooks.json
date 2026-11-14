@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit|mcp__.*",
+        "matcher": "Bash|Monitor|Read|Grep|Write|Edit|MultiEdit|NotebookRead|NotebookEdit|mcp__.*",
         "hooks": [{"type": "command", "command": "passess hook claude PreToolUse"}]
       }
     ],

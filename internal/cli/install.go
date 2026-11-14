@@ -258,6 +258,7 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 
 	out := harnessOutput{Applied: *apply, Harnesses: []harnessReport{}, Apps: []appReport{}}
 	healthy := true
+	withhold := len(callerAgents(st.Getenv, selfChain())) > 0
 	for _, a := range targets {
 		var desired []harness.Desired
 		if user != nil {
@@ -281,6 +282,9 @@ func harnessCommand(st *Streams, verb string, args []string) int {
 		}
 		if len(r.Errors) > 0 || (verb == "status" && !settled(r)) {
 			healthy = false
+		}
+		if withhold {
+			r.Unmanaged = withheldEntries(r.Unmanaged)
 		}
 		out.Harnesses = append(out.Harnesses, r)
 	}
@@ -333,6 +337,18 @@ func report(a harness.Adapter, verb string, desired []harness.Desired, force boo
 		r.Actions = append(r.Actions, actions...)
 	}
 	return r
+}
+
+// withheldEntries is the entries other tools configured without the
+// arguments and URL, which may hold a credential, for a report an agent
+// reads: the harness file they come from is one its hooks keep it out of.
+func withheldEntries(entries []harness.Entry) []harness.Entry {
+	out := make([]harness.Entry, len(entries))
+	for i, e := range entries {
+		e.Args, e.URL = nil, ""
+		out[i] = e
+	}
+	return out
 }
 
 func instructionsChange(verb, state string) bool {
@@ -407,7 +423,7 @@ func hooksChange(verb, state string, skip bool) bool {
 // handler from it, and restores the file if it does not read back so.
 func editHooks(h harness.Hooks, self string, install bool) error {
 	path := h.File()
-	before, err := os.ReadFile(path)
+	before, err := harness.ReadConfig(path, harness.MaxConfigSize)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -516,7 +532,7 @@ func applyActions(a harness.Adapter, actions []harness.Action) error {
 // change.
 func editConfig(a harness.Adapter, ed harness.Editor, actions []harness.Action) error {
 	path := a.ConfigPath()
-	before, err := os.ReadFile(path)
+	before, err := harness.ReadConfig(path, harness.MaxConfigSize)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -620,7 +636,7 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 		}
 		for _, e := range r.Unmanaged {
 			if len(e.Leaks) > 0 {
-				fmt.Fprintf(st.Stdout, "  %-14s %-10s credentials in clear: %s\n", e.Name, "LEAK", strings.Join(e.Leaks, ", "))
+				fmt.Fprintf(st.Stdout, "  %-14s %-10s credentials in clear: %s\n", printable(e.Name), "LEAK", printable(strings.Join(e.Leaks, ", ")))
 			}
 		}
 		for _, a := range r.Actions {
@@ -650,7 +666,7 @@ func printHarnesses(st *Streams, verb string, out harnessOutput) {
 			fmt.Fprintf(st.Stdout, "  backup: %s\n", r.Backup)
 		}
 		for _, e := range r.Errors {
-			fmt.Fprintf(st.Stdout, "  error: %s\n", e)
+			fmt.Fprintf(st.Stdout, "  error: %s\n", printable(e))
 		}
 	}
 	if !out.Applied && pending && verb != "status" {

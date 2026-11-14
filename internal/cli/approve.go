@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/afsharid/passess/internal/agent"
 	"github.com/afsharid/passess/internal/buildinfo"
@@ -71,7 +72,8 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 		return 0
 	}
 	slices.Sort(need)
-	family := policy.Family(prog.Name)
+	need = slices.Compact(need)
+	family := prog.RunsAs()
 	remember := anchored && u.Agent.ApprovalTTL > 0
 	now := time.Now()
 
@@ -105,10 +107,16 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	if !remember {
 		keys = nil
 	}
-	ask := agent.AskFor{Secrets: missing, Program: family, Path: prog.Path, Argv: redactArgv(req.Argv, nil), Dir: req.Dir,
-		Harness: detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v })}
+	// The requester chose the argv, the directory and the program's name;
+	// the question shows them with control characters made visible, so no
+	// approver, terminal or app, acts on bytes the requester picked. Bounded
+	// then cuts it to a size every approver can read.
+	ask := agent.AskFor{Secrets: missing, Program: visible(family), Path: visible(prog.Path), Argv: visibleAll(redactArgv(req.Argv, nil)), Dir: visible(req.Dir),
+		Harness: visible(detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v }))}.Bounded()
 	if anchored {
-		ask.Anchor = &anchor
+		shown := anchor
+		shown.Name = visible(shown.Name)
+		ask.Anchor = &shown
 	}
 	if remember {
 		ask.Until = now.Add(u.Agent.ApprovalTTL)
@@ -315,8 +323,7 @@ func (s *agentServer) approvals(u *config.User) []agent.Approval {
 // serveApprover sends questions to an approver and settles them with its
 // answers, for as long as it stays connected.
 func (s *agentServer) serveApprover(c *agent.Conn) {
-	chain, _ := agent.Ancestry(c.Peer.PID)
-	if err := approverGate(chain); err != nil {
+	if err := approverGate(peerChain(c.Peer.PID)); err != nil {
 		_ = c.Write(agent.Frame{Error: err.Error()})
 		return
 	}
@@ -368,13 +375,32 @@ func (s *agentServer) serveApprover(c *agent.Conn) {
 	}
 }
 
+// peerChain is the process chain of the peer with pid, as the agent sees it. A
+// peer passess cannot identify (pid 0 or 1, a process that has gone, an empty
+// chain) gets agent.Unreadable, which counts as an unidentified caller: the
+// kernel gave no pid, or the peer left before the walk, and either may hide a
+// harness, as a detached child does.
+func peerChain(pid int) []agent.Proc {
+	if pid <= 1 {
+		return agent.Unreadable(pid)
+	}
+	chain, err := agent.Ancestry(pid)
+	if err != nil || len(chain) == 0 {
+		return agent.Unreadable(pid)
+	}
+	return chain
+}
+
 // approverGate refuses an approver with a harness among its ancestors: an
 // agent must not approve its own requests. The whole chain counts, not only
 // the anchor, since any program the agent starts in between (script,
 // timeout, an interpreter) is an anchor of its own. One that detaches from
 // the harness first, a daemonized child whose parent is now launchd, gets
-// through (T6).
+// through (T6). A chain cut short or empty, which may hide the harness, is refused.
 func approverGate(chain []agent.Proc) error {
+	if len(chain) == 0 || agent.Truncated(chain) {
+		return errors.New("refusing an approver whose process chain passess cannot read to the end: an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own")
+	}
 	for _, p := range chain {
 		if agent.HarnessOf(p) != "" {
 			return fmt.Errorf("refusing an approver started by %s (pid %d): an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own", p.Name, p.PID)
@@ -611,15 +637,125 @@ func approveLoop(st *Streams, c *agent.Conn, in io.Reader, out io.Writer) int {
 func printAsk(w io.Writer, a agent.AskFor) {
 	who := "a caller passess cannot identify"
 	if a.Anchor != nil {
-		who = fmt.Sprintf("%s (pid %d)", a.Anchor.Name, a.Anchor.PID)
+		who = fmt.Sprintf("%s (pid %d)", visible(a.Anchor.Name), a.Anchor.PID)
 	}
 	if a.Harness != "" {
-		who += ", which says it is " + a.Harness
+		who += ", which says it is " + visible(a.Harness)
 	}
-	fmt.Fprintf(w, "\n%s wants %s for %s\n  in %s\n  $ %s\n", who, strings.Join(a.Secrets, ", "), a.Program, a.Dir, shellLine(a.Argv))
+	fmt.Fprintf(w, "\n%s wants %s for %s\n  in %s\n  $ %s\n", who, visible(strings.Join(a.Secrets, ", ")), visible(a.Program), visible(a.Dir), visible(shellLine(a.Argv)))
 	if a.Until.IsZero() {
 		fmt.Fprint(w, "Allow for this command? [y/N] ")
 	} else {
 		fmt.Fprintf(w, "Allow until %s? [y/N] ", a.Until.Local().Format("Mon 15:04"))
 	}
+}
+
+// visible spells out the control, format and line-separator characters in
+// text a requester chose, as \n, \x1b or \u202e, so a prompt shows them
+// instead of acting on them: an escape sequence can redraw the lines above
+// it, and a bidi mark can reorder the line. It never drops a character, so
+// the shown text maps back to the real name. Text that holds none comes back
+// unchanged.
+func visible(s string) string { return spell(s, false) }
+
+// spell is the one helper behind visible and printable. It spells out what
+// hiddenAt names, as \n, \x1b, \u202e or \U000e0067, and keeps a tab when
+// keepTab is set.
+func spell(s string, keepTab bool) string {
+	rs := []rune(s)
+	var b strings.Builder
+	spelled := false
+	for i, r := range rs {
+		if !hiddenAt(rs, i) || (keepTab && r == '\t') {
+			b.WriteRune(r)
+			continue
+		}
+		spelled = true
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x100:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case r < 0x10000:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		}
+	}
+	if !spelled {
+		return s
+	}
+	return b.String()
+}
+
+func visibleAll(words []string) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = visible(w)
+	}
+	return out
+}
+
+// hidden reports a rune that is hidden wherever it stands: controls (C0, DEL
+// and C1), the bidi embeddings, overrides and isolates, the line and
+// paragraph separators, and the format characters that show nothing (zero
+// width space, word joiner, soft hyphen, BOM and the like). Ordinary text
+// keeps the left and right marks, the variation selectors and, in context,
+// the joiners and the flag tags that hiddenAt decides.
+func hidden(r rune) bool {
+	switch {
+	case r == '\u200c', r == '\u200d', r == '\u200e', r == '\u200f', isTag(r):
+		return false
+	}
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// hiddenAt is hidden for the rune at rs[i], where its neighbours count: a
+// zero width joiner or non-joiner stays between letters, marks, digits or
+// emoji, as in Persian and in an emoji family; a tag character stays in a
+// flag sequence, a black flag, tags for letters and digits, then the cancel
+// tag.
+func hiddenAt(rs []rune, i int) bool {
+	r := rs[i]
+	switch {
+	case r == '\u200c', r == '\u200d':
+		return i == 0 || i == len(rs)-1 || !joins(rs[i-1]) || !joins(rs[i+1])
+	case isTag(r):
+		return !inFlag(rs, i)
+	}
+	return hidden(r)
+}
+
+func joins(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) || unicode.Is(unicode.So, r) || unicode.Is(unicode.Sk, r)
+}
+
+func isTag(r rune) bool { return r >= 0xe0020 && r <= 0xe007f }
+
+// inFlag reports whether the tag character at rs[i] belongs to a complete
+// flag sequence: U+1F3F4, tags for letters and digits, the cancel tag.
+func inFlag(rs []rune, i int) bool {
+	j := i
+	for j > 0 && isTag(rs[j-1]) {
+		j--
+	}
+	if j == 0 || rs[j-1] != 0x1f3f4 {
+		return false
+	}
+	k := j
+	for k < len(rs) && isTag(rs[k]) {
+		r := rs[k]
+		if r == 0xe007f {
+			return k == len(rs)-1 || !isTag(rs[k+1])
+		}
+		if r < 0xe0030 || (r > 0xe0039 && r < 0xe0061) || r > 0xe007a {
+			return false
+		}
+		k++
+	}
+	return false
 }

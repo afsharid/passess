@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/harness"
 	"github.com/afsharid/passess/internal/redact"
 	"github.com/afsharid/passess/internal/ref"
@@ -64,6 +65,18 @@ func runScan(st *Streams, args []string) int {
 		return failf(st, ExitUsage, "--scrub works on the transcripts a scan finds, with your configured values; drop the paths and --no-known")
 	case *scrub:
 		*transcripts = true
+	}
+	// Matching the configured values resolves every secret, with neither the
+	// clients list nor the approval that exec asks for, and says which line of
+	// a file holds which value: a guess oracle for a caller that may not use
+	// the secret. A coding agent runs the scan without it.
+	if !*noKnown {
+		if agents := callerAgents(st.Getenv, selfChain()); len(agents) > 0 {
+			if *scrub {
+				return failf(st, ExitNoPerm, "passess scan --scrub needs the values you configured, so only the user can run it, in a terminal or Passess.app")
+			}
+			return failf(st, ExitNoPerm, "passess scan resolves every secret you configured to search for its value; from %s, run it with --no-known, or ask the user to run it in a terminal or Passess.app", detect.Label(agents[0]))
+		}
 	}
 	augmentPath(st.Getenv)
 
@@ -222,9 +235,9 @@ func printScan(st *Streams, out scanOutput) {
 	home := st.Getenv("HOME")
 	short := func(p string) string {
 		if home != "" && strings.HasPrefix(p, home+"/") {
-			return "~" + p[len(home):]
+			p = "~" + p[len(home):]
 		}
-		return p
+		return printable(p) // a clone chose its file and directory names
 	}
 	byCategory := map[string][]scan.Finding{}
 	for _, f := range out.Findings {
@@ -238,9 +251,9 @@ func printScan(st *Streams, out scanOutput) {
 		fmt.Fprintf(st.Stdout, "%s\n", cat)
 		for _, f := range fs {
 			if f.Kind == "rule" {
-				fmt.Fprintf(st.Stdout, "  %s:%d  rule %s  fp %s (%d chars)\n", short(f.Path), f.Line, f.Rule, f.Fingerprint, f.Length)
+				fmt.Fprintf(st.Stdout, "  %s:%d  rule %s  fp %s (%d chars)\n", short(f.Path), f.Line, printable(f.Rule), f.Fingerprint, f.Length)
 			} else {
-				fmt.Fprintf(st.Stdout, "  %s:%d  known %s  fp %s\n", short(f.Path), f.Line, f.Secret, f.Fingerprint)
+				fmt.Fprintf(st.Stdout, "  %s:%d  known %s  fp %s\n", short(f.Path), f.Line, printable(f.Secret), f.Fingerprint)
 			}
 		}
 	}
@@ -268,10 +281,10 @@ func printScan(st *Streams, out scanOutput) {
 	}
 	printScrubbed(st, out, short)
 	for _, e := range out.Errors {
-		fmt.Fprintf(st.Stdout, "could not read: %s\n", e)
+		fmt.Fprintf(st.Stdout, "could not read: %s\n", printable(e))
 	}
 	for _, n := range out.Notes {
-		fmt.Fprintf(st.Stdout, "note: %s\n", n)
+		fmt.Fprintf(st.Stdout, "note: %s\n", printable(n))
 	}
 }
 
@@ -291,7 +304,7 @@ func printScrubbed(st *Streams, out scanOutput, short func(string) string) {
 		}
 		switch {
 		case r.Skipped != "":
-			fmt.Fprintf(st.Stdout, "  %s  left as it is: %s\n", short(r.Path), r.Skipped)
+			fmt.Fprintf(st.Stdout, "  %s  left as it is: %s\n", short(r.Path), printable(r.Skipped))
 		default:
 			fmt.Fprintf(st.Stdout, "  %s  %s\n", short(r.Path), strings.Join(parts, ", "))
 		}

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,9 +120,13 @@ func TestDisguisesAreSeenThrough(t *testing.T) {
 }
 
 // TestMultiCallBinary builds a busybox-like layout: applets are symlinks to
-// one binary, so the applet name decides, and busybox itself stays denied.
+// one binary the system installs under those names, so the applet name
+// decides, and busybox itself stays denied.
 func TestMultiCallBinary(t *testing.T) {
 	dir := t.TempDir()
+	saved := referenceDirs
+	referenceDirs = []string{dir}
+	t.Cleanup(func() { referenceDirs = saved })
 	box := filepath.Join(dir, "busybox")
 	if err := os.WriteFile(box, []byte("\x7fELF not really busybox"), 0o755); err != nil {
 		t.Fatal(err)
@@ -318,6 +323,606 @@ func TestCopyCheckDoesNotDependOnCallerPATH(t *testing.T) {
 	for _, allow := range [][]string{nil, {"gh"}} {
 		if d := Check("TOKEN", p, allow); d.Allowed {
 			t.Fatalf("allow=%v: a renamed copy of sh got the secret (families %v)", allow, p.Families)
+		}
+	}
+}
+
+// A project file only narrows. With no allow list of the user's own, its
+// list must not unlock a denied family.
+func TestEffectiveProjectCannotUnlockDeniedFamilies(t *testing.T) {
+	for _, name := range []string{"sh", "bash", "python3", "node", "env", "base64", "busybox"} {
+		got := Effective(nil, []string{name})
+		if got == nil || len(got) != 0 {
+			t.Errorf("project allow [%s] with no user list gave %v, want an empty list", name, got)
+		}
+	}
+	if got := Effective(nil, []string{"gh", "bash", "git"}); !slices.Equal(got, []string{"gh", "git"}) {
+		t.Fatalf("denied names must drop out and the rest stay: %v", got)
+	}
+	// Control: a list the user wrote keeps the shell the user allowed.
+	if got := Effective([]string{"sh"}, []string{"bash"}); !slices.Equal(got, []string{"bash"}) {
+		t.Fatalf("a shell the user allowed was narrowed away: %v", got)
+	}
+	if got := Combine(nil, []string{"sh"}); !slices.Equal(got, []string{"sh"}) {
+		t.Fatalf("Combine of two user lists must not filter: %v", got)
+	}
+}
+
+func TestProjectAllowDoesNotHandShellsTheSecret(t *testing.T) {
+	sh := mustInspect(t, "sh")
+	for _, project := range [][]string{{"sh"}, {"bash"}, {"sh", "gh"}} {
+		if d := Check("TOKEN", sh, Effective(nil, project)); d.Allowed {
+			t.Errorf("project %v let a shell receive the secret", project)
+		}
+	}
+	// Control: a project may still name an ordinary program.
+	cat := mustInspect(t, "cat")
+	if d := Check("TOKEN", cat, Effective(nil, []string{"cat"})); !d.Allowed {
+		t.Errorf("project allow [cat] refused cat: %+v", d)
+	}
+	if d := Check("TOKEN", cat, Effective(nil, []string{"gh"})); d.Allowed {
+		t.Errorf("project allow [gh] let cat through")
+	}
+}
+
+// interpFixture writes a copy and a symlink of the system sh, and returns
+// their paths with a directory to put scripts in.
+func interpFixture(t *testing.T) (dir, copied, linked string) {
+	t.Helper()
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	shPath, _ = filepath.EvalSymlinks(shPath)
+	data, err := os.ReadFile(shPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = t.TempDir()
+	copied = filepath.Join(dir, "myint")
+	if err := os.WriteFile(copied, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked = filepath.Join(dir, "myln")
+	if err := os.Symlink(shPath, linked); err != nil {
+		t.Fatal(err)
+	}
+	return dir, copied, linked
+}
+
+func writeScript(t *testing.T, path, firstLine string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(firstLine+"\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A script is judged by the file its #! line names, not by that file's name:
+// a copy or a link of a shell under another name is still a shell.
+func TestShebangInterpreterIsInspected(t *testing.T) {
+	dir, copied, linked := interpFixture(t)
+	viaCopy := filepath.Join(dir, "t1")
+	writeScript(t, viaCopy, "#!"+copied)
+	viaLink := filepath.Join(dir, "t2")
+	writeScript(t, viaLink, "#!"+linked)
+	chained := filepath.Join(dir, "t3")
+	writeScript(t, chained, "#!"+viaCopy)
+	viaEnv := filepath.Join(dir, "t4")
+	writeScript(t, viaEnv, "#!/usr/bin/env myint")
+	viaEnvS := filepath.Join(dir, "t5")
+	writeScript(t, viaEnvS, "#!/usr/bin/env -S myln -e")
+	lookPath := func(name string) (string, error) {
+		switch name {
+		case "myint":
+			return copied, nil
+		case "myln":
+			return linked, nil
+		}
+		return exec.LookPath(name)
+	}
+	for _, path := range []string{viaCopy, viaLink, chained, viaEnv, viaEnvS} {
+		p, err := Inspect(path, lookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, allow := range [][]string{nil, {filepath.Base(path)}} {
+			if d := Check("TOKEN", p, allow); d.Allowed {
+				t.Errorf("%s with allow=%v reached a shell (families %v)", filepath.Base(path), allow, p.Families)
+			}
+		}
+	}
+}
+
+func TestShebangControlsStayAllowed(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	plain := filepath.Join(dir, "plain")
+	writeScript(t, plain, "#!"+cat)
+	missing := filepath.Join(dir, "nothing")
+	writeScript(t, missing, "#!"+filepath.Join(dir, "missing-interpreter"))
+	loop := filepath.Join(dir, "loop")
+	writeScript(t, loop, "#!"+loop)
+	for _, path := range []string{plain, missing, loop} {
+		p, err := Inspect(path, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); !d.Allowed {
+			t.Errorf("%s was refused (families %v): %+v", filepath.Base(path), p.Families, d)
+		}
+	}
+}
+
+// A script's interpreter swapped after the check must be caught too.
+func TestUnchangedCatchesInterpreterSwap(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	cat, _ = filepath.EvalSymlinks(cat)
+	data, err := os.ReadFile(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp := filepath.Join(dir, "myint")
+	if err := os.WriteFile(interp, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+interp)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("untouched: %v", err)
+	}
+	shPath, _ := exec.LookPath("sh")
+	shPath, _ = filepath.EvalSymlinks(shPath)
+	sh, err := os.ReadFile(shPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, sh, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, interp); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err == nil {
+		t.Fatal("a swapped interpreter went unnoticed")
+	}
+}
+
+// A relative interpreter on the #! line is found from the directory the
+// program runs in. The agent daemon runs from /, so it is given that directory.
+func TestRelativeShebangUsesTheRunDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	for _, line := range []string{"#!./myint", "#!/usr/bin/env ./myint", "#!/usr/bin/env -S ./myint -e"} {
+		script := filepath.Join(dir, "rel")
+		writeScript(t, script, line)
+		p, err := InspectIn(script, dir, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); d.Allowed {
+			t.Errorf("%q with the run directory reached a shell (families %v)", line, p.Families)
+		}
+		// A directory without that file leaves nothing to judge: no failure.
+		other := t.TempDir()
+		p, err = InspectIn(script, other, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); !d.Allowed && !strings.Contains(line, "env") {
+			t.Errorf("%q with an empty directory was refused: %+v", line, d)
+		}
+	}
+}
+
+// A #! interpreter written without a slash is opened by the kernel relative
+// to the run directory, not searched on PATH. Only a name env launches is
+// looked up on PATH.
+func TestSlashlessShebangUsesTheRunDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	script := filepath.Join(dir, "noslash")
+	writeScript(t, script, "#!myint")
+	elsewhere := func(name string) (string, error) {
+		if name == "myint" {
+			return "", os.ErrNotExist // not on PATH
+		}
+		return exec.LookPath(name)
+	}
+	p, err := InspectIn(script, dir, elsewhere)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("#!myint beside a copy of a shell was allowed (families %v)", p.Families)
+	}
+	// A directory without that file leaves nothing to judge, even when PATH
+	// has a program of that name.
+	onPath := func(name string) (string, error) {
+		if name == "myint" {
+			return filepath.Join(dir, "myint"), nil
+		}
+		return exec.LookPath(name)
+	}
+	p, err = InspectIn(script, t.TempDir(), onPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Errorf("#!myint with an empty run directory was refused: %+v", d)
+	}
+	// env searches PATH: the same name through env is the PATH program.
+	writeScript(t, script, "#!/usr/bin/env myint")
+	p, err = InspectIn(script, t.TempDir(), onPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("env myint with the copy on PATH was allowed (families %v)", p.Families)
+	}
+}
+
+// Inspect on its own judges a relative interpreter against the process's
+// working directory, where a direct run starts the program.
+func TestRelativeShebangUsesTheProcessDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	script := filepath.Join(dir, "rel")
+	writeScript(t, script, "#!./myint")
+	t.Chdir(dir)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("relative interpreter reached a shell (families %v)", p.Families)
+	}
+}
+
+// What the #! line names must still be the file that was judged: a link
+// repointed after the check changes where the kernel goes.
+func TestUnchangedCatchesInterpreterLinkRetarget(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	link := filepath.Join(dir, "interp")
+	if err := os.Symlink(cat, link); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+link)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Fatalf("the harmless interpreter was refused: %+v", d)
+	}
+	// Control: the same link made again changes nothing.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cat, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("a link made again to the same file: %v", err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sh, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("retargeted link: %v, want ErrChanged", err)
+	}
+}
+
+// A link in a directory on the way counts the same as the final link.
+func TestUnchangedCatchesDirectoryLinkRetarget(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	good, bad := filepath.Join(dir, "good"), filepath.Join(dir, "bad")
+	for d, target := range map[string]string{good: cat, bad: sh} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(d, "interp")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	via := filepath.Join(dir, "via")
+	if err := os.Symlink(good, via); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+filepath.Join(via, "interp"))
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Fatalf("the harmless interpreter was refused: %+v", d)
+	}
+	if err := os.Remove(via); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bad, via); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("retargeted directory link: %v, want ErrChanged", err)
+	}
+}
+
+// An interpreter that was missing when the script was judged and appears
+// afterwards is a change too.
+func TestUnchangedCatchesInterpreterThatAppears(t *testing.T) {
+	dir := t.TempDir()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	interp := filepath.Join(dir, "later")
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+interp)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("untouched: %v", err)
+	}
+	if err := os.Symlink(sh, interp); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("interpreter that appeared: %v, want ErrChanged", err)
+	}
+}
+
+// env options that take a value must not be read as the command: the shell
+// after them is the interpreter. An option env does not know is refused as env.
+func TestShebangEnvOptions(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		line string
+		want string // the family that must decide a refusal; "" means allowed
+	}{
+		{"#!/usr/bin/env -u FOO sh", "sh"},
+		{"#!/usr/bin/env -uFOO sh", "sh"},
+		{"#!/usr/bin/env --unset FOO sh", "sh"},
+		{"#!/usr/bin/env --unset=FOO sh", "sh"},
+		{"#!/usr/bin/env -P /bin sh", "sh"},
+		{"#!/usr/bin/env -P/bin:/usr/bin sh", "sh"},
+		{"#!/usr/bin/env -C /tmp sh", "sh"},
+		{"#!/usr/bin/env --chdir=/tmp sh", "sh"},
+		{"#!/usr/bin/env -i -u FOO -u BAR FOO=1 sh", "sh"},
+		{"#!/usr/bin/env -iu FOO sh", "sh"},
+		{"#!/usr/bin/env -S -u FOO sh", "sh"},
+		{"#!/usr/bin/env -S sh -e", "sh"},
+		{"#!/usr/bin/env -- sh", "sh"},
+		{"#!/usr/bin/env -C /tmp ./sh", "env"},
+		{"#!/usr/bin/env -S\"sh\"", "env"},
+		{"#!/usr/bin/env -Ssh", "sh"},
+		{"#!/usr/bin/env -S 'sh -e'", "env"},
+		{"#!/usr/bin/env -a name sh", "env"},
+		{"#!/usr/bin/env --default-signal=INT sh", "env"},
+		{"#!/usr/bin/env -u", "env"},
+		{"#!/usr/bin/env -i", "env"},
+		{"#!/usr/bin/env cat", ""},
+		{"#!/usr/bin/env -i cat", ""},
+		{"#!/usr/bin/env FOO=1 cat", ""},
+		{"#!/usr/bin/env -u FOO cat", ""},
+		{"#!/usr/bin/env -P /bin:/usr/bin cat", ""},
+		{"#!/usr/bin/env -S -u FOO cat", ""},
+	} {
+		script := filepath.Join(dir, "e")
+		writeScript(t, script, tc.line)
+		p, err := Inspect(script, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := Check("TOKEN", p, nil)
+		if tc.want == "" {
+			if !d.Allowed {
+				t.Errorf("%q was refused (families %v): %+v", tc.line, p.Families, d)
+			}
+			continue
+		}
+		if d.Allowed || d.Family != tc.want {
+			t.Errorf("%q: decided by %q (allowed %v, families %v), want a refusal by %q", tc.line, d.Family, d.Allowed, p.Families, tc.want)
+		}
+	}
+}
+
+// Judging a script must not repeat the PATH scan for every file it reads.
+func TestInspectLooksUpReferencesOnce(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!/bin/sh")
+	calls := 0
+	lookPath := func(name string) (string, error) {
+		calls++
+		return exec.LookPath(name)
+	}
+	if _, err := Inspect(script, lookPath); err != nil {
+		t.Fatal(err)
+	}
+	if limit := len(lookups) + 4; calls > limit {
+		t.Errorf("Inspect made %d PATH lookups for a #!/bin/sh script, want at most %d", calls, limit)
+	}
+}
+
+// fakeBusybox builds the Alpine layout in a temp directory the test makes the
+// system's: sh, ls and cat are links to one multi-call file, installed next
+// to busybox itself. other holds a link the system did not make.
+func fakeBusybox(t *testing.T) (sys, other string, look func(string) (string, error)) {
+	t.Helper()
+	root := t.TempDir()
+	sys, other = filepath.Join(root, "bin"), filepath.Join(root, "home")
+	for _, d := range []string{sys, other} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	box := filepath.Join(sys, "busybox")
+	if err := os.WriteFile(box, []byte("\x7fELF not really busybox passess-fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, applet := range []string{"sh", "ls", "cat"} {
+		if err := os.Symlink("busybox", filepath.Join(sys, applet)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"tool", "ls"} { // not installed by the system under these names here
+		if err := os.Symlink(box, filepath.Join(other, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := referenceDirs
+	referenceDirs = []string{sys}
+	t.Cleanup(func() { referenceDirs = saved })
+	look = func(name string) (string, error) {
+		if strings.Contains(name, "/") {
+			return name, nil
+		}
+		return filepath.Join(sys, name), nil
+	}
+	return sys, other, look
+}
+
+// On a system where sh, ls and cat are applets of busybox, the allow list is
+// compared with the applet the program runs as, not with "busybox": allow=[sh]
+// lets sh in and allow=[ls] lets ls in, while busybox itself and a link the
+// system did not make stay the multi-call binary. Run on Alpine, this test and
+// TestShellIsRefusedUnlessAllowed and TestOrdinaryProgram hold on the real thing.
+func TestMultiCallAppletDecidesTheAllowList(t *testing.T) {
+	sys, other, look := fakeBusybox(t)
+	cases := []struct {
+		path  string
+		allow []string
+		ok    bool
+	}{
+		{filepath.Join(sys, "sh"), nil, false},
+		{filepath.Join(sys, "sh"), []string{"gh"}, false},
+		{filepath.Join(sys, "sh"), []string{"busybox"}, false},
+		{filepath.Join(sys, "sh"), []string{"sh"}, true},
+		{filepath.Join(sys, "sh"), []string{"bash"}, true}, // every shell is sh
+		{filepath.Join(sys, "ls"), nil, true},
+		{filepath.Join(sys, "ls"), []string{"ls"}, true},
+		{filepath.Join(sys, "ls"), []string{"cat"}, false},
+		{filepath.Join(sys, "ls"), []string{"busybox"}, false},
+		{filepath.Join(sys, "cat"), []string{"cat"}, true},
+		{filepath.Join(sys, "cat"), []string{"ls"}, false},
+		{filepath.Join(sys, "busybox"), nil, false},
+		{filepath.Join(sys, "busybox"), []string{"sh"}, false},
+		{filepath.Join(sys, "busybox"), []string{"ls"}, false},
+		{filepath.Join(sys, "busybox"), []string{"busybox"}, true},
+		{filepath.Join(other, "tool"), nil, false},
+		{filepath.Join(other, "tool"), []string{"tool"}, false},
+		{filepath.Join(other, "tool"), []string{"sh"}, false},
+		{filepath.Join(other, "tool"), []string{"busybox"}, true},
+		// The system installs this file as ls, so a link named ls runs the ls applet.
+		{filepath.Join(other, "ls"), nil, true},
+		{filepath.Join(other, "ls"), []string{"busybox"}, false},
+	}
+	for _, c := range cases {
+		p, err := Inspect(c.path, look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, c.allow); d.Allowed != c.ok {
+			t.Errorf("Check %s allow=%v: allowed=%v, want %v (%+v, families %v)", c.path, c.allow, d.Allowed, c.ok, d, p.Families)
+		}
+	}
+
+	// A program the user configured has no default refusal, only its allow list.
+	configured := []struct {
+		path  string
+		allow []string
+		ok    bool
+	}{
+		{filepath.Join(sys, "sh"), []string{"sh"}, true},
+		{filepath.Join(sys, "ls"), []string{"ls"}, true},
+		{filepath.Join(sys, "sh"), []string{"ls"}, false},
+		{filepath.Join(sys, "ls"), []string{"busybox"}, false},
+		{filepath.Join(sys, "busybox"), []string{"busybox"}, true},
+		{filepath.Join(sys, "busybox"), []string{"sh"}, false},
+	}
+	for _, c := range configured {
+		p, err := Inspect(c.path, look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := CheckConfigured("TOKEN", p, c.allow)
+		if d.Allowed != c.ok {
+			t.Errorf("CheckConfigured %s allow=%v: allowed=%v, want %v (%+v)", c.path, c.allow, d.Allowed, c.ok, d)
+		}
+		if !d.Allowed && strings.Contains(d.Reason, "busybox is not") && filepath.Base(c.path) != "busybox" {
+			t.Errorf("CheckConfigured %s names busybox, not the applet: %q", c.path, d.Reason)
+		}
+	}
+}
+
+// A script whose #! line names a system applet runs that applet; under a
+// name the system does not install it stays busybox.
+func TestMultiCallAppletOnAShebangLine(t *testing.T) {
+	sys, other, look := fakeBusybox(t)
+	dir := t.TempDir()
+	for name, line := range map[string]string{
+		"viaSh":   "#!" + filepath.Join(sys, "sh"),
+		"viaLs":   "#!" + filepath.Join(sys, "ls"),
+		"viaTool": "#!" + filepath.Join(other, "tool"),
+		"viaLink": "#!" + filepath.Join(other, "ls"),
+	} {
+		writeScript(t, filepath.Join(dir, name), line)
+	}
+	cases := []struct {
+		script string
+		allow  []string
+		ok     bool
+	}{
+		{"viaSh", nil, false},
+		{"viaSh", []string{"viaSh"}, false},
+		{"viaSh", []string{"viaSh", "sh"}, true},
+		{"viaSh", []string{"viaSh", "busybox"}, false},
+		{"viaLs", nil, true},
+		{"viaLs", []string{"viaLs"}, true},
+		{"viaTool", nil, false},
+		{"viaTool", []string{"viaTool", "sh"}, false},
+		{"viaTool", []string{"viaTool", "busybox"}, true},
+		{"viaLink", []string{"viaLink"}, true}, // named ls, which the system installs it as
+	}
+	for _, c := range cases {
+		p, err := Inspect(filepath.Join(dir, c.script), look)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, c.allow); d.Allowed != c.ok {
+			t.Errorf("Check %s allow=%v: allowed=%v, want %v (%+v, families %v)", c.script, c.allow, d.Allowed, c.ok, d, p.Families)
 		}
 	}
 }

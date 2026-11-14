@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -187,4 +188,73 @@ func TestInstructionPathsAreDistinct(t *testing.T) {
 			t.Fatalf("%s shares %s with Claude Code or Codex", id, p)
 		}
 	}
+}
+
+// bigFile writes a file one byte over limit and returns its path.
+func bigFile(t *testing.T, path string, limit int64) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"+strings.Repeat(" ", int(limit)-1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A config over the size cap is refused by name before it is read or parsed,
+// whichever way the harness reads it.
+func TestHugeConfigIsRefused(t *testing.T) {
+	refused := func(t *testing.T, path string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "larger than") {
+			t.Errorf("want an error naming %s and the cap, got %v", path, err)
+		}
+	}
+	t.Run("ReadConfig", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "c.json")
+		writeAt(t, path, "{}"+strings.Repeat(" ", 10))
+		if data, err := ReadConfig(path, 12); err != nil || len(data) != 12 {
+			t.Errorf("file at the cap: %d bytes, %v", len(data), err)
+		}
+		_, err := ReadConfig(path, 11)
+		refused(t, path, err)
+		if _, err := ReadConfig(path+".none", 12); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a missing file must stay os.ErrNotExist, got %v", err)
+		}
+	})
+	t.Run("json harnesses", func(t *testing.T) {
+		for _, spec := range JSONSpecs("darwin") {
+			home := t.TempDir()
+			j := JSONFile{Spec: spec, Home: home}
+			path := bigFile(t, j.abs(spec.Paths[0]), MaxConfigSize+1)
+			_, err := j.Entries()
+			refused(t, path, err)
+			_, _, err = j.Raw("x")
+			refused(t, path, err)
+		}
+	})
+	t.Run("hooks", func(t *testing.T) {
+		for _, spec := range HookSpecs() {
+			h := Hooks{Spec: spec, Home: t.TempDir()}
+			path := bigFile(t, h.File(), MaxConfigSize+1)
+			_, err := h.State(self)
+			refused(t, path, err)
+		}
+	})
+	t.Run("claude and codex", func(t *testing.T) {
+		home := t.TempDir()
+		c := Claude{Home: home}
+		path := bigFile(t, c.ConfigPath(), MaxStateSize+1)
+		_, err := c.Entries()
+		refused(t, path, err)
+		_, _, err = c.Raw("x")
+		refused(t, path, err)
+		x := Codex{Home: home, CodexHome: filepath.Join(home, ".codex")}
+		path = bigFile(t, x.ConfigPath(), MaxStateSize+1)
+		_, err = x.Entries()
+		refused(t, path, err)
+		_, _, err = x.Raw("x")
+		refused(t, path, err)
+	})
 }

@@ -55,7 +55,7 @@ func runRun(st *Streams, args []string) int {
 			name, d.Reason, name, u.Path)
 	}
 	for _, s := range prof.Secrets {
-		allow := policy.Effective(policy.Effective(u.Secrets[s].Allow, prof.Allow), proj.ProjectAllow(s))
+		allow := policy.Effective(policy.Combine(u.Secrets[s].Allow, prof.Allow), proj.ProjectAllow(s))
 		if d := policy.Check(s, prog, allow); !d.Allowed {
 			return refuse(st, u, s, d)
 		}

@@ -20,9 +20,14 @@ var selfChain = func() []agent.Proc {
 // callerAgents names the coding agents a call comes from: those its
 // environment names and those whose programs are in its process chain. A
 // command can clear a marker from its environment but cannot choose its
-// ancestors; either one seen counts.
+// ancestors; either one seen counts. A chain that stops short of pid 1 may
+// hide one past the cut: it counts as an unidentified agent, which no
+// clients list names.
 func callerAgents(getenv func(string) string, chain []agent.Proc) []string {
 	out := detect.Harnesses(getenv)
+	if agent.Truncated(chain) {
+		out = append(out, agent.Unidentified)
+	}
 	for _, p := range chain {
 		if h := detect.Program(p.Name); h != "" && !slices.Contains(out, h) {
 			out = append(out, h)

@@ -20,7 +20,7 @@ func peerOf(c *net.UnixConn) (Peer, error) {
 			return
 		}
 		p.UID = int(cred.Uid)
-		p.PID, _ = unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID) //nolint:gosec // G115: as above
+		p.PID, perr = unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID) //nolint:gosec // G115: as above
 	})
 	if err == nil {
 		err = perr

@@ -98,7 +98,7 @@ A reference can point at any of these; give several and the first that resolves 
 | `op://vault/item/field` | 1Password | the `op` CLI: desktop app sign-in, or `OP_SERVICE_ACCOUNT_TOKEN` |
 | `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token in the keychain: Connect your vault in Passess.app, or `passess backend bws` (another place with `backends.bws.access_token`) |
 | `bw://item/field` | Bitwarden Password Manager | the `bw` CLI with an unlocked session (`BW_SESSION` or `backends.bw.session`) |
-| `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` |
+| `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` (a daemon a coding agent starts gets no `VAULT_` or `BAO_` variables) |
 | `keychain://service/account` | macOS Keychain, Linux Secret Service | `security` / `secret-tool` |
 | `env://NAME` | an environment variable | — |
 
@@ -218,7 +218,9 @@ When passess edits a file, only its own entries change. Comments, key order and
 formatting stay, a symlinked config is changed where it points, and `uninstall`
 restores the file byte for byte ([ADR 7](docs/adr/0007-edit-harness-configs-by-splicing.md)).
 Files are backed up under `~/.local/state/passess/backups` first, and
-`passess uninstall --apply` takes everything out again.
+`passess uninstall --apply` takes everything out again. `install` and `status` refuse by
+name a config that passess edits if it is over 8 MiB, and `~/.claude.json` or Codex's
+`config.toml`, which passess only reads, if it is over 32 MiB.
 
 ## Guard hooks
 
@@ -308,6 +310,11 @@ agents' instructions and the hooks now teach this form. When a host is refused,
 the refusal names the `passess set` command that would allow it; an agent cannot
 run it, so it asks you.
 
+`passess http`, the remote MCP bridge and the Vault client ignore the caller's proxy
+variables (`HTTPS_PROXY` and the rest) and `SSL_CERT_FILE` / `SSL_CERT_DIR`, so they
+trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`, an absolute path; no
+setting names a proxy.
+
 ## A harness's own API key
 
 A harness that runs a command to get its API key can get it from passess, and the key
@@ -361,7 +368,8 @@ passess inventory > SECRETS-INVENTORY.md    # where every secret lives and what 
 - `scan` combines the gitleaks rule set with the exact values of every secret you have
   configured, in all their encodings. A finding is a file, a line, a rule or secret name
   and a fingerprint keyed for that run, so it matches across files but cannot be checked
-  against a guess.
+  against a guess. Looking for the values resolves every secret, so inside an agent
+  `scan` refuses unless it runs with `--no-known`.
 - `audit` checks what the harnesses do by default, such as Codex handing every
   `*TOKEN*` variable to the commands the agent runs (measured on 0.155). Each
   finding comes with the command or edit that fixes it; audit changes nothing.
@@ -397,7 +405,10 @@ redacts what it prints and returns its exit status. Commands at a terminal, `run
 `mcp-exec` keep running in-process. After upgrading passess, run `passess agent start`:
 the running agent refuses clients of another version rather than run them under its old
 policy, and `start` replaces it with one of this version serving the same config
-([ADR 8](docs/adr/0008-the-agent-runs-the-child.md)).
+([ADR 8](docs/adr/0008-the-agent-runs-the-child.md)). A daemon that a coding agent
+starts gets none of the `VAULT_`, `BAO_`, `OP_`, `BWS_`, `BW_` and `BITWARDENCLI_`
+variables and reads its backends from the config and the keychain; start it in a
+terminal to pass them.
 
 ```toml
 [agent]

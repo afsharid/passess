@@ -31,7 +31,7 @@ func (c Claude) Installed() bool {
 }
 
 func (c Claude) Entries() ([]Entry, error) {
-	data, err := os.ReadFile(c.ConfigPath())
+	data, err := ReadConfig(c.ConfigPath(), MaxStateSize)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -64,7 +64,7 @@ func (c Claude) Entries() ([]Entry, error) {
 }
 
 func (c Claude) Raw(name string) (Raw, bool, error) {
-	data, err := os.ReadFile(c.ConfigPath())
+	data, err := ReadConfig(c.ConfigPath(), MaxStateSize)
 	if err != nil {
 		return Raw{}, false, err
 	}

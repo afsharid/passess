@@ -179,7 +179,7 @@ func inventory(u *config.User, proj *config.Project, harnesses []harnessReport, 
 		var clear []string
 		for _, e := range h.Unmanaged {
 			if len(e.Leaks) > 0 {
-				clear = append(clear, fmt.Sprintf("%s (%s)", code(e.Name), strings.Join(e.Leaks, ", ")))
+				clear = append(clear, fmt.Sprintf("%s (%s)", code(printable(e.Name)), printable(strings.Join(e.Leaks, ", "))))
 			}
 		}
 		if len(clear) > 0 {
@@ -273,6 +273,6 @@ func inventory(u *config.User, proj *config.Project, harnesses []harnessReport, 
 
 	fmt.Fprintf(&b, "\n## Changing a value\n\nChange it where it lives (the vault, or the keychain command above). passess reads the new value the next time a program asks;\n")
 	b.WriteString("programs already started with `passess run` or `mcp-exec` keep the old one until they restart. If a value was ever in a file, a transcript\n")
-	b.WriteString("or a chat, rotate it at its provider first: `passess scan --transcripts` shows where it went.\n")
+	b.WriteString("or a chat, rotate it at its provider first: `passess scan --transcripts` shows where it went (the user runs it).\n")
 	return b.String()
 }

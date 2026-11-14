@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -79,20 +80,26 @@ func runActivity(st *Streams, args []string) int {
 		fmt.Fprintln(st.Stdout, "no activity yet: the agent records what it runs and what you approve")
 		return ExitOK
 	}
+	// The agent chose the program's file name and the log holds it as it
+	// was; the text view shows it without the characters a terminal acts on.
 	for _, e := range entries {
-		who := e.Program
+		who := printable(e.Program)
 		if e.Anchor != "" {
-			who += ", asked by " + e.Anchor
+			who += ", asked by " + printable(e.Anchor)
 		}
-		fmt.Fprintf(st.Stdout, "%s  %-8s %-11s %s for %s\n", e.Time.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Outcome,
-			strings.Join(e.Secrets, ", "), who)
+		fmt.Fprintf(st.Stdout, "%s  %-8s %-11s %s for %s\n", e.Time.Local().Format("2006-01-02 15:04:05"), printable(e.Kind), printable(e.Outcome),
+			printable(strings.Join(e.Secrets, ", ")), who)
 	}
 	return ExitOK
 }
 
+// auditLineMax is the longest log line readAudit reads. The agent keeps the
+// lines it writes far shorter (auditField); a longer one did not come from it.
+const auditLineMax = 1 << 20
+
 // readAudit returns the entries in one log file that keep says to. A line
-// that does not parse, such as one cut short by a crash, is skipped; a
-// missing file has none.
+// that does not parse, such as one cut short by a crash, or that is longer
+// than auditLineMax is skipped; a missing file has none.
 func readAudit(path string, keep func(auditEntry) bool) ([]auditEntry, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -103,13 +110,28 @@ func readAudit(path string, keep func(auditEntry) bool) ([]auditEntry, error) {
 	}
 	defer f.Close()
 	var out []auditEntry
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for sc.Scan() {
+	r := bufio.NewReaderSize(f, 64<<10)
+	var line []byte
+	tooLong := false
+	for {
+		chunk, isPrefix, err := r.ReadLine()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return out, err
+		}
+		if !tooLong {
+			line = append(line, chunk...)
+			tooLong = len(line) > auditLineMax
+		}
+		if isPrefix {
+			continue // the rest of the same line
+		}
 		var e auditEntry
-		if json.Unmarshal(sc.Bytes(), &e) == nil && keep(e) {
+		if !tooLong && json.Unmarshal(line, &e) == nil && keep(e) {
 			out = append(out, e)
 		}
+		line, tooLong = line[:0], false
 	}
-	return out, sc.Err()
 }

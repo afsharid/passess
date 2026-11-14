@@ -1,0 +1,814 @@
+git status
+%%
+git add -A && git commit -m "fix config.toml parsing"
+%%
+git diff HEAD~1 -- config.toml
+%%
+git log --oneline -n 5 -- .npmrc
+%%
+git checkout -- config.json
+%%
+git mv config.toml config.toml.bak
+%%
+git rm --cached credentials
+%%
+npm install && npm test
+%%
+npm run build -- --config config.json
+%%
+cd frontend && npm i && cd .. && echo x > config.toml
+%%
+cd frontend && npm ci && npm run build && cd ../backend && cat config.json
+%%
+cargo build --release
+%%
+cargo add serde
+%%
+cargo test -- --nocapture
+%%
+go test ./...
+%%
+go build -o bin/app ./cmd/app && ./bin/app --config config.toml
+%%
+go vet ./... && gofmt -l .
+%%
+docker build -t app . && docker run --rm app
+%%
+docker compose up -d
+%%
+docker exec -it web sh -c 'cat /app/config.json'
+%%
+make test
+%%
+make -C sub clean
+%%
+find . -name '*.go' | xargs grep -n TODO
+%%
+find . -type f -name '*.toml' -exec grep -l passess {} +
+%%
+find . -name config.toml -exec cat {} \;
+%%
+find . -name '*.log' -delete
+%%
+for f in *.go; do gofmt -l $f; done
+%%
+for d in a b c; do (cd $d && make); done
+%%
+for d in a b c; do cd $d; make; cd ..; done
+%%
+f() { echo hi; }; f
+%%
+build() { cd build && cmake .. && make; }; build; cat config.json
+%%
+cat <<EOF > notes.txt
+hello passess agent stop
+.env config.toml
+EOF
+%%
+cat > config.toml <<'EOF'
+name = "x"
+EOF
+%%
+mkdir -p a && cd a && echo x > config.toml
+%%
+cd "$(git rev-parse --show-toplevel)" && cat .npmrc
+%%
+cd "$(git rev-parse --show-toplevel)" && echo x >> .cargo/config.toml
+%%
+cd "$(dirname "$0")" && cat config.json
+%%
+source .venv/bin/activate && jq . config.json
+%%
+. ./env.sh; touch config.toml
+%%
+eval "$(direnv export bash)"; cat config.json
+%%
+if [ -d x ]; then cd x; fi; cat .npmrc
+%%
+for d in a b; do cd $d; done; cat .npmrc
+%%
+cd x || true; cat .npmrc
+%%
+cd "$X" && cp config.toml.example config.toml
+%%
+cd "$X" && grep config.toml Makefile
+%%
+cd "$X" && diff config.toml config.toml.bak
+%%
+sudo apt-get update
+%%
+sudo -u postgres psql -c 'select 1'
+%%
+timeout 30 npm test
+%%
+timeout -s KILL 10 go test ./...
+%%
+nice -n 10 make -j4
+%%
+env FOO=bar make
+%%
+env NODE_ENV=production npm run build
+%%
+env -i PATH=/usr/bin sh -c 'echo hi'
+%%
+passess exec -s API_KEY -- curl https://example.com
+%%
+passess list
+%%
+passess http -s TOKEN -H 'Authorization: Bearer {{TOKEN}}' https://api.example.com
+%%
+passess check
+%%
+passess agent status
+%%
+passess exec -s API_KEY -- gh api user
+%%
+echo "passess is a secrets tool" > notes.md
+%%
+grep -rn passess README.md
+%%
+grep -rn "passess agent" docs/
+%%
+sudo passess exec -s X -- ls
+%%
+timeout 5 passess list
+%%
+nice passess check
+%%
+passess exec -s X -- sh -c 'cd sub && make'
+%%
+xargs -n1 -P4 echo < files.txt
+%%
+xargs -I{} cp {} /tmp/ < files.txt
+%%
+sed -i 's/a/b/' config.toml
+%%
+sed -i.bak 's/foo/bar/' config.json
+%%
+tee config.json < /dev/null
+%%
+touch config.toml
+%%
+cp config.toml.example config.toml
+%%
+cp .env.example .env
+%%
+mv config.toml.bak config.toml
+%%
+rm -f config.toml
+%%
+chmod 600 credentials
+%%
+cat credentials
+%%
+cat .npmrc
+%%
+cat config.json | jq .
+%%
+jq .name package.json
+%%
+cat auth.json
+%%
+cat hosts.yml
+%%
+python3 -c 'print(1)'
+%%
+python3 script.py --config config.toml
+%%
+node app.js
+%%
+curl -s https://example.com | head
+%%
+ls -la ~/.config
+%%
+ls ~/.config/passess
+%%
+cd ~/.config && ls
+%%
+cd ~ && ls -a
+%%
+cd ~/Projects/other && cat config.toml
+%%
+cd /tmp && echo x > config.toml
+%%
+cd /tmp; for f in a b; do echo $f; done; cat config.toml
+%%
+pushd sub && make && popd
+%%
+(cd sub && npm test)
+%%
+{ cd sub; npm test; }
+%%
+cd sub && npm test || echo failed
+%%
+test -f config.toml && cat config.toml
+%%
+[ -f .npmrc ] && grep registry .npmrc
+%%
+echo $HOME
+%%
+echo ${HOME}/bin
+%%
+export PATH=$PATH:/usr/local/bin
+%%
+export FOO=bar
+%%
+printenv PATH
+%%
+declare -f build
+%%
+git config user.name
+%%
+git commit -m "x" && git push origin HEAD
+%%
+gh pr view 12
+%%
+gh pr create --title t --body b
+%%
+aws s3 ls
+%%
+kubectl get pods
+%%
+kubectl config view
+%%
+terraform plan
+%%
+ansible-playbook -i hosts site.yml
+%%
+hugo --config config.toml
+%%
+sh -c 'cd sub && make'
+%%
+bash -c 'cd sub; cat config.json'
+%%
+cd a && cd b && cd ../.. && cat config.toml
+%%
+cd a; cd ..; cat config.toml
+%%
+cd a && make && cd .. && cat .npmrc
+%%
+mkdir build && cd build && cmake .. && make && cd .. && cat config.toml
+%%
+export X=1; cd "$X"; ls
+%%
+echo 'cd ~/.config' > notes.txt
+%%
+for f in $(ls); do echo $f; done
+%%
+while read l; do echo "$l"; done < input.txt
+%%
+cat file | while read l; do cd "$l"; cat config.toml; done
+%%
+case $x in a) cd a;; esac; cat config.toml
+%%
+git -C sub status
+%%
+cd .. && cat config.json
+%%
+cd "$X" && cat config.json
+%%
+cd "$X" && echo x > config.toml
+%%
+cd $(mktemp -d) && cat config.toml
+%%
+tmp=$(mktemp -d) && cd "$tmp" && git init && echo '[x]' > config.toml
+%%
+cd "$HOME/projects/app" && cat .npmrc
+%%
+cd ~/projects/app && npm test && cat config.json
+%%
+cd ~/code/app && cat config.toml && cd .. && ls
+%%
+cd -- sub && cat config.toml
+%%
+cd "$OLDPWD" && cat config.toml
+%%
+cd - && cat config.toml
+%%
+export NODE_ENV=test && node -e 'console.log(1)'
+%%
+read -r line < config.toml
+%%
+awk '{print $1}' config.toml
+%%
+head -5 config.json
+%%
+sort credentials
+%%
+diff config.toml config.toml.bak
+%%
+grep -n "password" config.toml
+%%
+rg -n token config.json
+%%
+yq . config.yml
+%%
+nl config.toml
+%%
+less config.toml
+%%
+bat config.json
+%%
+install -m 644 config.toml /tmp/x
+%%
+rsync -a ./ /tmp/backup/
+%%
+ln -s config.toml.example config.toml
+%%
+truncate -s 0 app.log
+%%
+docker run -v "$PWD/config.json:/etc/config.json" app
+%%
+npx prettier --write config.json
+%%
+pnpm install --frozen-lockfile && pnpm build
+%%
+yarn add left-pad
+%%
+npm remove left-pad
+%%
+pip install -r requirements.txt
+%%
+python -m venv .venv && . .venv/bin/activate && pip install . && cat config.toml
+%%
+uv run pytest
+%%
+brew install jq
+%%
+xcodebuild -scheme App build
+%%
+swift test
+%%
+tail -f app.log | grep ERROR
+%%
+echo "$(date)" >> build.log
+%%
+set -euo pipefail; make
+%%
+set -e
+%%
+trap 'rm -f tmp' EXIT; make
+%%
+git diff --stat | tail -1
+%%
+VAR=1 cd sub && cat config.toml
+%%
+cd sub && VAR=1 cat config.json
+%%
+alias ll='ls -l'; ll
+%%
+f() { cd "$1" && cat config.toml; }; f sub
+%%
+f() { cd "$1"; }; f sub; cat config.toml
+%%
+run() { "$@"; }; run make
+%%
+cat .env.example
+%%
+cat config.toml.example
+%%
+bash scripts/deploy.sh
+%%
+./gradlew build
+%%
+mvn -q test
+%%
+go run ./cmd/app --config ./config.toml
+%%
+cd cmd/app && go run . && cd ../.. && cat config.toml
+%%
+find . -name config.json -not -path './node_modules/*'
+%%
+find . -name 'config.toml' | xargs cat
+%%
+find . -name 'config.toml' | xargs -I{} sed -i 's/a/b/' {}
+%%
+cat config.toml | tee out.txt
+%%
+echo hello | passess exec -s API_KEY -- cat
+%%
+git commit -m "$(cat <<'EOF'
+fix: handle config.toml and .env.example
+Co-Authored-By: someone
+EOF
+)"
+%%
+mkdir -p src/{a,b,c} && touch src/{a,b,c}/index.ts
+%%
+echo {1..3}
+%%
+cp config.toml{,.bak}
+%%
+cat {a,b}.txt
+%%
+cat $'README.md'
+%%
+echo $'a\nb'
+%%
+printf '%s\n' $'x'
+%%
+cat $".env.example"
+%%
+set -e
+for pkg in a b; do
+  (cd packages/$pkg && npm test)
+done
+cat config.json
+%%
+while read -r f; do cp "$f" "/tmp/$f"; done < list.txt
+%%
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT" && cat config.toml
+%%
+ROOT=$(git rev-parse --show-toplevel); cat "$ROOT/config.json"
+%%
+passess migrate env "$F"
+%%
+passess migrate env $(ls .env*)
+%%
+passess migrate --dry-run "$DIR"
+%%
+passess migrate scan "$DIR"
+%%
+passess install --dry-run "$X"
+%%
+passess install --harness "$H" --dry-run
+%%
+passess uninstall --dry-run "$X"
+%%
+passess agent "$@"
+%%
+p() { passess "$@"; }; p list
+%%
+passess "$@"
+%%
+passess $SUBCOMMAND
+%%
+passess exec -s API_KEY -- gh api "$URL"
+%%
+passess exec -s API_KEY -- curl -H "X: $Y" "$URL"
+%%
+passess http -s TOKEN "$URL"
+%%
+passess list $X
+%%
+passess check "$X"
+%%
+passess agent status --json
+%%
+passess activity --json
+%%
+passess audit --no-known "$DIR"
+%%
+passess scan "$DIR"
+%%
+passess doctor
+%%
+passess version
+%%
+sudo grep -r passess agent docs
+%%
+timeout 5 grep -rn "passess agent stop" docs
+%%
+time grep -rn passess add docs
+%%
+sudo echo passess add
+%%
+xargs grep -l passess agent < files.txt
+%%
+nice grep passess remove file.txt
+%%
+sudo -u passess ls
+%%
+sudo -u passess passess agent status
+%%
+sudo chown passess:passess /var/lib/passess
+%%
+timeout 5 $TOOL run
+%%
+timeout 5 $TOOL helper
+%%
+sudo $CMD agent status
+%%
+xargs -n1 $CC -c
+%%
+nohup $SERVER &
+%%
+time $BIN --version
+%%
+env $VAR=1 make
+%%
+$MAKE test
+%%
+$CC -o x x.c
+%%
+$GIT agent status
+%%
+$P agent status
+%%
+$P $S
+%%
+${EDITOR:-vi} config.toml
+%%
+"$@"
+%%
+exec "$@"
+%%
+exec $SHELL -l
+%%
+sudo "$@"
+%%
+timeout "$T" "$@"
+%%
+run() { timeout 30 "$@"; }; run make
+%%
+cd /tmp && git clone https://example.com/r.git && cd r && cat config.toml
+%%
+cd "$(mktemp -d)" && git init -q && cat config.toml
+%%
+cd $(git rev-parse --show-toplevel) && cat config.json
+%%
+cd "$(dirname "$(realpath "$0")")" && cat config.toml
+%%
+cd "${0%/*}" && cat config.toml
+%%
+cd "$SCRIPT_DIR" && npm test && cat config.json
+%%
+cd ~/Projects/passess && cat config.toml
+%%
+cd ~/Projects/passess && go test ./... && cat internal/hook/policy.go
+%%
+cd ~/Projects/passess/.claude/worktrees/audit3 && cat config.toml
+%%
+cd ~/.claude/worktrees/x && cat config.toml
+%%
+cd ~/.config/nvim && cat init.lua
+%%
+cd ~/.config/nvim && cat config.json
+%%
+cd ~/.config/Code/User && cat settings.json
+%%
+cd ~/.config/fish && cat config.fish
+%%
+cd ~/.local/share/x && cat config.toml
+%%
+cd ~/.cargo && cat config.toml
+%%
+cd ~/.docker && ls
+%%
+cd ~/.kube && ls
+%%
+cd ~/.aws && ls
+%%
+cd ~/.ssh && ls
+%%
+cd ~/.ssh && cat config
+%%
+cd ~/.ssh && cat known_hosts
+%%
+cat ~/.ssh/config
+%%
+cat ~/.ssh/known_hosts
+%%
+cat ~/.ssh/id_rsa.pub
+%%
+cat ~/.gitconfig
+%%
+cat ~/.zshrc
+%%
+cat ~/.config/passess/config.toml
+%%
+cat ~/.cargo/config.toml
+%%
+cat ~/.config/gh/config.yml
+%%
+cat ~/.config/starship.toml
+%%
+cat ~/.docker/daemon.json
+%%
+cat ~/.claude/settings.json
+%%
+cat ~/.claude/CLAUDE.md
+%%
+cat ~/.codex/config.toml
+%%
+grep -rn "TODO" ~/.claude/projects
+%%
+ls ~/.claude/projects
+%%
+cat .claude/settings.json
+%%
+cat .claude/settings.local.json
+%%
+cat .vscode/settings.json
+%%
+cat package.json tsconfig.json
+%%
+cat go.mod go.sum
+%%
+cat Cargo.toml
+%%
+cat pyproject.toml
+%%
+cat Dockerfile docker-compose.yml
+%%
+cat .gitignore
+%%
+cat .github/workflows/ci.yml
+%%
+cat .eslintrc.json
+%%
+cat .prettierrc
+%%
+cat .nvmrc
+%%
+cat .tool-versions
+%%
+cat key.pub
+%%
+cat server.crt
+%%
+cat cert.pem
+%%
+cat public.pem
+%%
+cat id_rsa.pub
+%%
+cat keys.json
+%%
+cat keystore.md
+%%
+ls *.pem
+%%
+openssl x509 -in cert.pem -noout -text
+%%
+file server.key
+%%
+git log --oneline -- .env.example
+%%
+cat .env.sample
+%%
+cat .env.template
+%%
+cat .env.dist
+%%
+cat .env.defaults
+%%
+cat .env.schema
+%%
+grep -n KEY .env.example
+%%
+cat .envrc.example
+%%
+touch .env.local
+%%
+echo "FOO=bar" > .env.example
+%%
+cp .env.example .env.local
+%%
+ln -s ../.env .env
+%%
+diff .env.example .env.sample
+%%
+git check-ignore .env
+%%
+test -f .env && echo present
+%%
+[ -f .env ] || cp .env.example .env
+%%
+ls -la .env
+%%
+stat .env
+%%
+wc -l .env.example
+%%
+rm .env.local
+%%
+chmod 600 .env
+%%
+echo ".env" >> .gitignore
+%%
+grep -q "^.env$" .gitignore || echo .env >> .gitignore
+%%
+docker run --env-file .env app
+%%
+docker compose --env-file .env.example config
+%%
+node --env-file=.env app.js
+%%
+dotenv -e .env -- npm start
+%%
+npm run dev --env-file .env
+%%
+export $(cat .env.example | xargs)
+%%
+set -a && source .env.example && set +a
+%%
+source venv/bin/activate && pytest
+%%
+. ~/.nvm/nvm.sh && nvm use 20 && npm test
+%%
+source ~/.cargo/env && cargo build
+%%
+source $HOME/.cargo/env
+%%
+eval "$(ssh-agent -s)"
+%%
+eval "$(brew shellenv)"
+%%
+eval $(minikube docker-env) && docker ps
+%%
+f() { echo "$1"; }; g() { f "$1"; }; g hi
+%%
+f() { f2; }; f2() { cd sub; }; f; cat config.toml
+%%
+a() { b; }; b() { a; }; a
+%%
+setup() { cd ~/.config/nvim; }; setup; cat config.json
+%%
+build() { (cd "$1" && make); }; build a; build b; cat config.toml
+%%
+echo passess agent stop
+%%
+echo "passess agent stop" >> notes.md
+%%
+printf '%s\n' passess add X
+%%
+git commit -m "docs: passess agent stop is the user's"
+%%
+git log --grep="passess add"
+%%
+grep -rn "passess add" docs/
+%%
+grep -rn passess add docs/
+%%
+grep passess agent stop README.md
+%%
+rg passess add
+%%
+rg -n passess set src
+%%
+cat docs/passess.md
+%%
+sudo grep -rn passess agent /var/log
+%%
+sudo tail -f /var/log/passess agent.log
+%%
+timeout 10 grep -rn passess remove docs
+%%
+nice -n 10 rg passess add
+%%
+xargs echo passess add
+%%
+nohup echo passess agent stop
+%%
+time echo passess add
+%%
+env FOO=1 grep passess set x
+%%
+sudo -u passess passess list
+%%
+xargs -I{} passess exec -s X -- echo {}
+%%
+find . -name '*.md' -exec grep -l 'passess agent stop' {} +
+%%
+find . -name '*.md' -exec grep -l passess add {} +
+%%
+docker run --rm passess agent status
+%%
+brew services restart passess
+%%
+launchctl kickstart gui/501/passess
+%%
+pgrep -f passess agent
+%%
+pkill -f "passess agent"
+%%
+ps aux | grep passess
+%%
+kill $(pgrep -f 'passess agent')
+%%
+tail -f ~/.local/state/passess/agent.log
+%%
+passess exec -s API_KEY -- sh -c 'curl -H "Authorization: Bearer $API_KEY" https://example.com'
+%%
+passess exec -s API_KEY -- make deploy
+%%
+passess exec -s A -s B -- ./run.sh
+%%
+passess http -s TOKEN https://api.example.com/x
+%%
+passess check --json
+%%
+passess list --json
+%%
+passess activity
+%%
+passess --version
+%%
+passess help
+%%
+grep -r foo ~/.claude/*
+%%
+cd ~/.claude && grep -r foo *
+

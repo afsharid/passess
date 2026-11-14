@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/outbound"
 	"github.com/afsharid/passess/internal/redact"
 )
 
@@ -28,8 +29,9 @@ func init() {
 // curl --fail does.
 const ExitHTTPError = 22
 
-// httpTransport is the transport passess http uses; tests replace it.
-var httpTransport http.RoundTripper = http.DefaultTransport
+// httpTransport is the transport passess http uses; tests replace it. When it
+// is nil, runHTTP builds one that ignores the caller's proxy and CA variables.
+var httpTransport http.RoundTripper
 
 var placeholder = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
 
@@ -172,7 +174,11 @@ func runHTTP(st *Streams, args []string) int {
 		k, v, _ := strings.Cut(h, ":")
 		req.Header.Add(strings.TrimSpace(k), expand(strings.TrimSpace(v)))
 	}
-	client := &http.Client{Transport: httpTransport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+	transport := httpTransport
+	if transport == nil {
+		transport = outbound.Transport()
+	}
+	client := &http.Client{Transport: transport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("more than 5 redirects")
 		}

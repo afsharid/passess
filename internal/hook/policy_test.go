@@ -1,7 +1,10 @@
 package hook
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -250,4 +253,463 @@ func TestResultMaskedByTheAgent(t *testing.T) {
 	if v := Decide(Event{Kind: Result, Text: "ok\n"}, env); v.Changed {
 		t.Fatalf("an unreachable agent changed the output: %+v", v)
 	}
+}
+
+// shellVerdicts checks one list of commands that must be refused and one that
+// must pass, run from /home/u/proj.
+func shellVerdicts(t *testing.T, deny, allow []string) {
+	t.Helper()
+	env := testEnv(t)
+	for _, c := range deny {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.HasPrefix(v.Reason, "passess: ") {
+			t.Errorf("allowed: %s", c)
+		}
+	}
+	for _, c := range allow {
+		if v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env); v.Deny {
+			t.Errorf("denied: %s: %s", c, v.Reason)
+		}
+	}
+}
+
+// A program or subcommand spelled with escapes, built from a variable, or
+// behind a wrapper's option argument is still passess.
+func TestProgramNameSpellings(t *testing.T) {
+	shellVerdicts(t, []string{
+		`\passess agent stop`, `passess agent st\op`, `passess a\dd X --ref keychain://passess/X`, `\passess helper API_KEY`,
+		`P=passess; $P agent stop`, `P=passess; "$P" agent stop`, `$(command -v passess) agent serve`, `$P helper API_KEY`,
+		`timeout 5 passess agent stop`, `timeout -s KILL 5 passess agent stop`, `timeout --signal=KILL 5 passess agent stop`,
+		`nice -n 10 passess agent stop`, `sudo -u root passess helper API_KEY`, `sudo -g adm -u root passess agent stop`,
+		`doas -u root passess agent stop`, `exec -a x passess agent stop`, `time -p passess agent stop`,
+		`xargs -n1 passess agent stop`, `echo x | xargs -I {} passess agent approve`,
+		`find . -exec passess agent stop \;`, `find . -name x -execdir passess helper API_KEY +`,
+		`env \passess agent stop`, `bash -c '\passess agent stop'`,
+	}, []string{
+		`timeout 5 make test`, `nice -n 10 make`, `sudo -u root ls`, `exec -a x make`, `xargs -n1 echo`, `xargs grep TODO`,
+		`find . -name x -exec echo {} \;`, `find . -type f -exec grep -l TODO {} +`, `$MAKE test`, `$GIT add .`, `$NPM remove left-pad`,
+		`$P agent status`, `\ls`, `echo a\ b`, `\passess list`, `passess a\gent status`,
+	})
+}
+
+// The shell removes the backslashes of an unquoted word, and of a quoted one
+// before $ ` " \ and a newline: the guards read the word the shell does.
+func TestBackslashEscapedWords(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat .e\nv`, `cat \.env`, `cat ~/.aws/cred\entials`, `cat ~/.ssh/id_\rsa`, `cat < .e\nv`,
+		`cat "$HOME"/.aws/cred\entials`, `cat .e\
+nv`, `grep KEY .env\*`,
+		`echo x > ~/.config/pass\ess/config.toml`, `echo x >> ~/.config/pass\ess/config.toml`, `tee -a ~/.config/pass\ess/config.toml`,
+		`cp /tmp/x ~/.config/pass\ess/config.toml`, `cd ~/.config/pass\ess && echo x >> config.toml`,
+		`cat ~/.local/state/pass\ess/backups/x/00-.env`, `sed -i '' s/a/b/ ~/.config/\passess/config.toml`,
+		`echo x > "$HOME"/.config/pass\ess/config.toml`,
+	}, []string{
+		`cat .e\\nv`, `cat ".e\nv"`, `cat '.e\nv'`, `echo a\ b > /tmp/x`, `cat README\.md`, `cat .env.exam\ple`,
+		`echo x > ~/.config/pass\\ess/config.toml`, `echo "\"" > /tmp/x`, `echo \$HOME`,
+	})
+}
+
+// A cd moves the shell only where the shell itself runs it: not in a subshell,
+// a pipeline, a background job or a command substitution, and not surely in a
+// branch that may be skipped.
+func TestCdScope(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cd ~/.config/passess && (cd /tmp) && echo x >> config.toml`,
+		`cd ~/.config/passess; cd /tmp | cat; echo x >> config.toml`,
+		`cd ~/.config/passess; false && cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; true || cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; { cd /tmp; } & echo x >> config.toml`,
+		`cd ~/.config/passess; cd /tmp & echo x >> config.toml`,
+		`cd ~/.config/passess; echo $(cd /tmp); echo x >> config.toml`,
+		`cd ~/.config/passess; if false; then cd /tmp; fi; echo x >> config.toml`,
+		`cd ~/.config/passess; for d in /tmp; do cd $d; done; echo x >> config.toml`,
+		`cd ~/.config/passess; case x in y) cd /tmp;; esac; echo x >> config.toml`,
+		`cd ~/.config/passess; cat <(cd /tmp); echo x >> config.toml`,
+		`cd ~/.aws; (cd /tmp); cat credentials`, `cd ~/.aws; (cd /tmp); cat < credentials`,
+		`cd ~/.aws; { cd /tmp; } | cat; cat credentials`,
+		// the cd's own scope still counts inside it
+		`(cd ~/.config/passess && echo x >> notes)`, `(cd ~/.config/passess; tee notes)`, `{ cd ~/.aws; } && cat credentials`,
+		`cd ~/.config/passess && { echo x >> config.toml; }`, `cd ~/.aws && cd . && cat credentials`,
+		// a directory that may or may not be entered is not known afterwards
+		`f() { cd ~/.config/passess; }; f; echo x >> config.toml`,
+		`builtin cd ~/.config/passess; echo x >> notes`, `command cd ~/.aws && cat credentials`,
+	}, []string{
+		`cd /tmp && ls`, `cd /tmp && cd sub && echo x > out.txt`, `(cd /tmp); echo x >> config.toml`, `(cd /tmp); cat credentials`,
+		`cd /tmp; echo x >> config.toml`, `cd /tmp | cat; echo x > out.txt`, `false && cd /tmp; echo x > out.txt`,
+		`echo $(cd /tmp); cat README.md`, `if true; then cd /tmp; fi; cat README.md`, `cd ~/.config/passess; (cd /tmp); cat README.md`,
+		`cd ~/.aws; ls; (cd /tmp); echo x > out.txt`, `{ cd /tmp; } & cat README.md`,
+		// the directory is lost from an ordinary one: see TestUnknownDirectory
+		`false && cd /tmp; echo x >> config.toml`, `if true; then cd /tmp; fi; cat < credentials`,
+		`source ./go.sh; cat credentials`, `. ./go.sh; echo x >> config.toml`,
+	})
+}
+
+// A pasted private key is refused however its lines are laid out, without
+// the reason showing it.
+func TestPromptPrivateKeyBlock(t *testing.T) {
+	env := testEnv(t)
+	body := func(n int) []string {
+		var lines []string
+		sum := sha256.Sum256([]byte("passess-fake-key-body"))
+		for i := 0; i < n; i++ {
+			sum = sha256.Sum256(sum[:])
+			lines = append(lines, base64.StdEncoding.EncodeToString(append(sum[:], sum[:16]...)))
+		}
+		return lines
+	}
+	pem := func(kind, nl string) string {
+		return "here is the key I use:" + nl + "-----BEGIN " + kind + "-----" + nl + strings.Join(body(3), nl) + nl + "-----END " + kind + "-----" + nl + "thanks"
+	}
+	for name, text := range map[string]string{
+		"rsa":     pem("RSA PRIVATE KEY", "\n"),
+		"crlf":    pem("RSA PRIVATE KEY", "\r\n"),
+		"openssh": pem("OPENSSH PRIVATE KEY", "\n"),
+		"oneline": strings.ReplaceAll(pem("RSA PRIVATE KEY", "\n"), "\n", " "),
+		"indent":  "> " + strings.ReplaceAll(pem("EC PRIVATE KEY", "\n"), "\n", "\n> "),
+	} {
+		v := Decide(Event{Kind: Prompt, Text: text}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "private-key") {
+			t.Errorf("%s: not refused: %+v", name, v)
+		}
+		for _, line := range body(3) {
+			if strings.Contains(v.Reason, line) {
+				t.Errorf("%s: the reason shows the key", name)
+			}
+		}
+	}
+	for name, text := range map[string]string{
+		"public":   "-----BEGIN PUBLIC KEY-----\n" + strings.Join(body(3), "\n") + "\n-----END PUBLIC KEY-----",
+		"cert":     "-----BEGIN CERTIFICATE-----\n" + strings.Join(body(3), "\n") + "\n-----END CERTIFICATE-----",
+		"header":   "the file starts with -----BEGIN RSA PRIVATE KEY----- and ends with -----END RSA PRIVATE KEY-----, please parse it",
+		"ordinary": "fix the failing test\nin commit 3fa2c9e1b07d4455aa01\nthanks",
+	} {
+		if v := Decide(Event{Kind: Prompt, Text: text}, env); v.Deny {
+			t.Errorf("%s: refused: %s", name, v.Reason)
+		}
+	}
+}
+
+// When a cd cannot be followed, a relative sensitive name is refused only if
+// the directory before it was a protected one; from an ordinary directory it
+// passes, as it did before the cd.
+func TestUnknownDirectory(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cd ~/.config/passess && npm i && cd /tmp && echo x >> config.toml`,
+		`cd ~/.config/passess; cd "$X"; echo x >> config.toml`,
+		`cd ~/.aws; source ./go.sh; cat credentials`, `cd ~/.aws; eval "$(foo)"; cat < credentials`,
+		`cd ~/.aws && ls && cd "$X"; cat credentials`,
+		`cd ~/.config/passess; if x; then cd "$D"; fi; echo x >> config.toml`,
+		`cd ~/.config/gh; for d in a b; do cd $d; done; cat hosts.yml`,
+		`cd ~; cd "$X"; cat .npmrc`, `cd ~/.config; cd "$X"; echo x >> config.toml`,
+		`cd ~/.local/state/passess; cd "$X"; cat auth.json`,
+		// a branch that ends in a protected directory
+		`if x; then cd ~/.config/passess; fi; echo x >> config.toml`, `false && cd ~/.aws; cat credentials`,
+		`eval 'cd ~/.aws'; cat credentials`, `eval cd ~/.config/passess; echo x >> config.toml`,
+		`cd /tmp; cd ~/.aws; cd "$X"; cat credentials`,
+		// the cd moves into a protected directory after an unknown one
+		`cd "$X"; cd ~/.aws && cat credentials`,
+		// what runs inside keeps what is known about the directory
+		`cd ~/.aws; cd "$X"; bash -c 'cat credentials'`, `cd ~/.aws; cd "$X"; find . -exec cat credentials \;`,
+		`cd ~/.aws; pushd "$X"; popd; cat credentials`, `cd ~/.config; cd passess; echo x >> config.toml`,
+	}, []string{
+		`cd "$X"; bash -c 'cat credentials'`, `cd "$X"; pushd /tmp; popd; cat credentials`,
+		`cd frontend && npm i && cd .. && echo x > config.toml`, `mkdir -p a && cd a && echo x > config.toml`,
+		`cd "$(git rev-parse --show-toplevel)" && cat .npmrc`,
+		`cd "$(git rev-parse --show-toplevel)" && echo x >> .cargo/config.toml`,
+		`cd "$(dirname "$0")" && cat config.json`, `source .venv/bin/activate && jq . config.json`,
+		`. ./env.sh; touch config.toml`, `eval "$(direnv export bash)"; cat config.json`,
+		`if [ -d x ]; then cd x; fi; cat .npmrc`, `for d in a b; do cd $d; done; cat .npmrc`, `cd x || true; cat .npmrc`,
+		`cd "$X" && cp config.toml.example config.toml`, `cd "$X" && grep config.toml Makefile`,
+		`cd "$X" && diff config.toml config.toml.bak`,
+		`cd /tmp; cd "$X"; echo x > config.toml`, `cd "$X"; cd /tmp; echo x > config.toml`,
+		`if x; then cd /tmp; fi; cat credentials`, `eval 'cd /tmp'; cat credentials`,
+	})
+	env := testEnv(t)
+	for _, c := range []string{`cd ~/.config/passess; cd "$X"; echo x >> config.toml`, `cd ~/.aws; cd "$X"; cat credentials`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !strings.Contains(v.Reason, "could not follow") {
+			t.Errorf("reason does not say the cd was not followed: %s: %s", c, v.Reason)
+		}
+	}
+	// a shell started where nothing is known stays careful
+	for _, c := range []string{`echo x >> config.toml`, `cat credentials`} {
+		if v := Decide(Event{Kind: Shell, Command: c}, env); !v.Deny {
+			t.Errorf("allowed with no directory: %s", c)
+		}
+	}
+	if v := Decide(Event{Kind: Shell, Command: `cd "$X"; cat credentials`}, env); !v.Deny {
+		t.Error("allowed after an unknown cd from no directory")
+	}
+}
+
+// A word the shell builds at run time in the place where the subcommand is
+// decided is refused, as it is in the first place.
+func TestUnreadableThirdWord(t *testing.T) {
+	shellVerdicts(t, []string{
+		`passess agent $S`, `passess agent "$S"`, `passess agent {stop,x}`, `passess agent $(echo stop)`,
+		`S=stop; passess agent $S`, `passess agent st${X}op`, `passess agent $'st\x6fp'`, `passess agent $'stop'`,
+		`passess mcp $S`, `passess profile "$S" web`, `$P agent $S`, `P=passess; $P agent $S`, `sudo passess agent $S`,
+		`timeout 5 passess agent $S`, `\passess agent $S`, `passess migrate env .env $A`, `passess uninstall $A`,
+		`passess install --no-hooks $A`, `$P agent {stop,x}`,
+	}, []string{
+		`passess agent status`, `$P agent status`, `passess list $X`, `passess exec -s API_KEY -- gh api $URL`,
+		`passess agent config --json`, `passess mcp list --json`, `$GIT agent status`, `$CC -o x x.c`, `passess migrate env .env`,
+		`passess profile list`, `passess agent`, `passess exec -s API_KEY -- make $T`,
+	})
+}
+
+// $'…' is static text the shell decodes; a brace expansion of static
+// alternatives is every one of them.
+func TestAnsiCQuotingAndBraces(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat $'.env'`, `cat .e$'n'v`, `cat $'\x2eenv'`, `cat $'\056env'`, `cat $'\u002eenv'`, `cat $'.e\156v'`,
+		`cat $'\x2e\x65nv'`, `cat ~/.aws/$'credentials'`, `echo x > ~/.config/pass$'ess'/config.toml`, `$'passess' agent stop`,
+		`passess $'\x61dd' X --ref keychain://passess/X`, `cat {.env,x}`, `cat .env{,}`, `cat {a,.env}`, `cat {x,{y,.env}}`,
+		`cat {$X,.env}`, `cat .e{n,m}v`, `cat {.,x}env`, `tee {a,~/.config/passess/config.toml}`, `cat $'.env' $'x'`,
+		`cat ~/.ssh/id_$'rsa'`, `cd ~/.aws; cat cred$'entials'`, `cat $'.e'nv`,
+	}, []string{
+		`echo $'a\tb' > out.txt`, `cat $'README.md'`, `cat {a,b}.txt`, `cat $'.env.example'`, `echo {1..3}`, `echo $'\e[0m'`,
+		`cat $'.e\nv'`, `cat $'\\.env'`, `cat {a,b}{c,d}`, `echo $'it\'s'`, `cat $'\x2e'env.example`, `cat .en{x,y}`,
+		`cat $'not-env'`, `passess exec -s API_KEY -- echo $'a\tb'`, `echo {a,b}`, `cat {x,y}.md`, `cat $'\e'.env.sample`,
+	})
+	if got, want := ansiC(`a\x41\101\u00e9\n\q\c`), "aAA\u00e9\n\\q\\c"; got != want {
+		t.Errorf("ansiC decoded to %q, want %q", got, want)
+	}
+}
+
+// A wrapper option the table does not list, or a cluster of short flags, or
+// a long option with a separate value, cannot make an option's argument the
+// program: every word that is passess is tried.
+func TestWrapperUnknownOptions(t *testing.T) {
+	shellVerdicts(t, []string{
+		`sudo -nu root passess agent stop`, `xargs --max-args 1 passess agent stop`, `sudo -Hu root passess agent stop`,
+		`sudo --unknown-opt value passess helper API_KEY`, `timeout --foreground 5 passess agent stop`,
+		`timeout -vs KILL 5 passess agent stop`, `nice --unknown 3 passess agent stop`, `xargs -tn1 passess agent stop`,
+		`stdbuf -oL --foo bar passess agent stop`, `nohup foo passess agent stop`, `sudo -u $U passess agent stop`,
+		`xargs --max-procs 4 --max-args 1 passess agent approve`, `caffeinate -di -t 5 passess agent stop`,
+		`sudo --other-flag x passess agent $S`, `sudo -nu root \passess agent stop`, `sudo -ku root $P agent stop`,
+		`sudo --role r --type t passess add X`, `/usr/bin/time -f %e passess agent serve`,
+	}, []string{
+		`sudo -nu root ls`, `xargs --max-args 1 echo`, `timeout 5 make test`, `sudo -u root grep passess README.md`,
+		`sudo -u root cat passess.log`, `xargs -tn1 echo`, `sudo --unknown-opt value ls`, `nice --unknown 3 make`,
+		`xargs grep -l passess`, `sudo -u $U make test`, `timeout -vs KILL 5 make`, `sudo -u root passess list`,
+	})
+}
+
+// A function body is checked where the function is called, with the
+// directory in effect there; a coproc is a subshell.
+func TestFunctionBodiesAndCoproc(t *testing.T) {
+	shellVerdicts(t, []string{
+		`f() { echo x >> config.toml; }; cd ~/.config/passess; f`, `f() { cat credentials; }; cd ~/.aws; f`,
+		`cd ~/.config/passess; coproc cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; coproc { cd /tmp; }; echo x >> config.toml`,
+		`f() { cat credentials; }; cd ~/.aws && f`, `f() { cat credentials; }; cd ~/.aws; (f)`,
+		`f() { echo x >> config.toml; }; g() { f; }; cd ~/.config/passess; g`,
+		`function f { cat credentials; }; cd ~/.aws; f`, `f() { cat credentials; }; cd ~/.aws; echo $(f)`,
+		`f() { cd ~/.aws; }; f; cat credentials`, `f() { echo x >> config.toml; }; cd ~/.config/passess; f; f`,
+		`f() { cat credentials; }; cd ~/.aws; cat x | f`, `f() { cat credentials; }; if x; then cd ~/.aws; f; fi`,
+		`f() { passess agent stop; }; f`, `f() { echo $GITHUB_TOKEN; }`,
+	}, []string{
+		`f() { echo x >> config.toml; }; f`, `f() { cat credentials; }; cd /tmp; f`, `f() { cd /tmp; }; f; echo x >> config.toml`,
+		`coproc cd /tmp; echo x > config.toml`, `cd /tmp; coproc { cd /; }; cat credentials`, `f() { f; }; f`,
+		`f() { g; }; g() { f; }; f`, `f() { cat README.md; }; cd ~/.aws; f`, `f() { cd /tmp; }; cd ~/.aws; f; cat credentials`,
+		`f() { echo x >> config.toml; }; cd ~/.config/passess; (cd /tmp; f)`,
+	})
+}
+
+// Lines of testdata/ordinary.txt the policy refuses from any session
+// directory, each for a reason of its own. refusedAlways are ones main refused
+// too: passess behind a variable, a key or harness file, passess's own state.
+// refusedOnPurpose are ones main allowed: a word that could be --apply or a
+// subcommand built from a variable, and passess named after a wrapper, which
+// the policy takes for the program since it cannot tell it from data.
+var (
+	refusedAlways = []string{
+		`p() { passess "$@"; }; p list`, `passess "$@"`, `passess $SUBCOMMAND`, `cat ~/.codex/config.toml`,
+		`cat cert.pem`, `cat public.pem`, `export $(cat .env.example | xargs)`, `tail -f ~/.local/state/passess/agent.log`,
+	}
+	refusedOnPurpose = []string{
+		`passess migrate env "$F"`, `passess migrate env $(ls .env*)`, `passess migrate --dry-run "$DIR"`, `passess migrate scan "$DIR"`,
+		`passess install --dry-run "$X"`, `passess install --harness "$H" --dry-run`, `passess uninstall --dry-run "$X"`,
+		`passess agent "$@"`,
+		`sudo echo passess add`, `nice grep passess remove file.txt`, `timeout 5 $TOOL helper`, `timeout 10 grep -rn passess remove docs`,
+		`nice -n 10 rg passess add`, `xargs echo passess add`, `nohup echo passess agent stop`,
+	}
+	// refusedHere are refused only in the session directory named: HOME holds
+	// .npmrc, and `cd ..` from ~/.docker/x reaches the file ~/.docker/config.json.
+	// (`cd a && make && cd .. && cat .npmrc` from HOME reads HOME's .npmrc if make
+	// succeeds, but where the shell is when make fails is not known, so it passes.)
+	refusedHere = map[string][]string{
+		"/home/u":           {`cat .npmrc`, `[ -f .npmrc ] && grep registry .npmrc`},
+		"/home/u/.docker/x": {`cd .. && cat config.json`},
+	}
+)
+
+// testdata/ordinary.txt is a table of ordinary commands, %% on a line of its
+// own between them. None may be refused wherever the session runs: in a
+// project, under ~/.claude, in HOME, or in a directory of a credential tool.
+// It is the guard against refusing ordinary work.
+func TestOrdinaryCommandsAreNotRefused(t *testing.T) {
+	b, err := os.ReadFile("testdata/ordinary.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmds := strings.Split(strings.TrimRight(string(b), "\n"), "\n%%\n")
+	if len(cmds) < 150 {
+		t.Fatalf("the table holds %d commands", len(cmds))
+	}
+	env := testEnv(t)
+	for _, cwd := range []string{"/home/u/proj", "/home/u/.claude/spares/spare-x", "/home/u", "/home/u/.aws/x",
+		"/home/u/.docker/x", "/home/u/.local/share/opencode/proj"} {
+		for _, c := range cmds {
+			v := Decide(Event{Kind: Shell, Command: c, CWD: cwd}, env)
+			listed := slices.Contains(refusedAlways, c) || slices.Contains(refusedOnPurpose, c) || slices.Contains(refusedHere[cwd], c)
+			if v.Deny != listed {
+				t.Errorf("cwd %s: refused=%v, want %v: %s: %s", cwd, v.Deny, listed, c, v.Reason)
+			}
+		}
+	}
+}
+
+// A credential directory is protected with the directories above it, not the
+// ones below it; the passess config and state are protected with everything
+// below them too.
+func TestProtectedDir(t *testing.T) {
+	env := testEnv(t)
+	for d, want := range map[string]bool{
+		"/home/u/.claude": true, "/home/u/.aws": true, "/home/u/.config/gh": true, "/home/u": true, "/home/u/.config": true, "/": true,
+		"/home/u/.claude/spares/x": false, "/home/u/.aws/x": false, "/home/u/.docker/x/y": false, "/home/u/.local/share/opencode/p": false,
+		"/home/u/proj": false, "/tmp": false, "": false,
+		"/home/u/.config/passess": true, "/home/u/.config/passess/sub": true, "/home/u/.local/state/passess/backups/x": true,
+	} {
+		if got := protectedDir(d, env, true); got != want {
+			t.Errorf("protectedDir(%q) = %v, want %v", d, got, want)
+		}
+	}
+	// the directory a session began in is not taken for one above a protected directory
+	for d, want := range map[string]bool{"/home/u": false, "/": false, "/home/u/.config": false, "/home/u/.aws": true, "/home/u/.config/passess/x": true} {
+		if got := protectedDir(d, env, false); got != want {
+			t.Errorf("protectedDir(%q) without ancestors = %v, want %v", d, got, want)
+		}
+	}
+}
+
+// The default macOS volume is case-insensitive, so a name in another case is the
+// same file or program.
+func TestCaseFolded(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat .ENV`, `cat .Env`, `CAT .env`, `cat ~/.AWS/credentials`, `cat ~/.aws/Credentials`, `cat ~/.NPMRC`, `cat ~/.SSH/ID_RSA`,
+		`cat ~/.local/state/PASSESS/backups/x`, `echo x >> ~/.config/Passess/config.toml`,
+		`cd ~/.Config/passess && echo x >> config.toml`, `cd ~/.config/passess && echo x >> CONFIG.TOML`,
+		`PASSESS agent stop`, `Passess agent stop`, `/opt/homebrew/bin/PASSESS add X --ref keychain://x`, `PASSESS helper`, `Printenv`,
+		`SUDO passess agent stop`, `Sudo -u root PASSESS agent stop`, `cd ~/.AWS; cat CREDENTIALS`, `Eval 'cat .env'`, `SED -i s/a/b/ ~/.CONFIG/passess/config.toml`,
+	}, []string{
+		`cat README.MD`, `CAT readme.md`, `PASSESS list`, `Passess exec -s API_KEY -- gh api user`, `cat .ENVIRONMENT`, `cat ~/.AWS/config`,
+		`cat .ENV.EXAMPLE`, `Make test`, `cat ~/.CONFIG/other/config.toml`,
+	})
+}
+
+// ~NAME is the home directory of NAME: HOME when NAME is the base name of
+// HOME, some other directory not known here when it is not.
+func TestTildeUser(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat ~u/.aws/credentials`, `echo x >> ~u/.config/passess/config.toml`, `cd ~u/.config/passess && echo x >> config.toml`,
+		`cat ~u/.ssh/id_rsa`, `cat ~u/.local/state/passess/backups/x`, `cd ~u && cd .aws && cat credentials`,
+		`cat ~root/.aws/credentials`, `cat ~root/.ssh/id_rsa`, `echo x >> ~root/.config/passess/config.toml`,
+	}, []string{
+		`cat ~u/proj/main.go`, `ls ~u`, `cd ~u/proj && cat config.toml`, `cat ~root/notes.txt`, `ls ~root/.config`, `cd ~root/proj && make`,
+		`cat ~u/.aws/config`, `cat ~root/proj/.env.example`,
+	})
+}
+
+// CDPATH moves a relative cd; the directory a cd - returns to is the one
+// before the last cd.
+func TestCdPathAndPrevious(t *testing.T) {
+	shellVerdicts(t, []string{
+		`CDPATH=~/.config cd passess && echo x >> config.toml`, `export CDPATH=$HOME/.config; cd passess; echo x >> config.toml`,
+		`CDPATH=~/.config; cd passess && echo x >> config.toml`, `declare -x CDPATH=~/.config; cd passess; echo x >> config.toml`,
+		`CDPATH=/x passess list`, `export CDPATH=/x; passess exec -s API_KEY -- ls`,
+		`cd ~/.config/passess; cd /tmp; cd -; echo x >> config.toml`, `cd ~/.aws; cd /tmp; cd -; cat credentials`,
+		`cd ~/.aws && cd /tmp && cd - && cat credentials`, `pushd ~/.aws; pushd /tmp; cd -; cat credentials`,
+		`cd ~/.aws; cd /tmp; cd -; cd /tmp; cd -; cat credentials`, `cd ~/.aws; (cd /tmp); cd /tmp; cd -; cat credentials`,
+	}, []string{
+		`CDPATH=.:$HOME/src cd app && make`, `export CDPATH=.:$HOME/src; cd app; make test`, `CDPATH= cd app && go build`,
+		`cd /tmp; cd -; cat config.toml`, `cd src && cd - && cat .npmrc`, `cd - && cat config.toml`, `cd /tmp && cd - && echo x > config.toml`,
+		`cd ~/.aws; cd /tmp; cd -; cd /tmp; cat credentials`, `cd /tmp; cd ~/.aws; cd -; cat credentials`,
+	})
+}
+
+// sed edits a file in place with a flag of any cluster of short options, or
+// with --in-place.
+func TestSedInPlaceForms(t *testing.T) {
+	const cfg = "~/.config/passess/config.toml"
+	var deny, allow []string
+	for _, flags := range []string{"-i", "-i.bak", "-ibak", "-Ei", "-ni", "-ri", "-nEi", "-Ei.bak", "--in-place", "--in-place=.bak", "--in", "-i -e", "-s -i"} {
+		deny = append(deny, "sed "+flags+" s/a/b/ "+cfg, "cd ~/.config/passess && sed "+flags+" s/a/b/ config.toml")
+	}
+	for _, flags := range []string{"-n", "-E", "-e", "-s", "-z", "-nE", "--quiet", "--regexp-extended", "-e s/i/x/", "--expression=s/i/x/"} {
+		allow = append(allow, "sed "+flags+" s/a/b/ "+cfg, "cd ~/.config/passess && sed "+flags+" p config.toml")
+	}
+	allow = append(allow, "sed -i s/a/b/ notes.txt", "sed -Ei s/a/b/ src/main.go", "sed --in-place s/a/b/ ./config.toml")
+	shellVerdicts(t, deny, allow)
+}
+
+// A wrapper or a shell the tables lacked hides the command behind it.
+func TestMoreWrappersAndShells(t *testing.T) {
+	shellVerdicts(t, []string{
+		`setsid passess agent stop`, `ionice -c3 passess agent stop`, `ionice -c 3 -n 7 passess agent stop`, `flock /tmp/l passess agent stop`,
+		`flock -w 5 /tmp/l passess agent stop`, `watch -n1 passess agent stop`, `watch -n 1 passess agent stop`, `watch 'passess agent stop'`,
+		`watch -n 1 'passess agent stop'`, `su -c "passess agent stop"`, `su root -c "passess agent stop"`, `su - root -c 'cat .env'`,
+		`script -q /dev/null passess agent stop`, `chrt -f 10 passess agent stop`, `taskset 0x1 passess agent stop`,
+		`taskset -c 0,1 passess agent stop`, `flock /tmp/l -c "passess agent stop"`, `flock --command='cat .env' /tmp/l`,
+		`script -c 'passess agent stop' /dev/null`, `su --command 'passess add X'`,
+		`fish -c 'cat .env'`, `busybox sh -c 'cat .env'`, `ash -c 'cat .env'`, `csh -c 'cat .env'`, `tcsh -c 'cat .env'`, `rbash -c 'cat .env'`,
+		`setsid cat .env`, `flock /tmp/x cat .env`, `ionice -c3 cat .env`, `watch cat .env`, `taskset -c 0 cat .env`, `taskset 0x3 cat .env`,
+		`chrt -r 1 cat .env`, `busybox cat .env`, `setsid fish -c 'passess agent stop'`, `/usr/bin/setsid passess helper API_KEY`,
+		`script -q /dev/null cat .env`, `watch -n 1 cat ~/.aws/credentials`, `sudo setsid passess agent stop`,
+	}, []string{
+		`setsid make`, `ionice -c3 make test`, `flock /tmp/l make`, `flock -w 5 /tmp/l go test ./...`, `watch -n 1 git status`, `watch 'ls -l'`,
+		`su -c 'ls /tmp'`, `su root -c "make install"`, `script -q /dev/null make`, `chrt -f 10 make`, `taskset -c 0,1 make -j2`,
+		`taskset 0x1 go test`, `fish -c 'ls'`, `busybox sh -c 'ls'`, `ash -c 'echo hi'`, `csh -c 'ls'`, `busybox ls`, `su postgres -c 'psql -l'`,
+		`flock /tmp/l -c 'make'`, `script -c 'make test' /dev/null`, `ionice -c3 passess list`, `watch passess status`, `setsid passess exec -s API_KEY -- ls`,
+	})
+}
+
+// Variable arguments to migrate, install and uninstall are refused for the
+// reason that one could be --apply, not for being a subcommand.
+func TestUnreadableApplyArgument(t *testing.T) {
+	env := testEnv(t)
+	for _, c := range []string{`passess migrate env "$F"`, `passess migrate scan "$DIR"`, `passess install --harness "$H" --dry-run`, `passess uninstall "$X"`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "--apply") || strings.Contains(v.Reason, "subcommand") {
+			t.Errorf("%s: %+v", c, v)
+		}
+	}
+	for _, c := range []string{`passess $V`, `passess agent $S`, `passess "$@"`} {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.Contains(v.Reason, "subcommand") {
+			t.Errorf("%s: %+v", c, v)
+		}
+	}
+}
+
+// A word whose directory part is unreadable still names a guarded file by
+// its last static segment, and a directory of credentials is not an operand
+// for a program that reads or copies a whole tree.
+func TestUnreadablePrefixAndCredentialDirectory(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat "$PWD/.env"`, `cat "$(git rev-parse --show-toplevel)/.env"`, `cat "$ROOT/.env"`, `cat $ROOT/.env.local`, `cat "$X/.aws/credentials"`,
+		`cat $X/credentials`, `cat "$X"/.env`, `grep KEY "$ROOT"/.env*`, `cat "${ROOT}/.ssh/id_rsa"`, `cat $X/server.pem`, `head $(pwd)/.npmrc`,
+		`cat < "$ROOT/.env"`, `while read l; do :; done < "$ROOT/.env"`, `cp "$ROOT/.env" /tmp/x`, `sudo cat "$ROOT/.env"`, `source "$ROOT/.env"`,
+		`grep -r aws_secret ~/.aws`, `grep -rn secret ~/.config/gh`, `grep -r . ~/.ssh/id_rsa`, `rg token ~/.docker`, `cp -r ~/.aws /tmp/a`,
+		`rsync -a ~/.aws/ /tmp/aws/`, `cat ~/.aws/*`, `grep -r x $HOME/.aws`, `cd ~/.aws && grep -r x .`, `cp -r ~/.kube /tmp/k`, `rg x ~/.codex`,
+		`cat ~/.gemini/*`, `cat ~/.codex/*`, `cd ~/.aws && grep -r x *`,
+		`grep -r x ~/.claude`, `cd ~/.claude && grep -r x .`, `cat ~/.claude/.*`, `cat ~/.claude/.credentials.json`, `cd ~/.claude && cat .*`,
+	}, []string{
+		`cat "$ROOT/README.md"`, `cat "$ROOT/.env.example"`, `cat $X/config.json`, `cat "$X/credentials.md"`, `cat "$X/.envs/a"`, `cat $PREFIX.env`,
+		`echo "$ROOT/.env"`, `ls "$ROOT/.env"`, `git add "$ROOT/.env.sample"`, `cp .env.example "$ROOT/.env"`, `cat "$ROOT/notes.txt"`,
+		`grep -r x ~/.config/other`, `grep -r x ~/.awsome`, `grep -r x ~`, `grep -r x ~/.config`, `cd ~ && grep -r x .`, `rsync -a ~/proj/ /tmp/p/`,
+		`ls ~/.aws`, `grep -r x ~/.claude/skills`, `cp -r ~/.claude/skills /tmp/s`, `cat ~/.aws/config`, `cp -r /tmp/a ~/.aws-backup`,
+		`cat ~/.claude/*`, `grep -r foo ~/.claude/*`, `cd ~/.claude && grep -r foo *`, `cp ~/.claude/* /tmp/s`,
+	})
 }

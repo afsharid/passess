@@ -102,18 +102,24 @@ func printAudit(st *Streams, out auditOutput) {
 		fmt.Fprintln(st.Stdout, "Nothing found: no harness setting or file checked here hands credentials to agents.")
 		return
 	}
-	fmt.Fprintf(st.Stdout, "%d finding(s). passess changed nothing; each fix is yours to run. `passess scan` finds values in clear line by line.\n", len(out.Findings))
+	fmt.Fprintf(st.Stdout, "%d finding(s). passess changed nothing; each fix is yours to run. `passess scan` finds values in clear line by line (the user runs it; an agent adds --no-known).\n", len(out.Findings))
 }
 
-// printable drops control characters but tab from one line of the report.
-// Findings quote names they read from files already; this keeps any that
-// slip through from moving the cursor, retitling the terminal or starting a
-// line of their own.
-func printable(s string) string {
-	return strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\t') || (r >= 0x7f && r <= 0x9f) { // C0, DEL and C1 (0x9b starts a sequence too)
-			return -1
-		}
-		return r
-	}, s)
+// printable is visible for one line of the report, with a tab kept: control
+// characters (C0, DEL and C1; 0x9b starts a sequence too), bidi and
+// zero-width marks, and the line separators come out spelled, not dropped.
+// Findings quote names they read from files already; this keeps any that slip
+// through from moving the cursor, retitling the terminal, reordering the line
+// or starting a line of their own, and the shown name still maps back to the
+// real one.
+func printable(s string) string { return spell(s, true) }
+
+// printableLines is printable for text of several lines: it keeps the
+// newlines and cleans each line.
+func printableLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = printable(l)
+	}
+	return strings.Join(lines, "\n")
 }

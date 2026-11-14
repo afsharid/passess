@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
 
@@ -43,6 +44,7 @@ type Event struct {
 	Tool     string   // the harness's tool name, for messages
 	Command  string   // Shell
 	Paths    []string // Read, Write
+	Globs    []string // Read: patterns that choose which files a search reads
 	Text     string   // Prompt text, or Result output as text
 	Response any      // Result output as the harness shaped it (decoded JSON)
 	CWD      string
@@ -77,25 +79,33 @@ type Env struct {
 	// memoize them, since a result is redacted string by string.
 	Rules func() *scan.Rules
 	Known func() *redact.Redactor // credential values in the harness's environment
+	// depth counts the command lines being checked inside one another (eval,
+	// sh -c, watch, su -c); checkShell bounds it.
+	depth int
 }
 
 // Decide applies the policy to one event.
 func Decide(ev Event, env Env) Verdict {
 	switch ev.Kind {
 	case Shell:
-		if r := checkShell(ev.Command, ev.CWD, env); r != "" {
+		if r := checkShell(ev.Command, where{ev.CWD, true}, env); r != "" {
 			return Verdict{Deny: true, Reason: r}
 		}
 	case Read:
 		for _, p := range ev.Paths {
-			if why := deniedPath(p, ev.CWD, env); why != "" {
+			if why := deniedPath(p, where{ev.CWD, true}, env); why != "" {
 				return Verdict{Deny: true, Reason: readReason(p, why)}
+			}
+		}
+		for _, g := range ev.Globs {
+			if why := deniedGlob(g, where{ev.CWD, true}, env); why != "" {
+				return Verdict{Deny: true, Reason: readReason(g, why)}
 			}
 		}
 	case Write:
 		for _, p := range ev.Paths {
-			if inConfig(abs(p, ev.CWD, env.Home), env) {
-				return Verdict{Deny: true, Reason: configReason(p)}
+			if r := configWrite(p, where{ev.CWD, true}, env); r != "" {
+				return Verdict{Deny: true, Reason: r}
 			}
 		}
 	case MCP:
@@ -159,10 +169,10 @@ func checkMCP(tool string) string {
 // --- files ---
 
 var (
-	envFile     = regexp.MustCompile(`^\.env(rc|\..+)?$`)
+	envFile     = regexp.MustCompile(`(?i)^\.env(rc|\..+)?$`)
 	envTemplate = regexp.MustCompile(`(?i)\.(example|sample|template|dist|defaults?|schema)$`)
 	keyFile     = regexp.MustCompile(`(?i)\.(pem|key|p12|pfx|jks|keystore)$`)
-	sshKey      = regexp.MustCompile(`^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$`)
+	sshKey      = regexp.MustCompile(`(?i)^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$`)
 )
 
 // credentialPaths are files under HOME that hold credentials by design or
@@ -175,12 +185,38 @@ var credentialPaths = func() []string {
 	return out
 }()
 
+// prog is the name a program is known by: its base name in lower case, since
+// a case-insensitive volume, the macOS default, runs PASSESS and Cat as passess and cat.
+func prog(path string) string { return strings.ToLower(filepath.Base(path)) }
+
+// where is the directory relative paths resolve against. dir is "" when it
+// is not known; blind then says that a relative name may still be in a
+// protected directory: none was known to begin with, or the last one known was
+// protected (see protectedDir).
+type where struct {
+	dir   string
+	blind bool
+}
+
+// otherTilde says whether p starts with ~NAME for a NAME that is not the base
+// name of home: the home directory of another user, which is not known here.
+func otherTilde(p, home string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(p, "~"), "/")
+	return strings.HasPrefix(p, "~") && name != "" && name != filepath.Base(home)
+}
+
+// abs is the path p names: ~ and ~NAME for the user whose home is home count
+// as home. A ~NAME of any other user is left as it is.
 func abs(p, cwd, home string) string {
 	switch {
 	case p == "~":
 		p = home
 	case strings.HasPrefix(p, "~/"):
 		p = filepath.Join(home, p[2:])
+	case strings.HasPrefix(p, "~") && home != "" && !otherTilde(p, home):
+		_, rest, _ := strings.Cut(p, "/")
+		p = filepath.Join(home, rest)
+	case otherTilde(p, home):
 	case !filepath.IsAbs(p) && cwd != "":
 		p = filepath.Join(cwd, p)
 	}
@@ -201,15 +237,160 @@ func inConfig(p string, env Env) bool {
 	return false
 }
 
+// within says whether p is dir or below it. Case does not count: a case-insensitive
+// volume, the macOS default, does not tell .AWS from .aws, so neither does the policy.
 func within(p, dir string) bool {
-	rel, err := filepath.Rel(dir, p)
+	rel, err := filepath.Rel(strings.ToLower(dir), strings.ToLower(p))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
+// unplaced says p is a name with no directory to be relative to, and that it
+// may be in a protected one: where it lands is not known. A relative name is
+// that when the directory is lost; ~NAME of another user always is.
+func unplaced(p string, at where, home string) bool {
+	if otherTilde(p, home) {
+		return true
+	}
+	return at.dir == "" && at.blind && p != "" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~")
+}
+
+// lostCd says why a relative name is refused when the directory is not known.
+const lostCd = "the hook could not follow a cd before it and cannot tell which directory it is in"
+
+// protectedDir says whether d is a directory where a relative name could be
+// one the hook guards: the passess config or state directory or one within
+// them, a directory that holds a credential file (HOME holds .npmrc and
+// .netrc), or, when above is set, a directory above one of them, which a cd can
+// still reach. A directory below a credential directory holds no credential
+// file by that name: ~/.claude/spares/x is ordinary, as is a project under ~/.aws.
+func protectedDir(d string, env Env, above bool) bool {
+	if d == "" {
+		return false
+	}
+	for _, p := range append([]string{env.StateDir}, env.ConfigDirs...) {
+		if p != "" && (within(d, p) || (above && within(p, d))) {
+			return true
+		}
+	}
+	home := false
+	if env.Home != "" {
+		for _, c := range credentialPaths {
+			if dir := filepath.Dir(filepath.Join(env.Home, c)); dir == env.Home {
+				home = true
+			} else if d == dir || (above && within(dir, d)) {
+				return true
+			}
+		}
+	}
+	return home && above && within(env.Home, d)
+}
+
+// unreadableDir stands for a directory that a word builds at run time:
+// "$ROOT/.env" is …/.env.
+const unreadableDir = "…/"
+
+// guardedBase says whether a file name is one the hook refuses to read in any
+// directory: an env or key file, or a credential file with a name of its own
+// (config.json, auth.json and hosts.yml are too common to stand for one).
+func guardedBase(base string) bool {
+	b := strings.ToLower(base)
+	if envFile.MatchString(strings.TrimRight(b, "*")) && !envTemplate.MatchString(b) {
+		return true
+	}
+	return sshKey.MatchString(b) || keyFile.MatchString(b) ||
+		(slices.Contains(credentialNames, b) && !slices.Contains([]string{"config.json", "config.toml", "auth.json", "hosts.yml", "crew"}, b))
+}
+
+// unreadableName is …/NAME for a word whose directory part the shell builds at
+// run time and whose last segment is a literal guarded name: "$ROOT/.env". It
+// is "" for any other word, which then matches nothing.
+func unreadableName(w *syntax.Word, env Env) string {
+	var parts []syntax.WordPart
+	var flat func([]syntax.WordPart)
+	flat = func(ps []syntax.WordPart) {
+		for _, p := range ps {
+			if q, ok := p.(*syntax.DblQuoted); ok {
+				flat(q.Parts)
+			} else {
+				parts = append(parts, p)
+			}
+		}
+	}
+	flat(w.Parts)
+	tail, i := "", len(parts)
+	for ; i > 0; i-- {
+		s, ok := literal(&syntax.Word{Parts: parts[i-1 : i]}, env)
+		if !ok {
+			break
+		}
+		tail = s + tail
+	}
+	if i == 0 || !strings.Contains(tail, "/") {
+		return ""
+	}
+	if seg := tail[strings.LastIndex(tail, "/")+1:]; guardedBase(seg) {
+		return unreadableDir + seg
+	}
+	return ""
+}
+
+// credentialDir says whether full is a directory of credential files, or all
+// that is in one (dir/* or dir/.*); HOME is not, though it holds some. The
+// shell's * skips dotfiles and .* matches only them, so a glob counts only when
+// a credential file in dir has a name it matches: ~/.claude/* does not reach
+// .credentials.json, ~/.aws/* reaches credentials.
+func credentialDir(full string, env Env) bool {
+	glob := filepath.Base(full)
+	for _, c := range credentialPaths {
+		dir := filepath.Dir(filepath.Join(env.Home, c))
+		if env.Home == "" || strings.EqualFold(dir, env.Home) {
+			continue
+		}
+		dotted := strings.HasPrefix(filepath.Base(c), ".")
+		if strings.EqualFold(full, dir) ||
+			((glob == "*" && !dotted || glob == ".*" && dotted) && strings.EqualFold(filepath.Dir(full), dir)) {
+			return true
+		}
+	}
+	return false
+}
+
+// credentialNames are the base names of the credential files under HOME; a
+// bare "config" (.kube/config) is too common a name to stand for one.
+var credentialNames = func() []string {
+	var out []string
+	for _, c := range credentialPaths {
+		if b := filepath.Base(c); b != "config" {
+			out = append(out, strings.ToLower(b))
+		}
+	}
+	return out
+}()
+
+// configWrite says why writing p changes the passess config, or "". A
+// relative name that is not placed counts when it is the config file's name.
+func configWrite(p string, at where, env Env) string {
+	switch {
+	case inConfig(abs(p, at.dir, env.Home), env):
+		return configReason(p)
+	case unplaced(p, at, env.Home) && strings.HasPrefix(strings.ToLower(filepath.Base(p)), "config.toml"):
+		return "passess: " + p + " may be the passess config (" + lostCd + "), which decides which program receives which secret. " +
+			"Write it by its full path in a command of its own, or tell the user what you need and let them do it in Passess.app " +
+			"or with `passess add` or `passess set`."
+	}
+	return ""
+}
+
 // deniedPath says why reading p would expose credentials, or "".
-func deniedPath(p, cwd string, env Env) string {
-	full := abs(p, cwd, env.Home)
+func deniedPath(p string, at where, env Env) string {
+	full := abs(p, at.dir, env.Home)
 	base := filepath.Base(full)
+	if unplaced(p, at, env.Home) && slices.Contains(credentialNames, strings.ToLower(base)) {
+		return "may hold credentials (" + lostCd + ")"
+	}
+	if strings.HasPrefix(p, unreadableDir) && guardedBase(base) {
+		return "may hold credentials (the directory it is in is built at run time)"
+	}
 	switch {
 	case envFile.MatchString(strings.TrimRight(base, "*")) && !envTemplate.MatchString(base):
 		return "holds secret values"
@@ -224,6 +405,70 @@ func deniedPath(p, cwd string, env Env) string {
 		}
 	}
 	return ""
+}
+
+// deniedGlob says why a search whose files a glob chooses would expose
+// credentials, or "": the glob names a file deniedPath refuses (.env,
+// **/.env*, .env.*, *.pem, {.env,x}). A glob that only could match such a
+// file, as * does, is an ordinary search. An exclusion (!…) names nothing to
+// read.
+func deniedGlob(g string, at where, env Env) string {
+	if strings.HasPrefix(g, "!") {
+		return ""
+	}
+	for _, alt := range expandBraces(g) {
+		dir, seg := alt[:strings.LastIndexByte(alt, '/')+1], alt[strings.LastIndexByte(alt, '/')+1:]
+		// With wildcards, the literal text before the first one and after the last
+		// stands for the name: .env.* is .env.x, *.pem is .pem.
+		names := []string{seg}
+		if first := strings.IndexAny(seg, "*?["); first >= 0 {
+			head, tail := seg[:first], seg[strings.LastIndexAny(seg, "*?]")+1:]
+			names = []string{head + tail, head + "x" + tail}
+		}
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			if why := deniedPath(dir+name, at, env); why != "" {
+				return why
+			}
+		}
+	}
+	return ""
+}
+
+// expandBraces is the globs a glob with {a,b} alternatives stands for. One
+// with more than maxAlternatives is left as it is.
+func expandBraces(g string) []string {
+	open := strings.IndexByte(g, '{')
+	if open < 0 {
+		return []string{g}
+	}
+	depth, last := 0, open+1
+	var alts []string
+	for i := open; i < len(g); i++ {
+		switch g[i] {
+		case '{':
+			depth++
+		case ',':
+			if depth == 1 {
+				alts, last = append(alts, g[last:i]), i+1
+			}
+		case '}':
+			if depth--; depth == 0 {
+				alts = append(alts, g[last:i])
+				var out []string
+				for _, a := range alts {
+					out = append(out, expandBraces(g[:open]+a+g[i+1:])...)
+					if len(out) > maxAlternatives {
+						return []string{g}
+					}
+				}
+				return out
+			}
+		}
+	}
+	return []string{g} // no closing brace
 }
 
 func readReason(p, why string) string {
@@ -249,9 +494,55 @@ var writers = map[string]bool{"tee": true, "sed": true, "truncate": true, "rm": 
 
 // Programs that run the rest of their arguments as a command.
 var wrappers = map[string]bool{"sudo": true, "command": true, "builtin": true, "exec": true, "nohup": true,
-	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true}
+	"nice": true, "time": true, "doas": true, "caffeinate": true, "stdbuf": true, "timeout": true, "xargs": true,
+	"setsid": true, "ionice": true, "flock": true, "watch": true, "chrt": true, "taskset": true, "script": true, "su": true,
+	"busybox": true}
 
-func checkShell(cmd, cwd string, env Env) string {
+// commandLineOptions are the options of a wrapper whose next word is a command
+// line for a shell, not a command: su -c 'passess agent stop'.
+var commandLineOptions = map[string][]string{"su": {"-c", "--command"}, "flock": {"-c", "--command"}, "script": {"-c", "--command"}}
+
+// wrapperOptions say, for the wrappers that have any, which options take the
+// next word as their argument, and how many words after the options are the
+// wrapper's own (timeout's duration). With satisfied set, an option that took
+// a word has given the wrapper what the positional words would (taskset -c LIST).
+var wrapperOptions = map[string]struct {
+	takes      []string
+	positional int
+	satisfied  bool
+}{
+	"sudo": {[]string{"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t", "--user", "--group", "--host",
+		"--prompt", "--chdir", "--role", "--type", "--close-from", "--other-user", "--command-timeout"}, 0, false},
+	"doas":       {[]string{"-u", "-C"}, 0, false},
+	"nice":       {[]string{"-n", "--adjustment"}, 0, false},
+	"timeout":    {[]string{"-s", "-k", "--signal", "--kill-after"}, 1, false},
+	"exec":       {[]string{"-a"}, 0, false},
+	"stdbuf":     {[]string{"-i", "-o", "-e"}, 0, false},
+	"caffeinate": {[]string{"-t", "-w"}, 0, false},
+	"time":       {[]string{"-f", "-o"}, 0, false},
+	"xargs": {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I", "--max-args", "--max-lines", "--max-procs", "--max-chars",
+		"--delimiter", "--eof", "--arg-file"}, 0, false},
+	"ionice":  {[]string{"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"}, 0, false},
+	"flock":   {[]string{"-w", "-E", "--timeout", "--wait", "--conflict-exit-code"}, 1, false},
+	"watch":   {[]string{"-n", "--interval"}, 0, false},
+	"chrt":    {[]string{"-T", "-P", "-D", "--sched-runtime", "--sched-period", "--sched-deadline"}, 1, false},
+	"taskset": {[]string{"-c", "--cpu-list"}, 1, true},
+	"script":  {[]string{"-t", "-T", "-I", "-O", "-B", "-E", "-m", "-c", "--command", "--timing", "--log-in", "--log-out", "--log-io", "--log-timing"}, 1, false},
+	"su":      {[]string{"-g", "-G", "-s", "-w", "-c", "--group", "--supp-group", "--shell", "--whitelist-environment", "--command"}, 0, false},
+}
+
+// maxShellDepth bounds how many command lines are checked inside one another.
+// Each level parses the text again, so `eval eval eval …` costs the square of
+// its length without a bound; no ordinary command nests so deep.
+const maxShellDepth = 16
+
+const nestedReason = "passess: that command line runs shells inside shells too deeply for its text to be checked, so it is refused. " +
+	"Write the command out without the extra eval, sh -c or watch."
+
+func checkShell(cmd string, at where, env Env) string {
+	if env.depth++; env.depth > maxShellDepth {
+		return nestedReason
+	}
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return "" // not ours to judge; the harness runs what it can
@@ -261,66 +552,170 @@ func checkShell(cmd, cwd string, env Env) string {
 	steered := ""   // a path setting assigned other than inline on a passess call
 	// cur is the directory relative paths resolve against: where the harness
 	// ran the command, then wherever a literal cd or pushd earlier in the same
-	// command line moved it. "" once that is unknown.
-	cur, stack := cwd, []string(nil)
-	syntax.Walk(file, func(node syntax.Node) bool {
-		if reason != "" {
-			return false
-		}
-		switch n := node.(type) {
-		case *syntax.ParamExp:
-			if n.Param != nil {
-				reason = checkParam(n.Param.Value, env)
-			}
-		case *syntax.Redirect:
-			p, ok := literal(n.Word, env)
-			switch {
-			case !ok:
-			case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
-				if why := deniedPath(p, cur, env); why != "" {
-					reason = readReason(p, why)
+	// command line moved it. "" once that is unknown; risk then says that the
+	// last directory known was a protected one (or none was known), so a
+	// relative sensitive name is still refused.
+	cur, stack, risk := at.dir, []string(nil), at.blind
+	// old is the directory cd - returns to, "" when it is not known; cdpath says
+	// CDPATH is set in this command line, so a relative cd may go anywhere.
+	old, cdpath := "", false
+	here := func() where { return where{cur, cur == "" && risk} }
+	// guarded says whether the directory the shell may have left was protected.
+	// The one the session began in is not taken for one above a protected
+	// directory, since that would refuse most commands run from HOME or from /.
+	guarded := func(d string) bool { return protectedDir(d, env, d != at.dir) }
+	// unknown drops the directory. dirs are the last ones it may have been.
+	unknown := func(sticky bool, dirs ...string) {
+		risk = sticky || slices.ContainsFunc(dirs, guarded)
+		cur, stack, old = "", nil, ""
+	}
+	// A cd moves the shell only where the shell runs it. In a subshell, a
+	// pipeline, a background job or a substitution it is undone when that ends;
+	// in a branch that may not run it leaves the directory unknown. A function
+	// body runs where the function is called, so it is walked again at each
+	// call. path holds the nodes being walked, scopes the ones that bound a cd.
+	funcs := map[string]*syntax.Stmt{}
+	running := map[string]bool{}
+	calls := 0
+	// chains remembers cdChain for the parts of a long `cd a && cd b && …`, which
+	// each ask about everything left of them.
+	chains := map[*syntax.Stmt]bool{}
+	// patched are the files of the apply_patch envelope in the command text, read
+	// when the first call to apply_patch needs them.
+	var patched []string
+	readPatched := false
+	var run func(root syntax.Node)
+	run = func(root syntax.Node) {
+		var path []syntax.Node
+		var scopes []cdScope
+		syntax.Walk(root, func(node syntax.Node) bool {
+			if node == nil { // the children of the last node on path are done
+				left := path[len(path)-1]
+				path = path[:len(path)-1]
+				if len(scopes) > 0 && scopes[len(scopes)-1].node == left {
+					sc := scopes[len(scopes)-1]
+					scopes = scopes[:len(scopes)-1]
+					switch {
+					case sc.undone:
+						cur, stack, old, risk = sc.cur, sc.stack, sc.old, sc.blind
+					case cur != sc.cur || !slices.Equal(stack, sc.stack):
+						unknown(sc.blind || (cur == "" && risk), sc.cur, cur)
+					case old != sc.old:
+						old = ""
+					}
 				}
-			case inConfig(abs(p, cur, env.Home), env): // > >> &> into the config
-				reason = configReason(p)
+				return true
 			}
-		case *syntax.CallExpr:
-			var args []string
-			for _, w := range n.Args {
-				s, _ := literal(w, env) // a non-literal word stays "" and matches nothing
-				args = append(args, s)
+			if reason != "" {
+				return false
 			}
-			program := ""
-			if len(args) > 0 {
-				program = args[0]
+			var parent syntax.Node
+			if len(path) > 0 {
+				parent = path[len(path)-1]
 			}
-			if filepath.Base(program) != "passess" && len(args) > 0 {
-				others = true
+			if undone, bounded := cdScopeOf(parent, node, chains, env); bounded {
+				scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack), old, cur == "" && risk})
 			}
-			for _, a := range n.Assigns {
-				if reason == "" && a.Name != nil {
-					reason = checkAssign(a.Name.Value, program)
-					if pathSettings[a.Name.Value] && filepath.Base(program) != "passess" {
+			path = append(path, node)
+			switch n := node.(type) {
+			case *syntax.ParamExp:
+				if n.Param != nil {
+					reason = checkParam(n.Param.Value, env)
+				}
+			case *syntax.FuncDecl:
+				if n.Name != nil {
+					funcs[n.Name.Value] = n.Body
+				}
+			case *syntax.Redirect:
+				p, ok := literal(n.Word, env)
+				switch {
+				case !ok:
+					if u := unreadableName(n.Word, env); u != "" && (n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut) {
+						if why := deniedPath(u, here(), env); why != "" {
+							reason = readReason(u, why)
+						}
+					}
+				case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
+					if why := deniedPath(p, here(), env); why != "" {
+						reason = readReason(p, why)
+					}
+				default: // > >> &> into the config
+					reason = configWrite(p, here(), env)
+				}
+			case *syntax.CallExpr:
+				var args []string
+				for _, w := range n.Args {
+					ws := words(w, env) // a non-literal word stays "" and matches nothing
+					if len(ws) == 1 && ws[0] == "" {
+						ws[0] = unreadableName(w, env)
+					}
+					args = append(args, ws...)
+				}
+				program := ""
+				if len(args) > 0 {
+					program = args[0]
+				}
+				if prog(program) != "passess" && len(args) > 0 {
+					others = true
+				}
+				if reason == "" && (prog(program) == "apply_patch" || prog(program) == "applypatch") {
+					// the envelope arrives on its input or as an argument: the command text holds it
+					if !readPatched {
+						patched, readPatched = patchPaths(cmd), true
+					}
+					for _, p := range patched {
+						if reason = configWrite(p, here(), env); reason != "" {
+							break
+						}
+					}
+				}
+				for _, a := range n.Assigns {
+					cdpath = cdpath || setsCDPath(a)
+					if reason == "" && a.Name != nil {
+						reason = checkAssign(a.Name.Value, program)
+						if pathSettings[a.Name.Value] && prog(program) != "passess" {
+							steered = a.Name.Value
+						}
+					}
+				}
+				if reason == "" {
+					reason = checkCall(args, here(), env)
+				}
+				if body := funcs[program]; reason == "" && body != nil && !running[program] && calls < maxFuncCalls {
+					calls++
+					running[program] = true
+					run(body)
+					delete(running, program)
+				}
+				next, st, isCd := afterCd(args, cur, stack, old, env.Home, cdpath)
+				if next == "" && cur != "" { // a cd to a directory not known here
+					risk = guarded(cur) || cdpath
+				}
+				if isCd {
+					old = cur
+				}
+				cur, stack = next, st
+				switch prog(program) {
+				case "eval", "source", ".": // they run commands, a cd among them, in this shell
+					reach := prog(program) == "eval" && evalReaches(args[1:], cur, env)
+					unknown((cur == "" && risk) || reach, cur)
+				}
+			case *syntax.DeclClause: // export, declare, typeset, local, readonly
+				reason = checkDecl(n, env)
+				for _, a := range n.Args {
+					cdpath = cdpath || (!a.Naked && setsCDPath(a))
+					if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
 						steered = a.Name.Value
 					}
 				}
 			}
-			if reason == "" {
-				reason = checkCall(args, cur, env)
-			}
-			cur, stack = afterCd(args, cur, stack, env.Home)
-		case *syntax.DeclClause: // export, declare, typeset, local, readonly
-			reason = checkDecl(n, env)
-			for _, a := range n.Args {
-				if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
-					steered = a.Name.Value
-				}
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+	run(file)
 	// HOME and the like set apart from the passess call, by export or for a
 	// shell that runs it, still reach it: the whole text is searched.
-	if reason == "" && steered != "" && strings.Contains(cmd, "passess") {
+	if reason == "" && steered != "" && strings.Contains(strings.ToLower(cmd), "passess") {
 		reason = checkAssign(steered, "passess")
 	}
 	// A path in quotes, a variable or a script can name the socket too, so
@@ -331,20 +726,116 @@ func checkShell(cmd, cwd string, env Env) string {
 	return reason
 }
 
+// cdScope is a part of the command line that bounds what a cd in it does to
+// the directory after it, with the directory when it began.
+type cdScope struct {
+	node   syntax.Node
+	undone bool // the cd is undone at its end; else the directory is unknown if it moved
+	cur    string
+	stack  []string
+	old    string
+	blind  bool // the directory was unknown then, and relative sensitive names counted
+}
+
+// cdScopeOf says whether node, a child of parent, bounds a cd, and how.
+func cdScopeOf(parent, node syntax.Node, chains map[*syntax.Stmt]bool, env Env) (undone, bounded bool) {
+	switch n := node.(type) {
+	case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.CoprocClause, *syntax.FuncDecl:
+		return true, true // a function body does not run where it is defined
+	case *syntax.BinaryCmd:
+		return true, n.Op == syntax.Pipe || n.Op == syntax.PipeAll
+	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause, *syntax.CaseClause:
+		return false, true
+	case *syntax.Stmt:
+		if n.Background || n.Coprocess {
+			return true, true
+		}
+		// The right side of && and || runs only when the left side lets it. A
+		// chain of cds on the left is the usual `cd a && cd b`: taken as run.
+		if b, ok := parent.(*syntax.BinaryCmd); ok && b.Y == n {
+			return false, b.Op == syntax.OrStmt || !cdChain(b.X, chains, env)
+		}
+	}
+	return false, false
+}
+
+// maxFuncCalls bounds how many function calls in one command line are walked.
+const maxFuncCalls = 64
+
+// evalReaches says whether the text eval runs, made of the literal words among
+// args, has a cd into a protected directory: the shell moves there.
+func evalReaches(args []string, cur string, env Env) bool {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(strings.Join(args, " ")), "")
+	if err != nil {
+		return false
+	}
+	dir, stack, hit := cur, []string(nil), false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if c, ok := node.(*syntax.CallExpr); ok && !hit {
+			var words []string
+			for _, w := range c.Args {
+				s, _ := literal(w, env)
+				words = append(words, s)
+			}
+			dir, stack, _ = afterCd(words, dir, stack, "", env.Home, false)
+			hit = protectedDir(dir, env, true)
+		}
+		return !hit
+	})
+	return hit
+}
+
+// cdChain says whether s is cd, pushd or popd, or such commands joined by &&.
+// chains holds the answers already given, so a chain is walked once.
+func cdChain(s *syntax.Stmt, chains map[*syntax.Stmt]bool, env Env) (chain bool) {
+	if known, ok := chains[s]; ok {
+		return known
+	}
+	defer func() { chains[s] = chain }()
+	switch c := s.Cmd.(type) {
+	case *syntax.CallExpr:
+		if len(c.Args) == 0 {
+			return false
+		}
+		w, _ := literal(c.Args[0], env)
+		switch w {
+		case "cd", "pushd", "popd":
+			return true
+		}
+	case *syntax.BinaryCmd:
+		return c.Op == syntax.AndStmt && cdChain(c.X, chains, env) && cdChain(c.Y, chains, env)
+	}
+	return false
+}
+
 // passessSettings point passess at another config or agent: an agent's
 // command has no business setting them.
 var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOCK": true}
 
 // pathSettings move passess's config and socket with everything else; set
-// for a passess command, they point it elsewhere just the same.
-var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
+// for a passess command, they point it elsewhere just the same. CDPATH moves a
+// relative cd instead: afterCd gives up on one when it is set.
+var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true, "CDPATH": true}
+
+// setsCDPath says whether a is an assignment to CDPATH with a value.
+func setsCDPath(a *syntax.Assign) bool {
+	return a.Name != nil && a.Name.Value == "CDPATH" && a.Value != nil
+}
+
+// maxDirLen bounds the directory afterCd follows: the longest path the
+// system calls take.
+const maxDirLen = 4096
 
 // afterCd returns the working directory after a cd, pushd or popd with args,
-// and the pushd stack; other commands leave both as they are. A directory it
-// cannot tell (cd "$X", cd -) becomes "".
-func afterCd(args []string, cur string, stack []string, home string) (string, []string) {
+// and the pushd stack; other commands leave both as they are, and isCd says
+// whether it was one of them. old is where cd - goes. A directory it cannot
+// tell (cd "$X", a relative cd when CDPATH is set) becomes "".
+func afterCd(args []string, cur string, stack []string, old, home string, cdpath bool) (dir string, left []string, isCd bool) {
+	for len(args) > 0 && (filepath.Base(args[0]) == "builtin" || filepath.Base(args[0]) == "command") {
+		args = args[1:]
+	}
 	if len(args) == 0 {
-		return cur, stack
+		return cur, stack, false
 	}
 	switch filepath.Base(args[0]) {
 	case "cd", "pushd":
@@ -355,33 +846,45 @@ func afterCd(args []string, cur string, stack []string, home string) (string, []
 		next := home
 		switch {
 		case len(ops) == 0 && filepath.Base(args[0]) == "pushd":
-			return "", stack // swaps with the top of a stack not known here
+			return "", stack, true // swaps with the top of a stack not known here
 		case len(ops) == 0:
-		case ops[0] == "" || ops[0] == "-":
+		case ops[0] == "":
 			next = ""
+		case ops[0] == "-":
+			next = old
 		default:
-			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) {
-				next = "" // relative to a directory not known here
+			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) || (cdpath && searched(ops[0])) {
+				next = "" // relative to a directory not known here, or one CDPATH may move
 			}
+		}
+		if len(next) > maxDirLen {
+			next = "" // no shell goes so deep, and a long chain of cd would cost the square of its length
 		}
 		if filepath.Base(args[0]) == "pushd" {
 			stack = append(stack, cur)
 		}
-		return next, stack
+		return next, stack, true
 	case "popd":
 		if len(stack) > 0 {
-			return stack[len(stack)-1], stack[:len(stack)-1]
+			return stack[len(stack)-1], stack[:len(stack)-1], true
 		}
-		return "", stack
+		return "", stack, true
 	}
-	return cur, stack
+	return cur, stack, false
+}
+
+// searched says whether cd looks for dir in CDPATH: every name but an absolute
+// one, one that starts with ./ or ../, and . and .. themselves.
+func searched(dir string) bool {
+	return dir != "." && dir != ".." && !strings.HasPrefix(dir, "/") && !strings.HasPrefix(dir, "./") && !strings.HasPrefix(dir, "../") &&
+		!strings.HasPrefix(dir, "~")
 }
 
 func checkAssign(name, program string) string {
 	if detect.IsMarker(name) {
 		return markerReason(name)
 	}
-	if passessSettings[name] || (pathSettings[name] && filepath.Base(program) == "passess") {
+	if passessSettings[name] || (pathSettings[name] && prog(program) == "passess") {
 		return fmt.Sprintf("passess: setting %s in a command points passess at another config or agent than the user's, "+
 			"around the policy and the approvals the user set up. Run passess without it; its settings are the user's to change.", name)
 	}
@@ -397,7 +900,8 @@ const socketReason = "passess: that command talks to the passess agent's socket 
 	"through `passess exec -s NAME -- command`; the agent's approval questions are the user's to answer."
 
 func mentionsAgent(text string, env Env) bool {
-	return strings.Contains(text, "agent.sock") || (env.AgentSocket != "" && strings.Contains(text, env.AgentSocket))
+	text = strings.ToLower(text)
+	return strings.Contains(text, "agent.sock") || (env.AgentSocket != "" && strings.Contains(text, strings.ToLower(env.AgentSocket)))
 }
 
 // checkDecl refuses the forms that print variables: export -p, bare
@@ -443,7 +947,8 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 
 // literal is a word's value when it has no expansion in it but the
 // variables passess finds its config by: "$HOME/.config/passess" names the
-// config as plainly as ~/.config/passess does.
+// config as plainly as ~/.config/passess does. It is the value the shell
+// makes of the word: backslashes are removed as the shell removes them.
 func literal(w *syntax.Word, env Env) (string, bool) {
 	if w == nil {
 		return "", false
@@ -452,18 +957,19 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 	for _, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.SglQuoted:
-			if p.Dollar { // $'…' holds escapes the shell decodes, not the text itself
-				return "", false
+			if p.Dollar { // $'…' holds escapes the shell decodes
+				b.WriteString(ansiC(p.Value))
+				continue
 			}
 			b.WriteString(p.Value)
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
-				if !plain(&b, q, env) {
+				if !plain(&b, q, env, true) {
 					return "", false
 				}
 			}
 		default:
-			if !plain(&b, part, env) {
+			if !plain(&b, part, env, false) {
 				return "", false
 			}
 		}
@@ -471,11 +977,149 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 	return b.String(), true
 }
 
+// ansiC decodes the escapes inside $'…' as the shell does: \a \b \e \f \n
+// \r \t \v \\ \' \" \?, \NNN octal, \xHH, \uHHHH, \UHHHHHHHH and \cX. An
+// escape it does not know stays as it is, and a NUL ends the text.
+func ansiC(s string) string {
+	var b strings.Builder
+	digits := func(i, max, base int) (n, used int) {
+		for used < max && i+used < len(s) {
+			d := strings.IndexByte("0123456789abcdef", s[i+used]|0x20)
+			if d < 0 || d >= base {
+				break
+			}
+			n, used = n*base+d, used+1
+		}
+		return n, used
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		e := s[i]
+		switch e {
+		case 'a', 'b', 'e', 'E', 'f', 'n', 'r', 't', 'v':
+			b.WriteByte(map[byte]byte{'a': 7, 'b': 8, 'e': 27, 'E': 27, 'f': 12, 'n': 10, 'r': 13, 't': 9, 'v': 11}[e])
+		case '\\', '\'', '"', '?':
+			b.WriteByte(e)
+		case '0', '1', '2', '3', '4', '5', '6', '7', 'x', 'u', 'U':
+			base, max, from := 8, 3, i
+			switch e {
+			case 'x':
+				base, max, from = 16, 2, i+1
+			case 'u':
+				base, max, from = 16, 4, i+1
+			case 'U':
+				base, max, from = 16, 8, i+1
+			}
+			n, used := digits(from, max, base)
+			if used == 0 {
+				b.WriteString(`\` + string(e))
+				continue
+			}
+			i = from + used - 1
+			switch {
+			case n == 0:
+				return b.String()
+			case e == 'u' || e == 'U':
+				if n > utf8.MaxRune {
+					n = utf8.RuneError
+				}
+				b.WriteRune(rune(n))
+			default:
+				b.WriteByte(byte(n & 0xff))
+			}
+		case 'c':
+			if i+1 < len(s) {
+				i++
+				b.WriteByte(s[i] & 0x1f)
+			} else {
+				b.WriteString(`\c`)
+			}
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(e)
+		}
+	}
+	return b.String()
+}
+
+// words are the words w becomes: itself, or for a brace expansion of static
+// alternatives one word for each. A word, or an alternative, not known here is "".
+func words(w *syntax.Word, env Env) []string {
+	if w == nil {
+		return nil
+	}
+	braced := slices.ContainsFunc(w.Parts, func(p syntax.WordPart) bool {
+		l, ok := p.(*syntax.Lit)
+		return ok && strings.Contains(l.Value, "{")
+	})
+	if braced {
+		split := &syntax.Word{Parts: slices.Clone(w.Parts)}
+		if syntax.SplitBraces(split) {
+			var out []string
+			for _, a := range expandParts(split.Parts, env) {
+				out = append(out, a.s)
+			}
+			return out
+		}
+	}
+	s, _ := literal(w, env)
+	return []string{s}
+}
+
+// maxAlternatives bounds a brace expansion; a larger one is not known.
+const maxAlternatives = 64
+
+type alternative struct {
+	s  string
+	ok bool // the text is known
+}
+
+// expandParts is the alternatives a word's parts make, brace expansions included.
+func expandParts(parts []syntax.WordPart, env Env) []alternative {
+	out := []alternative{{"", true}}
+	for _, part := range parts {
+		var opts []alternative
+		if be, isBrace := part.(*syntax.BraceExp); isBrace {
+			if be.Sequence { // {1..3}: the words are not made here
+				opts = []alternative{{"", false}}
+			}
+			for _, e := range be.Elems {
+				if !be.Sequence {
+					opts = append(opts, expandParts(e.Parts, env)...)
+				}
+			}
+		} else {
+			s, ok := literal(&syntax.Word{Parts: []syntax.WordPart{part}}, env)
+			opts = []alternative{{s, ok}}
+		}
+		var next []alternative
+		for _, a := range out {
+			for _, o := range opts {
+				next = append(next, alternative{a.s + o.s, a.ok && o.ok})
+			}
+		}
+		if len(next) > maxAlternatives {
+			return []alternative{{"", false}}
+		}
+		out = next
+	}
+	for i, a := range out {
+		if !a.ok {
+			out[i].s = ""
+		}
+	}
+	return out
+}
+
 // plain writes a literal part, or the value of a locator, to b.
-func plain(b *strings.Builder, part syntax.WordPart, env Env) bool {
+func plain(b *strings.Builder, part syntax.WordPart, env Env, quoted bool) bool {
 	switch p := part.(type) {
 	case *syntax.Lit:
-		b.WriteString(p.Value)
+		b.WriteString(unescape(p.Value, quoted))
 		return true
 	case *syntax.ParamExp:
 		v, ok := locator(p, env)
@@ -483,6 +1127,33 @@ func plain(b *strings.Builder, part syntax.WordPart, env Env) bool {
 		return ok
 	}
 	return false
+}
+
+// unescape removes the backslashes the shell removes: before any character
+// outside double quotes, and before $ ` " \ and a newline inside them. A
+// backslash and a newline are a line continuation and vanish together.
+func unescape(s string, quoted bool) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		next := s[i+1]
+		switch {
+		case next == '\n':
+			i++
+		case !quoted || strings.IndexByte("$`\"\\", next) >= 0:
+			i++
+			b.WriteByte(s[i])
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // locator is the value of $HOME, $XDG_CONFIG_HOME or $PASSESS_CONFIG, which
@@ -529,14 +1200,57 @@ func checkParam(name string, env Env) string {
 		name, name, name, name, name)
 }
 
-func checkCall(args []string, cwd string, env Env) string {
-	for len(args) > 0 && wrappers[filepath.Base(args[0])] {
-		args = skipOptions(args[1:])
+func checkCall(args []string, at where, env Env) string {
+	// Each word list after a wrapper is part of the one before it, so what a
+	// pass over the first one covers is not gone over again: a chain of n
+	// wrappers would cost n times the length of the line.
+	var cmdLines []string // the wrappers whose -c options were looked for
+	watched, scanned := false, false
+	for len(args) > 0 && wrappers[prog(args[0])] {
+		wrapper, rest := prog(args[0]), args[1:]
+		if !slices.Contains(cmdLines, wrapper) {
+			cmdLines = append(cmdLines, wrapper)
+			if r := commandLine(wrapper, rest, at, env); r != "" {
+				return r
+			}
+		}
+		args = skipOptions(wrapper, rest)
+		// watch hands its words to a shell. That check reaches the watch and the
+		// wrappers after it, which it parses again in turn.
+		if wrapper == "watch" && len(args) > 0 && !watched {
+			watched = true
+			if r := checkShell(strings.Join(args, " "), at, env); r != "" {
+				return r
+			}
+		}
+		// An option the table does not know may take a word, which would then
+		// stand for the program: every word that is passess, or cannot be read,
+		// is tried as the program.
+		if !scanned {
+			scanned = true
+			for i, w := range rest {
+				if w == "" || prog(w) == "passess" {
+					if r := checkCall(rest[i:], at, env); r != "" {
+						return r
+					}
+				}
+			}
+		}
 	}
-	if len(args) == 0 || args[0] == "" {
+	if len(args) == 0 {
 		return ""
 	}
-	name := filepath.Base(args[0])
+	if args[0] == "" {
+		// A program built from a variable or a substitution may be passess.
+		// The refusals no other program shares apply to it: `$P agent stop`.
+		agent := len(args) > 2 && args[1] == "agent" && (args[2] == "" || slices.Contains([]string{"stop", "serve", "approve"}, args[2]))
+		sets := len(args) > 2 && (args[1] == "mcp" || args[1] == "profile") && args[2] == ""
+		if len(args) > 1 && (args[1] == "helper" || agent || sets) {
+			return checkCall(append([]string{"passess"}, args[1:]...), at, env)
+		}
+		return ""
+	}
+	name := prog(args[0])
 	sub := func(i int) string {
 		if i < len(args) {
 			return args[i]
@@ -561,15 +1275,29 @@ func checkCall(args []string, cwd string, env Env) string {
 		return fmt.Sprintf("passess: `%s` prints a secret value into this conversation. %s", what, useInstead)
 	}
 	switch name {
-	case "sh", "bash", "zsh", "dash", "ksh":
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "ash", "rbash", "csh", "tcsh":
 		for i, a := range args[1:] {
 			// -c, -lc, -ec …: the next word is one more command line.
 			if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a, 'c') && i+2 < len(args) {
-				return checkShell(args[i+2], cwd, env)
+				return checkShell(args[i+2], at, env)
 			}
 		}
 	case "eval":
-		return checkShell(strings.Join(args[1:], " "), cwd, env)
+		return checkShell(strings.Join(args[1:], " "), at, env)
+	case "find":
+		// -exec COMMAND … ; and -exec COMMAND … + run COMMAND.
+		for i, a := range args {
+			if a != "-exec" && a != "-execdir" && a != "-ok" && a != "-okdir" {
+				continue
+			}
+			end := i + 1
+			for end < len(args) && args[end] != ";" && args[end] != "+" {
+				end++
+			}
+			if r := checkCall(args[i+1:end], at, env); r != "" {
+				return r
+			}
+		}
 	case "env":
 		rest := args[1:]
 		var set []string
@@ -597,14 +1325,21 @@ func checkCall(args []string, cwd string, env Env) string {
 				return r
 			}
 		}
-		return checkCall(rest, cwd, env)
+		return checkCall(rest, at, env)
 	case "passess":
 		switch {
-		case len(args) > 1 && args[1] == "":
-			// $V, $(…) or $'…' as the subcommand: what runs cannot be told
-			// from the text, and every subcommand an agent may run is plain.
+		case len(args) > 1 && args[1] == "",
+			// the same where a second word decides
+			len(args) > 2 && args[2] == "" && (args[1] == "agent" || args[1] == "mcp" || args[1] == "profile"):
+			// $V, $(…) or a brace expansion as the subcommand: what runs cannot
+			// be told from the text, and every subcommand an agent may run is plain.
 			return "passess: write the passess subcommand out as plain text; one built from a variable or a substitution " +
 				"cannot be checked, so it is refused."
+		case slices.Contains([]string{"migrate", "install", "uninstall"}, sub(1)) && slices.Contains(args[2:], ""):
+			// a word built at run time may be --apply, which makes the command act
+			return "passess: an argument of `passess " + sub(1) + "` built from a variable or a substitution could be --apply, " +
+				"which makes it act and is the user's to give; write the arguments out, with a path spelled in full, " +
+				"or show the user the dry run and let them apply it."
 		case sub(1) == "agent" && (sub(2) == "stop" || sub(2) == "serve"):
 			return "passess: `passess agent " + sub(2) + "` is the user's to run: the agent asks the user before a secret " +
 				"marked approve goes anywhere, and replacing or stopping it would skip that. Tell the user if the agent needs it."
@@ -709,9 +1444,12 @@ func checkCall(args []string, cwd string, env Env) string {
 	// Commands that write the files they name: none may touch the config.
 	if writers[name] || copiers[name] {
 		for _, a := range args[1:] {
-			if a != "" && !strings.HasPrefix(a, "-") && inConfig(abs(a, cwd, env.Home), env) {
-				if name != "sed" || slices.ContainsFunc(args[1:], func(f string) bool { return strings.HasPrefix(f, "-i") }) {
-					return configReason(a)
+			if a == "" || strings.HasPrefix(a, "-") {
+				continue
+			}
+			if r := configWrite(a, at, env); r != "" {
+				if name != "sed" || slices.ContainsFunc(args[1:], inPlace) {
+					return r
 				}
 			}
 		}
@@ -727,8 +1465,12 @@ func checkCall(args []string, cwd string, env Env) string {
 			operands = operands[:len(operands)-1] // cp .env.example .env writes .env, it does not read it
 		}
 		for _, a := range operands {
-			if why := deniedPath(a, cwd, env); why != "" {
+			if why := deniedPath(a, at, env); why != "" {
 				return readReason(a, why)
+			}
+			// a recursive grep or copy reads every file in it
+			if credentialDir(abs(a, at.dir, env.Home), env) {
+				return readReason(a, "holds credentials")
 			}
 		}
 	}
@@ -742,14 +1484,78 @@ func checkCall(args []string, cwd string, env Env) string {
 	return ""
 }
 
-// skipOptions drops the leading options of a wrapper such as sudo. An
-// option's argument (sudo -u USER) is taken for the command: a gap that is
-// acceptable for a second line of defense, which this is.
-func skipOptions(args []string) []string {
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		args = args[1:]
+// inPlace says whether a sed flag edits files in place: -i in a cluster of
+// short flags (-i, -Ei, -ni.bak), or --in-place, in full or shortened.
+func inPlace(flag string) bool {
+	if long, ok := strings.CutPrefix(flag, "--"); ok {
+		long, _, _ = strings.Cut(long, "=")
+		return long != "" && strings.HasPrefix("in-place", long)
 	}
-	return args
+	return sedCluster.MatchString(flag)
+}
+
+var sedCluster = regexp.MustCompile(`^-[A-Za-z]*i`)
+
+// commandLine checks the command line a wrapper's -c option gives a shell, as
+// the word after the option or attached to it (--command=TEXT).
+func commandLine(wrapper string, args []string, at where, env Env) string {
+	for i, a := range args {
+		text := ""
+		for _, o := range commandLineOptions[wrapper] {
+			if t, ok := strings.CutPrefix(a, o+"="); ok && strings.HasPrefix(o, "--") {
+				text = t
+			}
+			if a == o && strings.HasPrefix(o, "--") && i+1 < len(args) {
+				text = args[i+1]
+			}
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a, 'c') && len(commandLineOptions[wrapper]) > 0 && i+1 < len(args) {
+			text = args[i+1] // -c, -lc …
+		}
+		if text != "" {
+			if r := checkShell(text, at, env); r != "" {
+				return r
+			}
+		}
+	}
+	return ""
+}
+
+// skipOptions drops the leading options of a wrapper such as sudo, with the
+// arguments of the options it knows take one (sudo -u USER) and the words
+// that are the wrapper's own (timeout's duration). An option it does not know
+// that takes an argument leaves that argument in the command's place.
+func skipOptions(wrapper string, args []string) []string {
+	spec := wrapperOptions[wrapper]
+	took := false
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		opt := args[0]
+		args = args[1:]
+		if takesWord(spec.takes, opt) && len(args) > 0 {
+			args, took = args[1:], true
+		}
+	}
+	if took && spec.satisfied {
+		return args
+	}
+	return args[min(spec.positional, len(args)):]
+}
+
+// takesWord says whether opt, an option or a cluster of short flags, takes
+// the next word: the last flag of a cluster does (-nu root); one before the
+// end has its argument attached (-uroot).
+func takesWord(takes []string, opt string) bool {
+	if slices.Contains(takes, opt) {
+		return true
+	}
+	if len(opt) > 2 && opt[1] != '-' {
+		for i := 1; i < len(opt); i++ {
+			if slices.Contains(takes, "-"+opt[i:i+1]) {
+				return i == len(opt)-1
+			}
+		}
+	}
+	return false
 }
 
 // --- prompts, results, session start ---
@@ -763,14 +1569,26 @@ func pasted(text string, env Env) string {
 	if rs == nil {
 		return ""
 	}
+	refused := func(rule string) string {
+		return fmt.Sprintf("passess: this message looks like it contains a %s credential, so it was not sent: whatever reaches the model "+
+			"also reaches its logs and this transcript. Store it with `passess add NAME --keychain` (you type it into the keychain), "+
+			"then ask the agent to use `passess exec -s NAME -- command`. If it was a real credential that already went somewhere, rotate it.", rule)
+	}
+	// A private key spans lines, from its BEGIN line to its END line, so that
+	// rule reads the whole text.
+	if strings.Contains(strings.ToLower(text), "-----begin") {
+		for _, m := range rs.Line("prompt", text) {
+			if m.Rule == "private-key" {
+				return refused(m.Rule)
+			}
+		}
+	}
 	for _, line := range strings.Split(text, "\n") {
 		for _, m := range rs.Line("prompt", line) {
 			if m.Rule == "generic-api-key" {
 				continue // too loose for a prompt: hashes and IDs look like it
 			}
-			return fmt.Sprintf("passess: this message looks like it contains a %s credential, so it was not sent: whatever reaches the model "+
-				"also reaches its logs and this transcript. Store it with `passess add NAME --keychain` (you type it into the keychain), "+
-				"then ask the agent to use `passess exec -s NAME -- command`. If it was a real credential that already went somewhere, rotate it.", m.Rule)
+			return refused(m.Rule)
 		}
 	}
 	return ""

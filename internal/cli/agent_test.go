@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -634,5 +635,176 @@ func TestAgentMasksWhatItHolds(t *testing.T) {
 	s.forget()
 	if got := s.mask(text); got != text {
 		t.Fatalf("after lock the agent still masks: %q", got)
+	}
+}
+
+// An agent that starts the daemon must not choose the backends the daemon's
+// later clients are served from: the variables the providers read are left
+// out of the daemon's environment. A person at a terminal keeps them.
+func TestAgentStartEnvDropsBackendVariablesForAgents(t *testing.T) {
+	environ := []string{
+		"PATH=/usr/bin", "LANG=C", "TMPDIR=/tmp",
+		"VAULT_ADDR=http://127.0.0.1:1", "VAULT_TOKEN=passess-fake-token", "BAO_ADDR=http://127.0.0.1:2", "BAO_TOKEN=passess-fake-token",
+		"VAULT_NAMESPACE=x", "OP_CONNECT_HOST=http://127.0.0.1:3", "OP_CONNECT_TOKEN=passess-fake-token",
+		"OP_SERVICE_ACCOUNT_TOKEN=passess-fake-token", "OP_ACCOUNT=x", "BWS_ACCESS_TOKEN=passess-fake-token",
+		"BWS_SERVER_URL=http://127.0.0.1:4", "BW_SESSION=passess-fake-token", "BITWARDENCLI_APPDATA_DIR=/x",
+	}
+	got, dropped := agentEnv(environ, true)
+	if !slices.Equal(got, []string{"PATH=/usr/bin", "LANG=C", "TMPDIR=/tmp"}) {
+		t.Errorf("under an agent the daemon got %v", got)
+	}
+	if len(dropped) != len(environ)-3 {
+		t.Errorf("dropped %v", dropped)
+	}
+	for _, d := range dropped {
+		if strings.Contains(d, "=") || strings.Contains(d, "passess-fake") {
+			t.Errorf("dropped list names %q: it must hold names only", d)
+		}
+	}
+	got, dropped = agentEnv(environ, false)
+	if !slices.Equal(got, environ) || len(dropped) != 0 {
+		t.Errorf("a person's environment was changed: %v, dropped %v", got, dropped)
+	}
+}
+
+// execAs runs one exec request through the daemon's exec path as a peer with
+// the given pid and returns the exit code and what the client would see on
+// stderr. The connection is the client end of a real socket whose Peer is set
+// by hand: the kernel would report the pid of this process.
+func execAs(t *testing.T, s *agentServer, cfg string, pid int, secret string) (int, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	l, err := net.Listen("unix", filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		if c, err := l.Accept(); err == nil {
+			t.Cleanup(func() { _ = c.Close() })
+		}
+	}()
+	c, err := agent.Dial(filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	c.Peer = agent.Peer{UID: os.Getuid(), PID: pid}
+	var files []*os.File
+	for range 2 {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, f)
+	}
+	errPath := filepath.Join(dir, "stderr")
+	ef, err := os.Create(errPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, ef)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := agent.Request{V: agent.Version, Build: buildinfo.String(), Kind: agent.Exec, Argv: []string{"/bin/true"}, Dir: wd,
+		Secrets: []agent.Secret{{Env: secret, Name: secret}}, Config: cfg}
+	code := s.exec(c, req, files)
+	b, err := os.ReadFile(errPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, string(b)
+}
+
+// A peer the daemon cannot identify (the kernel gave no pid, or the process
+// left before the walk) may hide a coding agent, so exec treats it as an
+// unidentified agent and a secret that names its clients refuses it. This
+// pins the call site in exec; TestPeerChainFailsClosed pins the helper.
+func TestAgentExecRefusesAPeerItCannotIdentify(t *testing.T) {
+	noHarness(t)
+	dir := setupDir(t)
+	cfg := filepath.Join(dir, "config.toml")
+	body := `version = 1
+[secrets.CLIENTS]
+ref     = "env://PASSESS_TEST_X_TOKEN"
+clients = ["kiro"]
+[secrets.OPEN]
+ref = "env://PASSESS_TEST_Y_TOKEN"
+`
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newAgentServer(nil, canonical(cfg), func(*config.User) (*resolve.Resolver, func()) {
+		r := resolve.New()
+		return r, r.Zero
+	})
+	s.log = &auditLog{stderr: io.Discard}
+	child := exec.Command("true")
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	gone := child.Process.Pid // reaped: no such process
+	for _, pid := range []int{0, 1, gone} {
+		code, errOut := execAs(t, s, cfg, pid, "CLIENTS")
+		if code != ExitNoPerm || !strings.Contains(errOut, "CLIENTS is not connected to") {
+			t.Errorf("pid %d: exit %d, stderr %q; want the clients refusal", pid, code, errOut)
+		}
+		// Control: a secret with no clients list is not refused for that reason.
+		if _, errOut := execAs(t, s, cfg, pid, "OPEN"); strings.Contains(errOut, "is not connected to") {
+			t.Errorf("pid %d: a secret with no clients list was refused: %q", pid, errOut)
+		}
+	}
+}
+
+// An agent that starts the daemon must not hand it the backend variables.
+// The daemon here is this test binary acting as `agent serve` (see TestMain),
+// which records the names of the variables it started with and exits.
+func TestAgentStartFromACodingAgentDropsBackendVariables(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		chain       []agent.Proc
+		wantBackend bool
+		wantNote    bool
+	}{
+		{"a coding agent among the ancestors", []agent.Proc{{Name: "passess"}, {Name: "zsh"}, {Name: "kiro-cli-chat"}}, false, true},
+		{"a person at a terminal", []agent.Proc{{Name: "passess"}, {Name: "zsh"}, {Name: "Terminal"}}, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			setup(t)
+			noHarness(t)
+			underChain(t, c.chain...)
+			agentSocket(t)
+			dump := filepath.Join(t.TempDir(), "env-names")
+			t.Setenv("PASSESS_TEST_ENVDUMP", dump)
+			t.Setenv("VAULT_ADDR", "http://127.0.0.1:1")
+			t.Setenv("VAULT_TOKEN", "passess-fake-token")
+			t.Setenv("BWS_ACCESS_TOKEN", "passess-fake-token")
+			t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "passess-fake-token")
+			_, errOut, _ := run(t, "agent", "start")
+			b, err := os.ReadFile(dump)
+			if err != nil {
+				t.Fatalf("the daemon never started: %v; stderr %q", err, errOut)
+			}
+			names := strings.Fields(string(b))
+			for _, n := range []string{"VAULT_ADDR", "VAULT_TOKEN", "BWS_ACCESS_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN"} {
+				if slices.Contains(names, n) != c.wantBackend {
+					t.Errorf("the daemon has %s: %v, want %v", n, !c.wantBackend, c.wantBackend)
+				}
+			}
+			for _, n := range []string{"PATH", "PASSESS_CONFIG", "PASSESS_AGENT_SOCK"} {
+				if !slices.Contains(names, n) {
+					t.Errorf("the daemon lost %s", n)
+				}
+			}
+			if got := strings.Contains(errOut, "are not passed on"); got != c.wantNote {
+				t.Errorf("note about dropped variables = %v, want %v: %q", got, c.wantNote, errOut)
+			}
+		})
 	}
 }

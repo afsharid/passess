@@ -14,9 +14,78 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+// maxDepth is the deepest nesting parse accepts. hujson.Parse recurses once per
+// level with no limit, and a goroutine stack overflow is fatal, so a hostile
+// config could abort passess. Real harness configs nest a handful of levels.
+const maxDepth = 512
+
+// MaxSize is the largest document parse accepts. hujson keeps the whole tree
+// alive and one byte of a flat array costs about 300 bytes of heap, so a file
+// of a few hundred MB written by another process could get passess killed for
+// lack of memory. Real harness configs are a few KB; ~/.claude.json, the
+// biggest, stays well under this.
+const MaxSize = 8 << 20
+
+// maxNesting returns the deepest bracket nesting of src, or maxDepth+1 as soon
+// as it passes maxDepth. One linear pass counts open brackets, skipping strings
+// and comments. A closing bracket never takes the count below zero. On
+// malformed input the count can be higher than the tree hujson would build,
+// never lower, and hujson rejects that input anyway.
+func maxNesting(src []byte) int {
+	depth, deepest := 0, 0
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '[', '{':
+			if depth++; depth > deepest {
+				deepest = depth
+			}
+			if deepest > maxDepth {
+				return deepest
+			}
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case '"':
+			for i++; i < len(src) && src[i] != '"'; i++ {
+				if src[i] == '\\' {
+					i++
+				}
+			}
+		case '/':
+			switch {
+			case i+1 < len(src) && src[i+1] == '/':
+				for i < len(src) && src[i] != '\n' {
+					i++
+				}
+			case i+1 < len(src) && src[i+1] == '*':
+				if end := bytes.Index(src[i+2:], []byte("*/")); end >= 0 {
+					i += end + 3
+				} else {
+					i = len(src)
+				}
+			}
+		}
+	}
+	return deepest
+}
+
+// parse is hujson.Parse behind a size and a depth check: a document over
+// MaxSize or nested deeper than maxDepth is refused before the recursive
+// parser sees it.
+func parse(src []byte) (hujson.Value, error) {
+	if len(src) > MaxSize {
+		return hujson.Value{}, fmt.Errorf("larger than %d MiB", MaxSize>>20)
+	}
+	if maxNesting(src) > maxDepth {
+		return hujson.Value{}, fmt.Errorf("nested deeper than %d levels", maxDepth)
+	}
+	return hujson.Parse(src)
+}
+
 // Decode parses a JSON or JSONC document into out. src is not modified.
 func Decode(src []byte, out any) error {
-	v, err := hujson.Parse(bytes.Clone(src)) // Standardize rewrites the bytes it parsed
+	v, err := parse(bytes.Clone(src)) // Standardize rewrites the bytes it parsed
 	if err != nil {
 		return err
 	}
@@ -31,7 +100,7 @@ func Set(src []byte, path []string, name string, value any) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		src = []byte("{}\n")
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +145,7 @@ func Append(src []byte, path []string, value any) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		src = []byte("{}\n")
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +167,7 @@ func RemoveWhere(src []byte, path []string, match func(any) bool) ([]byte, error
 		if len(bytes.TrimSpace(src)) == 0 {
 			return src, nil
 		}
-		root, err := hujson.Parse(src)
+		root, err := parse(src)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +217,7 @@ func Delete(src []byte, path []string, name string) ([]byte, error) {
 	if len(bytes.TrimSpace(src)) == 0 {
 		return src, nil
 	}
-	root, err := hujson.Parse(src)
+	root, err := parse(src)
 	if err != nil {
 		return nil, err
 	}

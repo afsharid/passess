@@ -7,6 +7,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
@@ -71,14 +74,24 @@ type Result struct {
 	Exit   int
 }
 
+// cliTimeout bounds one backend CLI call. A Touch ID or unlock prompt the
+// user has not answered yet must fit inside it, so it is generous; it exists
+// so that a stalled CLI cannot hold the agent's generation lock for ever and
+// keep `agent lock` and `agent stop` waiting.
+const cliTimeout = 5 * time.Minute
+
 // ExecRunner runs commands with os/exec. Look finds the program; nil means
-// LookTrusted, which never consults PATH.
+// LookTrusted, which never consults PATH. Timeout bounds one call; zero means
+// cliTimeout.
 type ExecRunner struct {
-	Look func(name string) (string, error)
+	Look    func(name string) (string, error)
+	Timeout time.Duration
 }
 
 // Run executes c. A non-zero exit is reported in Result.Exit, not as an error;
-// the error is for failures to start the command at all.
+// the error is for failures to start the command at all, and for a command
+// that outlives its bound: that one is killed with every process it started,
+// and the error names the command, never what it printed.
 func (r ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	look := r.Look
 	if look == nil {
@@ -88,7 +101,16 @@ func (r ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %s is not installed in a standard location", ErrUnavailable, c.Name)
 	}
-	cmd := exec.CommandContext(ctx, path, c.Args...)
+	limit := cmp.Or(r.Timeout, cliTimeout)
+	bounded, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	cmd := exec.CommandContext(bounded, path, c.Args...)
+	// Its own process group, so that expiry reaches what the CLI started too.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	// A grandchild that outlives the kill must not keep the output pipes, and
+	// so Wait, open.
+	cmd.WaitDelay = time.Second
 	cmd.Env = c.Env
 	if c.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
@@ -96,6 +118,9 @@ func (r ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
+	if bounded.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		return Result{}, fmt.Errorf("%w: %s did not finish within %s", ErrUnavailable, c.Name, limit)
+	}
 	res := Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	var exit *exec.ExitError
 	switch {

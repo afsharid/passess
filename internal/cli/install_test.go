@@ -134,7 +134,7 @@ func TestInstallApplyAndUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
-	for _, want := range []string{passessPath() + " hook claude PreToolUse", passessPath() + " hook claude UserPromptSubmit", `"matcher": "Bash|Read`} {
+	for _, want := range []string{passessPath() + " hook claude PreToolUse", passessPath() + " hook claude UserPromptSubmit", `"matcher": "Bash|Monitor|Read`} {
 		if !strings.Contains(string(settings), want) {
 			t.Fatalf("Claude settings lack %q:\n%s", want, settings)
 		}

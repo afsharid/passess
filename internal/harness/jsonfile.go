@@ -3,6 +3,7 @@ package harness
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,6 +123,39 @@ func (j JSONFile) Installed() bool {
 	return err == nil && st.IsDir()
 }
 
+// MaxConfigSize bounds the harness configs passess edits, the size jsonedit
+// parses.
+const MaxConfigSize = jsonedit.MaxSize
+
+// MaxStateSize bounds ~/.claude.json and Codex's config.toml, which passess
+// only reads: encoding/json and go-toml cost far less per byte than hujson, and
+// ~/.claude.json grows with the user's history.
+const MaxStateSize = 32 << 20
+
+// ReadConfig reads a harness config of at most limit bytes. A larger file is
+// refused by name before it is read, so a huge file cannot fill memory; the
+// read itself is capped too, in case the file grows after the size check.
+func ReadConfig(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	tooBig := fmt.Errorf("%s is larger than %d MiB; passess does not read a harness config that big", path, limit>>20)
+	if st, err := f.Stat(); err == nil && st.Size() > limit {
+		return nil, tooBig
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		clear(data)
+		return nil, tooBig
+	}
+	return data, nil
+}
+
 // servers decodes the servers object; a missing file has none.
 func (j JSONFile) servers() (map[string]map[string]any, error) {
 	ex := j.existing()
@@ -131,14 +165,14 @@ func (j JSONFile) servers() (map[string]map[string]any, error) {
 	case len(ex) > 1:
 		return nil, fmt.Errorf("both %s and %s exist; passess cannot tell which one %s reads, so merge them into one", ex[0], ex[1], j.Spec.Label)
 	}
-	data, err := os.ReadFile(ex[0])
+	data, err := ReadConfig(ex[0], MaxConfigSize)
 	if err != nil {
 		return nil, err
 	}
 	defer clear(data)
 	var doc map[string]any
 	if err := jsonedit.Decode(data, &doc); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON", ex[0])
+		return nil, fmt.Errorf("%s is not valid JSON: %w", ex[0], err)
 	}
 	var at any = doc
 	for _, key := range j.Spec.Servers {
