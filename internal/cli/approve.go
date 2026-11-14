@@ -322,8 +322,11 @@ func (s *agentServer) approvals(u *config.User) []agent.Approval {
 // serveApprover sends questions to an approver and settles them with its
 // answers, for as long as it stays connected.
 func (s *agentServer) serveApprover(c *agent.Conn) {
-	chain, _ := agent.Ancestry(c.Peer.PID)
-	if err := approverGate(chain); err != nil {
+	chain, err := agent.Ancestry(c.Peer.PID)
+	if err == nil {
+		err = approverGate(chain)
+	}
+	if err != nil {
 		_ = c.Write(agent.Frame{Error: err.Error()})
 		return
 	}
@@ -380,8 +383,11 @@ func (s *agentServer) serveApprover(c *agent.Conn) {
 // the anchor, since any program the agent starts in between (script,
 // timeout, an interpreter) is an anchor of its own. One that detaches from
 // the harness first, a daemonized child whose parent is now launchd, gets
-// through (T6).
+// through (T6). A chain cut short, which may hide the harness, is refused.
 func approverGate(chain []agent.Proc) error {
+	if agent.Truncated(chain) {
+		return errors.New("refusing an approver whose process chain passess cannot read to the end: an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own")
+	}
 	for _, p := range chain {
 		if agent.HarnessOf(p) != "" {
 			return fmt.Errorf("refusing an approver started by %s (pid %d): an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own", p.Name, p.PID)

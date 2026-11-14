@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,6 +44,28 @@ func TestCallerAgentsFromAncestry(t *testing.T) {
 	}
 	if got := callerAgents(none, []agent.Proc{{Name: "passess"}, {Name: "zsh"}, {Name: "Terminal"}}); len(got) != 0 {
 		t.Fatalf("a terminal is no agent: %v", got)
+	}
+}
+
+// A chain that stops before pid 1 may hide the agent past the cut: it counts
+// as an agent no clients list names. The same chain complete does not.
+func TestCallerAgentsOfATruncatedChain(t *testing.T) {
+	none := func(string) string { return "" }
+	cut := []agent.Proc{{PID: 9, Name: "passess", PPID: 8}, {PID: 8, Name: "zsh", PPID: 7}}
+	if got := callerAgents(none, cut); !slices.Equal(got, []string{agent.Unidentified}) {
+		t.Fatalf("a cut chain: %v", got)
+	}
+	whole := []agent.Proc{{PID: 9, Name: "passess", PPID: 8}, {PID: 8, Name: "zsh", PPID: 1}}
+	if got := callerAgents(none, whole); len(got) != 0 {
+		t.Fatalf("a chain that reaches launchd: %v", got)
+	}
+	u := &config.User{Secrets: map[string]config.Secret{"X": {Clients: []string{"codex"}}, "Y": {}}}
+	st := &Streams{Stderr: &bytes.Buffer{}}
+	if code := checkClients(st, u, []string{"X"}, callerAgents(none, cut)); code != ExitNoPerm {
+		t.Errorf("a clients-gated secret under a cut chain: exit %d", code)
+	}
+	if code := checkClients(st, u, []string{"Y"}, callerAgents(none, cut)); code != 0 {
+		t.Errorf("a secret open to every client under a cut chain: exit %d", code)
 	}
 }
 

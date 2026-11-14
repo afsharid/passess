@@ -440,6 +440,10 @@ func TestApproveRefusesInsideAHarnessAndWithoutATerminal(t *testing.T) {
 
 func TestApproverGate(t *testing.T) {
 	p := func(name string, pid int) agent.Proc { return agent.Proc{PID: pid, Name: name} }
+	// A chain cut short may hide the harness above the cut.
+	if err := approverGate([]agent.Proc{p("passess", 3), {PID: 2, Name: "zsh", PPID: 7}}); err == nil {
+		t.Error("an approver whose chain ends before pid 1 was let in")
+	}
 	if err := approverGate([]agent.Proc{p("passess", 3), p("zsh", 2), p("claude", 1)}); err == nil {
 		t.Error("an approver started by Claude Code was let in")
 	}
