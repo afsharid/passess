@@ -117,6 +117,7 @@ where the protection stops. Read the last section before relying on it.
 - **The agent answers whether a text holds one of its values.** Hooks send tool output
   to it for masking, and so could any same-user process, with a guess. For a short,
   guessable value, a password, that is an oracle. Reaching the socket at all is T6.
+  `scan` would be one too, so it refuses to match configured values inside an agent.
 - **`passess helper` prints a value by design.** It is for a harness's own API key
   (Claude Code's `apiKeyHelper`). Each secret opts in, a terminal never gets it, and the
   hooks refuse it in agent shells. But the harness's agent can run what the harness

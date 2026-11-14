@@ -65,6 +65,15 @@ func runScan(st *Streams, args []string) int {
 	case *scrub:
 		*transcripts = true
 	}
+	// Matching the configured values resolves every secret, with neither the
+	// clients list nor the approval that exec asks for, and says which line of
+	// a file holds which value: a guess oracle for a caller that may not use
+	// the secret. A coding agent runs the scan without it.
+	if !*noKnown {
+		if code := refuseUnderAgent(st, "scan", "resolves every secret you configured to search for its value; use --no-known, or run it yourself"); code != 0 {
+			return code
+		}
+	}
 	augmentPath(st.Getenv)
 
 	rules, err := scan.DefaultRules()
