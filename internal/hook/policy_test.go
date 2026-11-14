@@ -305,3 +305,37 @@ nv`, `grep KEY .env\*`,
 		`echo x > ~/.config/pass\\ess/config.toml`, `echo "\"" > /tmp/x`, `echo \$HOME`,
 	})
 }
+
+// A cd moves the shell only where the shell itself runs it: not in a subshell,
+// a pipeline, a background job or a command substitution, and not surely in a
+// branch that may be skipped.
+func TestCdScope(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cd ~/.config/passess && (cd /tmp) && echo x >> config.toml`,
+		`cd ~/.config/passess; cd /tmp | cat; echo x >> config.toml`,
+		`cd ~/.config/passess; false && cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; true || cd /tmp; echo x >> config.toml`,
+		`cd ~/.config/passess; { cd /tmp; } & echo x >> config.toml`,
+		`cd ~/.config/passess; cd /tmp & echo x >> config.toml`,
+		`cd ~/.config/passess; echo $(cd /tmp); echo x >> config.toml`,
+		`cd ~/.config/passess; if false; then cd /tmp; fi; echo x >> config.toml`,
+		`cd ~/.config/passess; for d in /tmp; do cd $d; done; echo x >> config.toml`,
+		`cd ~/.config/passess; case x in y) cd /tmp;; esac; echo x >> config.toml`,
+		`cd ~/.config/passess; cat <(cd /tmp); echo x >> config.toml`,
+		`cd ~/.aws; (cd /tmp); cat credentials`, `cd ~/.aws; (cd /tmp); cat < credentials`,
+		`cd ~/.aws; { cd /tmp; } | cat; cat credentials`,
+		// the cd's own scope still counts inside it
+		`(cd ~/.config/passess && echo x >> notes)`, `(cd ~/.config/passess; tee notes)`, `{ cd ~/.aws; } && cat credentials`,
+		`cd ~/.config/passess && { echo x >> config.toml; }`, `cd ~/.aws && cd . && cat credentials`,
+		// a directory that may or may not be entered is not known afterwards
+		`false && cd /tmp; echo x >> config.toml`, `if true; then cd /tmp; fi; cat < credentials`,
+		`f() { cd ~/.config/passess; }; f; echo x >> config.toml`,
+		`builtin cd ~/.config/passess; echo x >> notes`, `command cd ~/.aws && cat credentials`,
+		`eval 'cd ~/.aws'; cat credentials`, `source ./go.sh; cat credentials`, `. ./go.sh; echo x >> config.toml`,
+	}, []string{
+		`cd /tmp && ls`, `cd /tmp && cd sub && echo x > out.txt`, `(cd /tmp); echo x >> config.toml`, `(cd /tmp); cat credentials`,
+		`cd /tmp; echo x >> config.toml`, `cd /tmp | cat; echo x > out.txt`, `false && cd /tmp; echo x > out.txt`,
+		`echo $(cd /tmp); cat README.md`, `if true; then cd /tmp; fi; cat README.md`, `cd ~/.config/passess; (cd /tmp); cat README.md`,
+		`cd ~/.aws; ls; (cd /tmp); echo x > out.txt`, `{ cd /tmp; } & cat README.md`,
+	})
+}

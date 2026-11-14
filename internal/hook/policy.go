@@ -94,7 +94,7 @@ func Decide(ev Event, env Env) Verdict {
 		}
 	case Write:
 		for _, p := range ev.Paths {
-			if inConfig(abs(p, ev.CWD, env.Home), env) {
+			if writesConfig(p, ev.CWD, env) {
 				return Verdict{Deny: true, Reason: configReason(p)}
 			}
 		}
@@ -206,10 +206,38 @@ func within(p, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
+// unplaced says p is a relative name with no directory to be relative to:
+// where it lands is not known.
+func unplaced(p, cwd string) bool {
+	return cwd == "" && p != "" && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~")
+}
+
+// credentialNames are the base names of the credential files under HOME; a
+// bare "config" (.kube/config) is too common a name to stand for one.
+var credentialNames = func() []string {
+	var out []string
+	for _, c := range credentialPaths {
+		if b := filepath.Base(c); b != "config" {
+			out = append(out, b)
+		}
+	}
+	return out
+}()
+
+// writesConfig says whether writing p changes the passess config. A relative
+// name that is not placed counts when it is the config file's name.
+func writesConfig(p, cwd string, env Env) bool {
+	return inConfig(abs(p, cwd, env.Home), env) ||
+		(unplaced(p, cwd) && strings.HasPrefix(filepath.Base(p), "config.toml"))
+}
+
 // deniedPath says why reading p would expose credentials, or "".
 func deniedPath(p, cwd string, env Env) string {
 	full := abs(p, cwd, env.Home)
 	base := filepath.Base(full)
+	if unplaced(p, cwd) && slices.Contains(credentialNames, base) {
+		return "may hold credentials"
+	}
 	switch {
 	case envFile.MatchString(strings.TrimRight(base, "*")) && !envTemplate.MatchString(base):
 		return "holds secret values"
@@ -281,10 +309,39 @@ func checkShell(cmd, cwd string, env Env) string {
 	// ran the command, then wherever a literal cd or pushd earlier in the same
 	// command line moved it. "" once that is unknown.
 	cur, stack := cwd, []string(nil)
+	// A cd moves the shell only where the shell runs it. In a subshell, a
+	// pipeline, a background job or a substitution it is undone when that ends;
+	// in a branch or a function that may not run it leaves the directory
+	// unknown. path holds the nodes being walked, scopes the ones that bound a cd.
+	var path []syntax.Node
+	var scopes []cdScope
 	syntax.Walk(file, func(node syntax.Node) bool {
+		if node == nil { // the children of the last node on path are done
+			left := path[len(path)-1]
+			path = path[:len(path)-1]
+			if len(scopes) > 0 && scopes[len(scopes)-1].node == left {
+				sc := scopes[len(scopes)-1]
+				scopes = scopes[:len(scopes)-1]
+				switch {
+				case sc.undone:
+					cur, stack = sc.cur, sc.stack
+				case cur != sc.cur || !slices.Equal(stack, sc.stack):
+					cur, stack = "", nil
+				}
+			}
+			return true
+		}
 		if reason != "" {
 			return false
 		}
+		var parent syntax.Node
+		if len(path) > 0 {
+			parent = path[len(path)-1]
+		}
+		if undone, bounded := cdScopeOf(parent, node, env); bounded {
+			scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack)})
+		}
+		path = append(path, node)
 		switch n := node.(type) {
 		case *syntax.ParamExp:
 			if n.Param != nil {
@@ -298,7 +355,7 @@ func checkShell(cmd, cwd string, env Env) string {
 				if why := deniedPath(p, cur, env); why != "" {
 					reason = readReason(p, why)
 				}
-			case inConfig(abs(p, cur, env.Home), env): // > >> &> into the config
+			case writesConfig(p, cur, env): // > >> &> into the config
 				reason = configReason(p)
 			}
 		case *syntax.CallExpr:
@@ -326,6 +383,10 @@ func checkShell(cmd, cwd string, env Env) string {
 				reason = checkCall(args, cur, env)
 			}
 			cur, stack = afterCd(args, cur, stack, env.Home)
+			switch filepath.Base(program) {
+			case "eval", "source", ".": // they run commands, a cd among them, in this shell
+				cur, stack = "", nil
+			}
 		case *syntax.DeclClause: // export, declare, typeset, local, readonly
 			reason = checkDecl(n, env)
 			for _, a := range n.Args {
@@ -349,6 +410,55 @@ func checkShell(cmd, cwd string, env Env) string {
 	return reason
 }
 
+// cdScope is a part of the command line that bounds what a cd in it does to
+// the directory after it, with the directory when it began.
+type cdScope struct {
+	node   syntax.Node
+	undone bool // the cd is undone at its end; else the directory is unknown if it moved
+	cur    string
+	stack  []string
+}
+
+// cdScopeOf says whether node, a child of parent, bounds a cd, and how.
+func cdScopeOf(parent, node syntax.Node, env Env) (undone, bounded bool) {
+	switch n := node.(type) {
+	case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
+		return true, true
+	case *syntax.BinaryCmd:
+		return true, n.Op == syntax.Pipe || n.Op == syntax.PipeAll
+	case *syntax.FuncDecl, *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause, *syntax.CaseClause:
+		return false, true
+	case *syntax.Stmt:
+		if n.Background || n.Coprocess {
+			return true, true
+		}
+		// The right side of && and || runs only when the left side lets it. A
+		// chain of cds on the left is the usual `cd a && cd b`: taken as run.
+		if b, ok := parent.(*syntax.BinaryCmd); ok && b.Y == n {
+			return false, b.Op == syntax.OrStmt || !cdChain(b.X, env)
+		}
+	}
+	return false, false
+}
+
+// cdChain says whether s is cd, pushd or popd, or such commands joined by &&.
+func cdChain(s *syntax.Stmt, env Env) bool {
+	switch c := s.Cmd.(type) {
+	case *syntax.CallExpr:
+		if len(c.Args) == 0 {
+			return false
+		}
+		w, _ := literal(c.Args[0], env)
+		switch w {
+		case "cd", "pushd", "popd":
+			return true
+		}
+	case *syntax.BinaryCmd:
+		return c.Op == syntax.AndStmt && cdChain(c.X, env) && cdChain(c.Y, env)
+	}
+	return false
+}
+
 // passessSettings point passess at another config or agent: an agent's
 // command has no business setting them.
 var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOCK": true}
@@ -361,6 +471,9 @@ var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_R
 // and the pushd stack; other commands leave both as they are. A directory it
 // cannot tell (cd "$X", cd -) becomes "".
 func afterCd(args []string, cur string, stack []string, home string) (string, []string) {
+	for len(args) > 0 && (filepath.Base(args[0]) == "builtin" || filepath.Base(args[0]) == "command") {
+		args = args[1:]
+	}
 	if len(args) == 0 {
 		return cur, stack
 	}
@@ -777,7 +890,7 @@ func checkCall(args []string, cwd string, env Env) string {
 	// Commands that write the files they name: none may touch the config.
 	if writers[name] || copiers[name] {
 		for _, a := range args[1:] {
-			if a != "" && !strings.HasPrefix(a, "-") && inConfig(abs(a, cwd, env.Home), env) {
+			if a != "" && !strings.HasPrefix(a, "-") && writesConfig(a, cwd, env) {
 				if name != "sed" || slices.ContainsFunc(args[1:], func(f string) bool { return strings.HasPrefix(f, "-i") }) {
 					return configReason(a)
 				}
