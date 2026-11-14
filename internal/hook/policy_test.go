@@ -440,6 +440,22 @@ func TestUnknownDirectory(t *testing.T) {
 	}
 }
 
+// A word the shell builds at run time in the place where the subcommand is
+// decided is refused, as it is in the first place.
+func TestUnreadableThirdWord(t *testing.T) {
+	shellVerdicts(t, []string{
+		`passess agent $S`, `passess agent "$S"`, `passess agent {stop,x}`, `passess agent $(echo stop)`,
+		`S=stop; passess agent $S`, `passess agent st${X}op`, `passess agent $'st\x6fp'`, `passess agent $'stop'`,
+		`passess mcp $S`, `passess profile "$S" web`, `$P agent $S`, `P=passess; $P agent $S`, `sudo passess agent $S`,
+		`timeout 5 passess agent $S`, `\passess agent $S`, `passess migrate env .env $A`, `passess uninstall $A`,
+		`passess install --no-hooks $A`, `$P agent {stop,x}`,
+	}, []string{
+		`passess agent status`, `$P agent status`, `passess list $X`, `passess exec -s API_KEY -- gh api $URL`,
+		`passess agent config --json`, `passess mcp list --json`, `$GIT agent status`, `$CC -o x x.c`, `passess migrate env .env`,
+		`passess profile list`, `passess agent`, `passess exec -s API_KEY -- make $T`,
+	})
+}
+
 // $'…' is static text the shell decodes; a brace expansion of static
 // alternatives is every one of them.
 func TestAnsiCQuotingAndBraces(t *testing.T) {
@@ -457,6 +473,25 @@ func TestAnsiCQuotingAndBraces(t *testing.T) {
 	if got, want := ansiC(`a\x41\101\u00e9\n\q\c`), "aAA\u00e9\n\\q\\c"; got != want {
 		t.Errorf("ansiC decoded to %q, want %q", got, want)
 	}
+}
+
+// A wrapper option the table does not list, or a cluster of short flags, or
+// a long option with a separate value, cannot make an option's argument the
+// program: every word that is passess is tried.
+func TestWrapperUnknownOptions(t *testing.T) {
+	shellVerdicts(t, []string{
+		`sudo -nu root passess agent stop`, `xargs --max-args 1 passess agent stop`, `sudo -Hu root passess agent stop`,
+		`sudo --unknown-opt value passess helper API_KEY`, `timeout --foreground 5 passess agent stop`,
+		`timeout -vs KILL 5 passess agent stop`, `nice --unknown 3 passess agent stop`, `xargs -tn1 passess agent stop`,
+		`stdbuf -oL --foo bar passess agent stop`, `nohup foo passess agent stop`, `sudo -u $U passess agent stop`,
+		`xargs --max-procs 4 --max-args 1 passess agent approve`, `caffeinate -di -t 5 passess agent stop`,
+		`sudo --other-flag x passess agent $S`, `sudo -nu root \passess agent stop`, `sudo -ku root $P agent stop`,
+		`sudo --role r --type t passess add X`, `/usr/bin/time -f %e passess agent serve`,
+	}, []string{
+		`sudo -nu root ls`, `xargs --max-args 1 echo`, `timeout 5 make test`, `sudo -u root grep passess README.md`,
+		`sudo -u root cat passess.log`, `xargs -tn1 echo`, `sudo --unknown-opt value ls`, `nice --unknown 3 make`,
+		`xargs grep -l passess`, `sudo -u $U make test`, `timeout -vs KILL 5 make`, `sudo -u root passess list`,
+	})
 }
 
 // A function body is checked where the function is called, with the

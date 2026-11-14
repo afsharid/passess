@@ -333,7 +333,8 @@ var wrapperOptions = map[string]struct {
 	takes      []string
 	positional int
 }{
-	"sudo":       {[]string{"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t", "--user", "--group"}, 0},
+	"sudo": {[]string{"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t", "--user", "--group", "--host",
+		"--prompt", "--chdir", "--role", "--type", "--close-from", "--other-user", "--command-timeout"}, 0},
 	"doas":       {[]string{"-u", "-C"}, 0},
 	"nice":       {[]string{"-n", "--adjustment"}, 0},
 	"timeout":    {[]string{"-s", "-k", "--signal", "--kill-after"}, 1},
@@ -341,7 +342,8 @@ var wrapperOptions = map[string]struct {
 	"stdbuf":     {[]string{"-i", "-o", "-e"}, 0},
 	"caffeinate": {[]string{"-t", "-w"}, 0},
 	"time":       {[]string{"-f", "-o"}, 0},
-	"xargs":      {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I"}, 0},
+	"xargs": {[]string{"-n", "-L", "-P", "-s", "-d", "-E", "-a", "-I", "--max-args", "--max-lines", "--max-procs", "--max-chars",
+		"--delimiter", "--eof", "--arg-file"}, 0},
 }
 
 func checkShell(cmd string, at where, env Env) string {
@@ -933,7 +935,18 @@ func checkParam(name string, env Env) string {
 
 func checkCall(args []string, at where, env Env) string {
 	for len(args) > 0 && wrappers[filepath.Base(args[0])] {
-		args = skipOptions(filepath.Base(args[0]), args[1:])
+		rest := args[1:]
+		args = skipOptions(filepath.Base(args[0]), rest)
+		// An option the table does not know may take a word, which would then
+		// stand for the program: every word that is passess, or cannot be read,
+		// is tried as the program.
+		for i, w := range rest {
+			if w == "" || filepath.Base(w) == "passess" {
+				if r := checkCall(rest[i:], at, env); r != "" {
+					return r
+				}
+			}
+		}
 	}
 	if len(args) == 0 {
 		return ""
@@ -941,7 +954,9 @@ func checkCall(args []string, at where, env Env) string {
 	if args[0] == "" {
 		// A program built from a variable or a substitution may be passess.
 		// The refusals no other program shares apply to it: `$P agent stop`.
-		if len(args) > 1 && (args[1] == "helper" || (len(args) > 2 && args[1] == "agent" && slices.Contains([]string{"stop", "serve", "approve"}, args[2]))) {
+		agent := len(args) > 2 && args[1] == "agent" && (args[2] == "" || slices.Contains([]string{"stop", "serve", "approve"}, args[2]))
+		sets := len(args) > 2 && (args[1] == "mcp" || args[1] == "profile") && args[2] == ""
+		if len(args) > 1 && (args[1] == "helper" || agent || sets) {
 			return checkCall(append([]string{"passess"}, args[1:]...), at, env)
 		}
 		return ""
@@ -1024,9 +1039,12 @@ func checkCall(args []string, at where, env Env) string {
 		return checkCall(rest, at, env)
 	case "passess":
 		switch {
-		case len(args) > 1 && args[1] == "":
-			// $V, $(…) or $'…' as the subcommand: what runs cannot be told
-			// from the text, and every subcommand an agent may run is plain.
+		case len(args) > 1 && args[1] == "",
+			// the same where a second word decides, or a flag that makes a command apply
+			len(args) > 2 && args[2] == "" && (args[1] == "agent" || args[1] == "mcp" || args[1] == "profile"),
+			slices.Contains([]string{"migrate", "install", "uninstall"}, sub(1)) && slices.Contains(args[2:], ""):
+			// $V, $(…) or a brace expansion as the subcommand: what runs cannot
+			// be told from the text, and every subcommand an agent may run is plain.
 			return "passess: write the passess subcommand out as plain text; one built from a variable or a substitution " +
 				"cannot be checked, so it is refused."
 		case sub(1) == "agent" && (sub(2) == "stop" || sub(2) == "serve"):
@@ -1178,11 +1196,28 @@ func skipOptions(wrapper string, args []string) []string {
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 		opt := args[0]
 		args = args[1:]
-		if slices.Contains(spec.takes, opt) && len(args) > 0 {
+		if takesWord(spec.takes, opt) && len(args) > 0 {
 			args = args[1:]
 		}
 	}
 	return args[min(spec.positional, len(args)):]
+}
+
+// takesWord says whether opt, an option or a cluster of short flags, takes
+// the next word: the last flag of a cluster does (-nu root); one before the
+// end has its argument attached (-uroot).
+func takesWord(takes []string, opt string) bool {
+	if slices.Contains(takes, opt) {
+		return true
+	}
+	if len(opt) > 2 && opt[1] != '-' {
+		for i := 1; i < len(opt); i++ {
+			if slices.Contains(takes, "-"+opt[i:i+1]) {
+				return i == len(opt)-1
+			}
+		}
+	}
+	return false
 }
 
 // --- prompts, results, session start ---
