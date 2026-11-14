@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/afsharid/passess/internal/outbound"
 	"github.com/afsharid/passess/internal/redact"
 )
 
@@ -41,14 +42,16 @@ func sameOrigin(a, b *url.URL) bool {
 }
 
 // newClient is the HTTP client for endpoint: it adds headers to the
-// endpoint's own requests and follows no redirect to another origin.
+// endpoint's own requests and follows no redirect to another origin. It
+// ignores the caller's proxy and CA variables, so a header only reaches the
+// endpoint itself.
 func newClient(endpoint string, headers http.Header) (*http.Client, error) {
 	origin, err := url.Parse(endpoint)
 	if err != nil || origin.Host == "" {
 		return nil, errors.New("the MCP server URL is not a URL")
 	}
 	return &http.Client{
-		Transport: headerTransport{base: http.DefaultTransport, origin: origin, headers: headers},
+		Transport: headerTransport{base: outbound.Transport(), origin: origin, headers: headers},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("too many redirects")

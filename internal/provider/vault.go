@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afsharid/passess/internal/outbound"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
 )
@@ -113,7 +114,7 @@ func (v *Vault) client() (*http.Client, error) {
 	if v.Client != nil {
 		return v.Client, nil
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr := outbound.Transport()
 	if v.CACert != "" {
 		pem, err := os.ReadFile(v.CACert)
 		if err != nil {

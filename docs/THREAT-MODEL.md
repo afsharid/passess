@@ -37,7 +37,9 @@ where the protection stops. Read the last section before relying on it.
   `curl` can be sent through `exec` to any URL the agent chooses. `passess http` closes
   that for secrets that name their `hosts`: passess sends the request itself, only to
   those hosts, over https, and follows redirects only among them, and no child process
-  holds the value. It binds the host, not what the request does there: an agent can
+  holds the value. It ignores the caller's proxy variables and `SSL_CERT_FILE` /
+  `SSL_CERT_DIR`, so a proxy the caller names cannot read the request; the same holds
+  for the remote MCP bridge and the Vault client. It binds the host, not what the request does there: an agent can
   still use a token for anything the API allows it. Programs other than curl (gh, a
   cloud CLI) reach their hosts through `exec` as before; a transparent proxy for them
   is future work.
