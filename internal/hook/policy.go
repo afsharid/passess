@@ -160,10 +160,10 @@ func checkMCP(tool string) string {
 // --- files ---
 
 var (
-	envFile     = regexp.MustCompile(`^\.env(rc|\..+)?$`)
+	envFile     = regexp.MustCompile(`(?i)^\.env(rc|\..+)?$`)
 	envTemplate = regexp.MustCompile(`(?i)\.(example|sample|template|dist|defaults?|schema)$`)
 	keyFile     = regexp.MustCompile(`(?i)\.(pem|key|p12|pfx|jks|keystore)$`)
-	sshKey      = regexp.MustCompile(`^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$`)
+	sshKey      = regexp.MustCompile(`(?i)^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$`)
 )
 
 // credentialPaths are files under HOME that hold credentials by design or
@@ -175,6 +175,10 @@ var credentialPaths = func() []string {
 	}
 	return out
 }()
+
+// prog is the name a program is known by: its base name in lower case, since
+// the owner's volume runs PASSESS and Cat as passess and cat.
+func prog(path string) string { return strings.ToLower(filepath.Base(path)) }
 
 // where is the directory relative paths resolve against. dir is "" when it
 // is not known; blind then says that a relative name may still be in a
@@ -211,8 +215,10 @@ func inConfig(p string, env Env) bool {
 	return false
 }
 
+// within says whether p is dir or below it. Case does not count: the owner's
+// volume does not tell .AWS from .aws, so neither does the policy.
 func within(p, dir string) bool {
-	rel, err := filepath.Rel(dir, p)
+	rel, err := filepath.Rel(strings.ToLower(dir), strings.ToLower(p))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
@@ -259,7 +265,7 @@ var credentialNames = func() []string {
 	var out []string
 	for _, c := range credentialPaths {
 		if b := filepath.Base(c); b != "config" {
-			out = append(out, b)
+			out = append(out, strings.ToLower(b))
 		}
 	}
 	return out
@@ -271,7 +277,7 @@ func configWrite(p string, at where, env Env) string {
 	switch {
 	case inConfig(abs(p, at.dir, env.Home), env):
 		return configReason(p)
-	case unplaced(p, at) && strings.HasPrefix(filepath.Base(p), "config.toml"):
+	case unplaced(p, at) && strings.HasPrefix(strings.ToLower(filepath.Base(p)), "config.toml"):
 		return "passess: " + p + " may be the passess config (" + lostCd + "), which decides which program receives which secret. " +
 			"Write it by its full path in a command of its own, or tell the user what you need and let them do it in Passess.app " +
 			"or with `passess add` or `passess set`."
@@ -283,7 +289,7 @@ func configWrite(p string, at where, env Env) string {
 func deniedPath(p string, at where, env Env) string {
 	full := abs(p, at.dir, env.Home)
 	base := filepath.Base(full)
-	if unplaced(p, at) && slices.Contains(credentialNames, base) {
+	if unplaced(p, at) && slices.Contains(credentialNames, strings.ToLower(base)) {
 		return "may hold credentials (" + lostCd + ")"
 	}
 	switch {
@@ -439,13 +445,13 @@ func checkShell(cmd string, at where, env Env) string {
 				if len(args) > 0 {
 					program = args[0]
 				}
-				if filepath.Base(program) != "passess" && len(args) > 0 {
+				if prog(program) != "passess" && len(args) > 0 {
 					others = true
 				}
 				for _, a := range n.Assigns {
 					if reason == "" && a.Name != nil {
 						reason = checkAssign(a.Name.Value, program)
-						if pathSettings[a.Name.Value] && filepath.Base(program) != "passess" {
+						if pathSettings[a.Name.Value] && prog(program) != "passess" {
 							steered = a.Name.Value
 						}
 					}
@@ -464,9 +470,9 @@ func checkShell(cmd string, at where, env Env) string {
 					risk = guarded(cur)
 				}
 				cur, stack = next, st
-				switch filepath.Base(program) {
+				switch prog(program) {
 				case "eval", "source", ".": // they run commands, a cd among them, in this shell
-					reach := filepath.Base(program) == "eval" && evalReaches(args[1:], cur, env)
+					reach := prog(program) == "eval" && evalReaches(args[1:], cur, env)
 					unknown((cur == "" && risk) || reach, cur)
 				}
 			case *syntax.DeclClause: // export, declare, typeset, local, readonly
@@ -483,7 +489,7 @@ func checkShell(cmd string, at where, env Env) string {
 	run(file)
 	// HOME and the like set apart from the passess call, by export or for a
 	// shell that runs it, still reach it: the whole text is searched.
-	if reason == "" && steered != "" && strings.Contains(cmd, "passess") {
+	if reason == "" && steered != "" && strings.Contains(strings.ToLower(cmd), "passess") {
 		reason = checkAssign(steered, "passess")
 	}
 	// A path in quotes, a variable or a script can name the socket too, so
@@ -623,7 +629,7 @@ func checkAssign(name, program string) string {
 	if detect.IsMarker(name) {
 		return markerReason(name)
 	}
-	if passessSettings[name] || (pathSettings[name] && filepath.Base(program) == "passess") {
+	if passessSettings[name] || (pathSettings[name] && prog(program) == "passess") {
 		return fmt.Sprintf("passess: setting %s in a command points passess at another config or agent than the user's, "+
 			"around the policy and the approvals the user set up. Run passess without it; its settings are the user's to change.", name)
 	}
@@ -639,7 +645,8 @@ const socketReason = "passess: that command talks to the passess agent's socket 
 	"through `passess exec -s NAME -- command`; the agent's approval questions are the user's to answer."
 
 func mentionsAgent(text string, env Env) bool {
-	return strings.Contains(text, "agent.sock") || (env.AgentSocket != "" && strings.Contains(text, env.AgentSocket))
+	text = strings.ToLower(text)
+	return strings.Contains(text, "agent.sock") || (env.AgentSocket != "" && strings.Contains(text, strings.ToLower(env.AgentSocket)))
 }
 
 // checkDecl refuses the forms that print variables: export -p, bare
@@ -939,14 +946,14 @@ func checkParam(name string, env Env) string {
 }
 
 func checkCall(args []string, at where, env Env) string {
-	for len(args) > 0 && wrappers[filepath.Base(args[0])] {
+	for len(args) > 0 && wrappers[prog(args[0])] {
 		rest := args[1:]
-		args = skipOptions(filepath.Base(args[0]), rest)
+		args = skipOptions(prog(args[0]), rest)
 		// An option the table does not know may take a word, which would then
 		// stand for the program: every word that is passess, or cannot be read,
 		// is tried as the program.
 		for i, w := range rest {
-			if w == "" || filepath.Base(w) == "passess" {
+			if w == "" || prog(w) == "passess" {
 				if r := checkCall(rest[i:], at, env); r != "" {
 					return r
 				}
@@ -966,7 +973,7 @@ func checkCall(args []string, at where, env Env) string {
 		}
 		return ""
 	}
-	name := filepath.Base(args[0])
+	name := prog(args[0])
 	sub := func(i int) string {
 		if i < len(args) {
 			return args[i]

@@ -593,3 +593,18 @@ func TestProtectedDir(t *testing.T) {
 		}
 	}
 }
+
+// The owner's volume is case-insensitive, so a name in another case is the
+// same file or program.
+func TestCaseFolded(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat .ENV`, `cat .Env`, `CAT .env`, `cat ~/.AWS/credentials`, `cat ~/.aws/Credentials`, `cat ~/.NPMRC`, `cat ~/.SSH/ID_RSA`,
+		`cat ~/.local/state/PASSESS/backups/x`, `echo x >> ~/.config/Passess/config.toml`,
+		`cd ~/.Config/passess && echo x >> config.toml`, `cd ~/.config/passess && echo x >> CONFIG.TOML`,
+		`PASSESS agent stop`, `Passess agent stop`, `/opt/homebrew/bin/PASSESS add X --ref keychain://x`, `PASSESS helper`, `Printenv`,
+		`SUDO passess agent stop`, `Sudo -u root PASSESS agent stop`, `cd ~/.AWS; cat CREDENTIALS`, `Eval 'cat .env'`, `SED -i s/a/b/ ~/.CONFIG/passess/config.toml`,
+	}, []string{
+		`cat README.MD`, `CAT readme.md`, `PASSESS list`, `Passess exec -s API_KEY -- gh api user`, `cat .ENVIRONMENT`, `cat ~/.AWS/config`,
+		`cat .ENV.EXAMPLE`, `Make test`, `cat ~/.CONFIG/other/config.toml`,
+	})
+}
