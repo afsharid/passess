@@ -276,6 +276,70 @@ func protectedDir(d string, env Env, above bool) bool {
 	return home && above && within(env.Home, d)
 }
 
+// unreadableDir stands for a directory that a word builds at run time:
+// "$ROOT/.env" is …/.env.
+const unreadableDir = "…/"
+
+// guardedBase says whether a file name is one the hook refuses to read in any
+// directory: an env or key file, or a credential file with a name of its own
+// (config.json, auth.json and hosts.yml are too common to stand for one).
+func guardedBase(base string) bool {
+	b := strings.ToLower(base)
+	if envFile.MatchString(strings.TrimRight(b, "*")) && !envTemplate.MatchString(b) {
+		return true
+	}
+	return sshKey.MatchString(b) || keyFile.MatchString(b) ||
+		(slices.Contains(credentialNames, b) && !slices.Contains([]string{"config.json", "config.toml", "auth.json", "hosts.yml", "crew"}, b))
+}
+
+// unreadableName is …/NAME for a word whose directory part the shell builds at
+// run time and whose last segment is a literal guarded name: "$ROOT/.env". It
+// is "" for any other word, which then matches nothing.
+func unreadableName(w *syntax.Word, env Env) string {
+	var parts []syntax.WordPart
+	var flat func([]syntax.WordPart)
+	flat = func(ps []syntax.WordPart) {
+		for _, p := range ps {
+			if q, ok := p.(*syntax.DblQuoted); ok {
+				flat(q.Parts)
+			} else {
+				parts = append(parts, p)
+			}
+		}
+	}
+	flat(w.Parts)
+	tail, i := "", len(parts)
+	for ; i > 0; i-- {
+		s, ok := literal(&syntax.Word{Parts: parts[i-1 : i]}, env)
+		if !ok {
+			break
+		}
+		tail = s + tail
+	}
+	if i == 0 || !strings.Contains(tail, "/") {
+		return ""
+	}
+	if seg := tail[strings.LastIndex(tail, "/")+1:]; guardedBase(seg) {
+		return unreadableDir + seg
+	}
+	return ""
+}
+
+// credentialDir says whether full is a directory of credential files, or all
+// that is in one (dir/*); HOME is not, though it holds some.
+func credentialDir(full string, env Env) bool {
+	for _, c := range credentialPaths {
+		dir := filepath.Dir(filepath.Join(env.Home, c))
+		if env.Home == "" || strings.EqualFold(dir, env.Home) {
+			continue
+		}
+		if strings.EqualFold(full, dir) || (filepath.Base(full) == "*" && strings.EqualFold(filepath.Dir(full), dir)) {
+			return true
+		}
+	}
+	return false
+}
+
 // credentialNames are the base names of the credential files under HOME; a
 // bare "config" (.kube/config) is too common a name to stand for one.
 var credentialNames = func() []string {
@@ -308,6 +372,9 @@ func deniedPath(p string, at where, env Env) string {
 	base := filepath.Base(full)
 	if unplaced(p, at, env.Home) && slices.Contains(credentialNames, strings.ToLower(base)) {
 		return "may hold credentials (" + lostCd + ")"
+	}
+	if strings.HasPrefix(p, unreadableDir) && guardedBase(base) {
+		return "may hold credentials (the directory it is in is built at run time)"
 	}
 	switch {
 	case envFile.MatchString(strings.TrimRight(base, "*")) && !envTemplate.MatchString(base):
@@ -466,6 +533,11 @@ func checkShell(cmd string, at where, env Env) string {
 				p, ok := literal(n.Word, env)
 				switch {
 				case !ok:
+					if u := unreadableName(n.Word, env); u != "" && (n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut) {
+						if why := deniedPath(u, here(), env); why != "" {
+							reason = readReason(u, why)
+						}
+					}
 				case n.Op == syntax.RdrIn || n.Op == syntax.RdrInOut:
 					if why := deniedPath(p, here(), env); why != "" {
 						reason = readReason(p, why)
@@ -476,7 +548,11 @@ func checkShell(cmd string, at where, env Env) string {
 			case *syntax.CallExpr:
 				var args []string
 				for _, w := range n.Args {
-					args = append(args, words(w, env)...) // a non-literal word stays "" and matches nothing
+					ws := words(w, env) // a non-literal word stays "" and matches nothing
+					if len(ws) == 1 && ws[0] == "" {
+						ws[0] = unreadableName(w, env)
+					}
+					args = append(args, ws...)
 				}
 				program := ""
 				if len(args) > 0 {
@@ -1265,6 +1341,10 @@ func checkCall(args []string, at where, env Env) string {
 		for _, a := range operands {
 			if why := deniedPath(a, at, env); why != "" {
 				return readReason(a, why)
+			}
+			// a recursive grep or copy reads every file in it
+			if credentialDir(abs(a, at.dir, env.Home), env) {
+				return readReason(a, "holds credentials")
 			}
 		}
 	}
