@@ -87,7 +87,7 @@ func runExec(st *Streams, args []string) int {
 	if code != 0 {
 		return code
 	}
-	prog, code := checkExec(st, u, proj, argv, wanted, exec.LookPath)
+	prog, code := checkExec(st, u, proj, argv, wanted, "", exec.LookPath)
 	if code != 0 {
 		return code
 	}
@@ -114,9 +114,9 @@ type secretSource interface {
 
 // checkExec finds argv's program and decides whether every wanted secret may
 // go to it. Refusals go to st.Stderr; a non-zero code means nothing may run.
-func checkExec(st *Streams, u *config.User, proj *config.Project, argv []string, wanted secretFlags,
+func checkExec(st *Streams, u *config.User, proj *config.Project, argv []string, wanted secretFlags, dir string,
 	lookPath func(string) (string, error)) (policy.Program, int) {
-	prog, err := policy.Inspect(argv[0], lookPath)
+	prog, err := policy.InspectIn(argv[0], dir, lookPath)
 	if err != nil {
 		return prog, failf(st, ExitNotFound, "%v", err)
 	}

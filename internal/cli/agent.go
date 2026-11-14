@@ -702,7 +702,7 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 	defer close(quit)
 	frames := clientFrames(c, quit)
 
-	prog, code := checkExec(st, u, proj, req.Argv, wanted, lookPathIn(req.Env, req.Dir))
+	prog, code := checkExec(st, u, proj, req.Argv, wanted, req.Dir, lookPathIn(req.Env, req.Dir))
 	if code != 0 {
 		return code
 	}
@@ -764,7 +764,7 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 		}
 		names = append(names, w.Name)
 	}
-	prog, err := policy.Inspect(req.Argv[0], lookPathIn(req.Env, req.Dir))
+	prog, err := policy.InspectIn(req.Argv[0], req.Dir, lookPathIn(req.Env, req.Dir))
 	if err != nil {
 		return failf(st, ExitNotFound, "%v", err)
 	}

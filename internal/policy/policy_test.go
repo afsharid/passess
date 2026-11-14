@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -491,5 +492,236 @@ func TestUnchangedCatchesInterpreterSwap(t *testing.T) {
 	}
 	if err := p.Unchanged(); err == nil {
 		t.Fatal("a swapped interpreter went unnoticed")
+	}
+}
+
+// A relative interpreter on the #! line is found from the directory the
+// program runs in. The agent daemon runs from /, so it is given that directory.
+func TestRelativeShebangUsesTheRunDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	for _, line := range []string{"#!./myint", "#!/usr/bin/env ./myint", "#!/usr/bin/env -S ./myint -e"} {
+		script := filepath.Join(dir, "rel")
+		writeScript(t, script, line)
+		p, err := InspectIn(script, dir, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); d.Allowed {
+			t.Errorf("%q with the run directory reached a shell (families %v)", line, p.Families)
+		}
+		// A directory without that file leaves nothing to judge: no failure.
+		other := t.TempDir()
+		p, err = InspectIn(script, other, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := Check("TOKEN", p, nil); !d.Allowed && !strings.Contains(line, "env") {
+			t.Errorf("%q with an empty directory was refused: %+v", line, d)
+		}
+	}
+}
+
+// Inspect on its own judges a relative interpreter against the process's
+// working directory, where a direct run starts the program.
+func TestRelativeShebangUsesTheProcessDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	script := filepath.Join(dir, "rel")
+	writeScript(t, script, "#!./myint")
+	t.Chdir(dir)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("relative interpreter reached a shell (families %v)", p.Families)
+	}
+}
+
+// What the #! line names must still be the file that was judged: a link
+// repointed after the check changes where the kernel goes.
+func TestUnchangedCatchesInterpreterLinkRetarget(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	link := filepath.Join(dir, "interp")
+	if err := os.Symlink(cat, link); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+link)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Fatalf("the harmless interpreter was refused: %+v", d)
+	}
+	// Control: the same link made again changes nothing.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cat, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("a link made again to the same file: %v", err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sh, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("retargeted link: %v, want ErrChanged", err)
+	}
+}
+
+// A link in a directory on the way counts the same as the final link.
+func TestUnchangedCatchesDirectoryLinkRetarget(t *testing.T) {
+	dir := t.TempDir()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("no cat on PATH")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	good, bad := filepath.Join(dir, "good"), filepath.Join(dir, "bad")
+	for d, target := range map[string]string{good: cat, bad: sh} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(d, "interp")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	via := filepath.Join(dir, "via")
+	if err := os.Symlink(good, via); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+filepath.Join(via, "interp"))
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Fatalf("the harmless interpreter was refused: %+v", d)
+	}
+	if err := os.Remove(via); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bad, via); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("retargeted directory link: %v, want ErrChanged", err)
+	}
+}
+
+// An interpreter that was missing when the script was judged and appears
+// afterwards is a change too.
+func TestUnchangedCatchesInterpreterThatAppears(t *testing.T) {
+	dir := t.TempDir()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on PATH")
+	}
+	interp := filepath.Join(dir, "later")
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!"+interp)
+	p, err := Inspect(script, exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); err != nil {
+		t.Fatalf("untouched: %v", err)
+	}
+	if err := os.Symlink(sh, interp); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unchanged(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("interpreter that appeared: %v, want ErrChanged", err)
+	}
+}
+
+// env options that take a value must not be read as the command: the shell
+// after them is the interpreter. An option env does not know is refused as env.
+func TestShebangEnvOptions(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		line string
+		want string // the family that must decide a refusal; "" means allowed
+	}{
+		{"#!/usr/bin/env -u FOO sh", "sh"},
+		{"#!/usr/bin/env -uFOO sh", "sh"},
+		{"#!/usr/bin/env --unset FOO sh", "sh"},
+		{"#!/usr/bin/env --unset=FOO sh", "sh"},
+		{"#!/usr/bin/env -P /bin sh", "sh"},
+		{"#!/usr/bin/env -P/bin:/usr/bin sh", "sh"},
+		{"#!/usr/bin/env -C /tmp sh", "sh"},
+		{"#!/usr/bin/env --chdir=/tmp sh", "sh"},
+		{"#!/usr/bin/env -i -u FOO -u BAR FOO=1 sh", "sh"},
+		{"#!/usr/bin/env -iu FOO sh", "sh"},
+		{"#!/usr/bin/env -S -u FOO sh", "sh"},
+		{"#!/usr/bin/env -S sh -e", "sh"},
+		{"#!/usr/bin/env -- sh", "sh"},
+		{"#!/usr/bin/env -C /tmp ./sh", "env"},
+		{"#!/usr/bin/env -S\"sh\"", "env"},
+		{"#!/usr/bin/env -Ssh", "sh"},
+		{"#!/usr/bin/env -S 'sh -e'", "env"},
+		{"#!/usr/bin/env -a name sh", "env"},
+		{"#!/usr/bin/env --default-signal=INT sh", "env"},
+		{"#!/usr/bin/env -u", "env"},
+		{"#!/usr/bin/env -i", "env"},
+		{"#!/usr/bin/env cat", ""},
+		{"#!/usr/bin/env -i cat", ""},
+		{"#!/usr/bin/env FOO=1 cat", ""},
+		{"#!/usr/bin/env -u FOO cat", ""},
+		{"#!/usr/bin/env -P /bin:/usr/bin cat", ""},
+		{"#!/usr/bin/env -S -u FOO cat", ""},
+	} {
+		script := filepath.Join(dir, "e")
+		writeScript(t, script, tc.line)
+		p, err := Inspect(script, exec.LookPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := Check("TOKEN", p, nil)
+		if tc.want == "" {
+			if !d.Allowed {
+				t.Errorf("%q was refused (families %v): %+v", tc.line, p.Families, d)
+			}
+			continue
+		}
+		if d.Allowed || d.Family != tc.want {
+			t.Errorf("%q: decided by %q (allowed %v, families %v), want a refusal by %q", tc.line, d.Family, d.Allowed, p.Families, tc.want)
+		}
+	}
+}
+
+// Judging a script must not repeat the PATH scan for every file it reads.
+func TestInspectLooksUpReferencesOnce(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "t")
+	writeScript(t, script, "#!/bin/sh")
+	calls := 0
+	lookPath := func(name string) (string, error) {
+		calls++
+		return exec.LookPath(name)
+	}
+	if _, err := Inspect(script, lookPath); err != nil {
+		t.Fatal(err)
+	}
+	if limit := len(lookups) + 4; calls > limit {
+		t.Errorf("Inspect made %d PATH lookups for a #!/bin/sh script, want at most %d", calls, limit)
 	}
 }

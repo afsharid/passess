@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -43,6 +44,18 @@ func (p Program) Unchanged() error {
 		return fmt.Errorf("%w: %s; run the command again", ErrChanged, p.Path)
 	}
 	for _, i := range p.interps {
+		if i.written != "" {
+			now, err := filepath.EvalSymlinks(i.written)
+			if i.path == "" && err != nil {
+				continue // still not there
+			}
+			if abs, aerr := filepath.Abs(now); err != nil || aerr != nil || abs != i.path {
+				return fmt.Errorf("%w: %s; run the command again", ErrChanged, i.written)
+			}
+		}
+		if i.path == "" {
+			continue
+		}
 		if now, err := stampOf(i.path); err != nil || now != i.stamp {
 			return fmt.Errorf("%w: %s; run the command again", ErrChanged, i.path)
 		}
