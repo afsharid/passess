@@ -443,7 +443,8 @@ func checkDecl(n *syntax.DeclClause, env Env) string {
 
 // literal is a word's value when it has no expansion in it but the
 // variables passess finds its config by: "$HOME/.config/passess" names the
-// config as plainly as ~/.config/passess does.
+// config as plainly as ~/.config/passess does. It is the value the shell
+// makes of the word: backslashes are removed as the shell removes them.
 func literal(w *syntax.Word, env Env) (string, bool) {
 	if w == nil {
 		return "", false
@@ -458,12 +459,12 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 			b.WriteString(p.Value)
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
-				if !plain(&b, q, env) {
+				if !plain(&b, q, env, true) {
 					return "", false
 				}
 			}
 		default:
-			if !plain(&b, part, env) {
+			if !plain(&b, part, env, false) {
 				return "", false
 			}
 		}
@@ -472,10 +473,10 @@ func literal(w *syntax.Word, env Env) (string, bool) {
 }
 
 // plain writes a literal part, or the value of a locator, to b.
-func plain(b *strings.Builder, part syntax.WordPart, env Env) bool {
+func plain(b *strings.Builder, part syntax.WordPart, env Env, quoted bool) bool {
 	switch p := part.(type) {
 	case *syntax.Lit:
-		b.WriteString(p.Value)
+		b.WriteString(unescape(p.Value, quoted))
 		return true
 	case *syntax.ParamExp:
 		v, ok := locator(p, env)
@@ -483,6 +484,33 @@ func plain(b *strings.Builder, part syntax.WordPart, env Env) bool {
 		return ok
 	}
 	return false
+}
+
+// unescape removes the backslashes the shell removes: before any character
+// outside double quotes, and before $ ` " \ and a newline inside them. A
+// backslash and a newline are a line continuation and vanish together.
+func unescape(s string, quoted bool) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		next := s[i+1]
+		switch {
+		case next == '\n':
+			i++
+		case !quoted || strings.IndexByte("$`\"\\", next) >= 0:
+			i++
+			b.WriteByte(s[i])
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // locator is the value of $HOME, $XDG_CONFIG_HOME or $PASSESS_CONFIG, which

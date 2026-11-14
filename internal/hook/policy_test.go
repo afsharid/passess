@@ -251,3 +251,38 @@ func TestResultMaskedByTheAgent(t *testing.T) {
 		t.Fatalf("an unreachable agent changed the output: %+v", v)
 	}
 }
+
+// shellVerdicts checks one list of commands that must be refused and one that
+// must pass, run from /home/u/proj.
+func shellVerdicts(t *testing.T, deny, allow []string) {
+	t.Helper()
+	env := testEnv(t)
+	for _, c := range deny {
+		v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env)
+		if !v.Deny || !strings.HasPrefix(v.Reason, "passess: ") {
+			t.Errorf("allowed: %s", c)
+		}
+	}
+	for _, c := range allow {
+		if v := Decide(Event{Kind: Shell, Command: c, CWD: "/home/u/proj"}, env); v.Deny {
+			t.Errorf("denied: %s: %s", c, v.Reason)
+		}
+	}
+}
+
+// The shell removes the backslashes of an unquoted word, and of a quoted one
+// before $ ` " \ and a newline: the guards read the word the shell does.
+func TestBackslashEscapedWords(t *testing.T) {
+	shellVerdicts(t, []string{
+		`cat .e\nv`, `cat \.env`, `cat ~/.aws/cred\entials`, `cat ~/.ssh/id_\rsa`, `cat < .e\nv`,
+		`cat "$HOME"/.aws/cred\entials`, `cat .e\
+nv`, `grep KEY .env\*`,
+		`echo x > ~/.config/pass\ess/config.toml`, `echo x >> ~/.config/pass\ess/config.toml`, `tee -a ~/.config/pass\ess/config.toml`,
+		`cp /tmp/x ~/.config/pass\ess/config.toml`, `cd ~/.config/pass\ess && echo x >> config.toml`,
+		`cat ~/.local/state/pass\ess/backups/x/00-.env`, `sed -i '' s/a/b/ ~/.config/\passess/config.toml`,
+		`echo x > "$HOME"/.config/pass\ess/config.toml`,
+	}, []string{
+		`cat .e\\nv`, `cat ".e\nv"`, `cat '.e\nv'`, `echo a\ b > /tmp/x`, `cat README\.md`, `cat .env.exam\ple`,
+		`echo x > ~/.config/pass\\ess/config.toml`, `echo "\"" > /tmp/x`, `echo \$HOME`,
+	})
+}
