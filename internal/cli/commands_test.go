@@ -312,6 +312,9 @@ ref = "bws://dev/KEY"
 		t.Setenv("CLAUDECODE", "1")
 		for _, s := range []string{"vault", "bws"} {
 			b := backends(t)[s]
+			if s == "bws" && strings.Contains(b.Detail, "not installed") {
+				continue // no bws on this machine: doctor says so before any credential
+			}
 			if !b.OK || !strings.Contains(b.Detail, "configured") {
 				t.Errorf("%s = %+v", s, b)
 			}
