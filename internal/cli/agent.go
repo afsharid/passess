@@ -155,7 +155,7 @@ func printInfo(w io.Writer, in *agent.Info) {
 	fmt.Fprintf(w, "  running  %d command(s); %d since it started\n", in.Jobs, in.Served)
 	fmt.Fprintf(w, "  approve  %d approver(s) connected, %d question(s) open\n", in.Approvers, in.Pending)
 	for _, a := range in.Approvals {
-		fmt.Fprintf(w, "           %s for %s, asked by %s (pid %d), until %s\n", a.Secret, a.Program, a.Anchor.Name, a.Anchor.PID,
+		fmt.Fprintf(w, "           %s for %s, asked by %s (pid %d), until %s\n", visible(a.Secret), visible(a.Program), visible(a.Anchor.Name), a.Anchor.PID,
 			a.Until.Local().Format("Mon 15:04"))
 	}
 }
