@@ -1,6 +1,7 @@
 package outbound
 
 import (
+	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,14 +10,17 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -206,14 +210,6 @@ func TestTransportRejectsServerSignedByCertEnvironmentCA(t *testing.T) {
 // A new non-test file that builds its own client, or uses the default one,
 // fails here. Add a file to the allowlist only after reading outbound.go.
 func TestNoHTTPClientOutsideOutbound(t *testing.T) {
-	banned := regexp.MustCompile(`http\.DefaultTransport|http\.DefaultClient|http\.(Get|Post|Head|PostForm)\(|&?http\.Transport\{|tls\.Dial|tls\.Client\(|net/http/httputil`)
-	client := regexp.MustCompile(`http\.Client\{`)
-	// Files that build a client and take its transport from outbound.Transport().
-	allowClient := map[string]bool{
-		"internal/provider/vault.go":   true,
-		"internal/cli/http.go":         true,
-		"internal/mcpbridge/bridge.go": true,
-	}
 	root := filepath.Join("..", "..")
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -234,19 +230,150 @@ func TestNoHTTPClientOutsideOutbound(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if m := banned.Find(src); m != nil {
-			t.Errorf("%s uses %q; build the client on outbound.Transport()", rel, m)
-		}
-		if client.Match(src) {
-			if !allowClient[rel] {
-				t.Errorf("%s builds an http.Client; add it to the allowlist after it uses outbound.Transport()", rel)
-			} else if !strings.Contains(string(src), "outbound.Transport()") {
-				t.Errorf("%s builds an http.Client without outbound.Transport()", rel)
-			}
+		for _, v := range outboundViolations(rel, src) {
+			t.Errorf("%s: %s", rel, v)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Files that build a client and take its transport from outbound.Transport().
+var allowClient = map[string]bool{
+	"internal/provider/vault.go":   true,
+	"internal/cli/http.go":         true,
+	"internal/mcpbridge/bridge.go": true,
+}
+
+// Names of net/http that a file outside this package must not reach. Client
+// is allowed only in allowClient files, and only beside outbound.Transport().
+var bannedHTTP = map[string]bool{
+	"Transport": true, "DefaultClient": true, "DefaultTransport": true,
+	"Get": true, "Post": true, "Head": true, "PostForm": true,
+}
+
+// MCP SDK transports that dial with their own client unless given one.
+var sdkTransports = map[string]bool{"StreamableClientTransport": true, "SSEClientTransport": true}
+
+// outboundViolations lists what src breaks of the outbound rule. It parses
+// src and resolves the local names of net/http, crypto/tls and the outbound
+// package, so an alias, a dot import, a type use or new(http.Client) counts
+// as the literal does.
+func outboundViolations(rel string, src []byte) []string {
+	f, err := parser.ParseFile(token.NewFileSet(), rel, src, parser.SkipObjectResolution)
+	if err != nil {
+		return []string{"does not parse: " + err.Error()}
+	}
+	var out []string
+	var httpName, tlsName, outboundName string
+	dotHTTP := false
+	for _, im := range f.Imports {
+		path, _ := strconv.Unquote(im.Path.Value)
+		name := ""
+		if im.Name != nil {
+			name = im.Name.Name
+		}
+		switch {
+		case path == "net/http":
+			if name == "." {
+				dotHTTP = true
+			} else if name != "_" {
+				httpName = cmp.Or(name, "http")
+			}
+		case path == "crypto/tls":
+			tlsName = cmp.Or(name, "tls")
+		case path == "net/http/httputil":
+			out = append(out, "imports net/http/httputil; build the client on outbound.Transport()")
+		case strings.HasSuffix(path, "/internal/outbound"):
+			outboundName = cmp.Or(name, "outbound")
+		}
+	}
+	allowed := allowClient[rel]
+	usesOutbound := false
+	check := func(pkg, name string) {
+		switch {
+		case pkg == httpName && httpName != "" || pkg == "" && dotHTTP:
+			ref := "http." + name
+			switch {
+			case bannedHTTP[name]:
+				out = append(out, "uses "+ref+"; build the client on outbound.Transport()")
+			case name == "Client" && !allowed:
+				out = append(out, "uses "+ref+"; add the file to the allowlist after it uses outbound.Transport()")
+			}
+		case pkg == tlsName && tlsName != "" && (name == "Dial" || name == "DialWithDialer" || name == "Client"):
+			out = append(out, "uses tls."+name+"; build the client on outbound.Transport()")
+		case pkg == outboundName && outboundName != "" && name == "Transport":
+			usesOutbound = true
+		}
+	}
+	usesHTTPClient := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.SelectorExpr:
+			if x, ok := n.X.(*ast.Ident); ok {
+				check(x.Name, n.Sel.Name)
+				if x.Name == httpName && httpName != "" && n.Sel.Name == "Client" {
+					usesHTTPClient = true
+				}
+			}
+			if sdkTransports[n.Sel.Name] && rel != "internal/mcpbridge/bridge.go" {
+				out = append(out, "uses "+n.Sel.Name+"; it dials with its own client outside the bridge")
+			}
+		case *ast.Ident:
+			if dotHTTP && n.Name == "Client" {
+				usesHTTPClient = true
+			}
+			if dotHTTP && (bannedHTTP[n.Name] || n.Name == "Client") {
+				check("", n.Name)
+			}
+		}
+		return true
+	})
+	if allowed && usesHTTPClient && !usesOutbound {
+		out = append(out, "uses http.Client without outbound.Transport()")
+	}
+	return out
+}
+
+func TestOutboundViolationsVariants(t *testing.T) {
+	const other = "internal/zz/zz.go"
+	hdr := "package zz\n"
+	cases := []struct {
+		name, rel, src string
+		want           bool
+	}{
+		{"literal", other, hdr + "import \"net/http\"\nvar _ = &http.Client{}\n", true},
+		{"zero value", other, hdr + "import \"net/http\"\nvar _ http.Client\n", true},
+		{"new", other, hdr + "import \"net/http\"\nvar _ = new(http.Client)\n", true},
+		{"pointer type", other, hdr + "import \"net/http\"\nvar _ *http.Client\n", true},
+		{"alias", other, hdr + "import h \"net/http\"\nvar _ = &h.Client{}\n", true},
+		{"alias default transport", other, hdr + "import h \"net/http\"\nvar _ = h.DefaultTransport\n", true},
+		{"alias get", other, hdr + "import h \"net/http\"\nfunc f() { _, _ = h.Get(\"x\") }\n", true},
+		{"dot import client", other, hdr + "import . \"net/http\"\nvar _ = &Client{}\n", true},
+		{"dot import get", other, hdr + "import . \"net/http\"\nfunc f() { _, _ = Get(\"x\") }\n", true},
+		{"default client", other, hdr + "import \"net/http\"\nvar _ = http.DefaultClient\n", true},
+		{"post form", other, hdr + "import \"net/http\"\nfunc f() { _, _ = http.PostForm(\"x\", nil) }\n", true},
+		{"transport struct", other, hdr + "import \"net/http\"\nvar _ = &http.Transport{}\n", true},
+		{"transport zero value", other, hdr + "import \"net/http\"\nvar _ http.Transport\n", true},
+		{"sdk transport without client", other, hdr + "import \"example.test/sdk/mcp\"\nvar _ = &mcp.StreamableClientTransport{Endpoint: \"x\"}\n", true},
+		{"sse transport", other, hdr + "import \"example.test/sdk/mcp\"\nvar _ = &mcp.SSEClientTransport{}\n", true},
+		{"allowlisted without outbound", "internal/cli/http.go", hdr + "import \"net/http\"\nvar _ = &http.Client{}\n", true},
+		{"allowlisted aliased outbound", "internal/cli/http.go", hdr + "import (\n\t\"net/http\"\n\to \"github.com/afsharid/passess/internal/outbound\"\n)\nvar _ = &http.Client{Transport: o.Transport()}\n", false},
+		{"allowlisted with outbound", "internal/cli/http.go", hdr + "import (\n\t\"net/http\"\n\t\"github.com/afsharid/passess/internal/outbound\"\n)\nvar _ = &http.Client{Transport: outbound.Transport()}\n", false},
+		{"allowlisted default transport", "internal/cli/http.go", hdr + "import (\n\t\"net/http\"\n\t\"github.com/afsharid/passess/internal/outbound\"\n)\nvar _ = outbound.Transport\nvar _ = http.DefaultTransport\n", true},
+		{"bridge sdk transport", "internal/mcpbridge/bridge.go", hdr + "import (\n\t\"net/http\"\n\t\"example.test/sdk/mcp\"\n\t\"github.com/afsharid/passess/internal/outbound\"\n)\nvar _ = &http.Client{Transport: outbound.Transport()}\nvar _ = &mcp.StreamableClientTransport{}\n", false},
+		{"types only", other, hdr + "import \"net/http\"\nvar _ http.RoundTripper\nvar _ = http.MethodGet\nvar _ = http.Header{}\nfunc f(r *http.Request) {}\n", false},
+		{"no net/http", other, hdr + "type T struct{}\nfunc (T) Get() {}\nvar _ = T{}\n", false},
+		{"local Client without import", other, hdr + "type http struct{ Client int }\nvar x http\nvar _ = x.Client\n", false},
+		{"tls dial", other, hdr + "import \"crypto/tls\"\nfunc f() { _, _ = tls.Dial(\"tcp\", \"x\", nil) }\n", true},
+		{"httputil", other, hdr + "import \"net/http/httputil\"\nvar _ = httputil.NewSingleHostReverseProxy\n", true},
+	}
+	for _, c := range cases {
+		got := outboundViolations(c.rel, []byte(c.src))
+		if (len(got) > 0) != c.want {
+			t.Errorf("%s: want violation=%v, got %v", c.name, c.want, got)
+		}
 	}
 }
