@@ -667,7 +667,7 @@ func (s *agentServer) exec(c *agent.Conn, req agent.Request, files []*os.File) (
 			entry.Secrets = append(entry.Secrets, w.Name)
 		}
 	}
-	chain, _ := agent.Ancestry(c.Peer.PID)
+	chain := peerChain(c.Peer.PID)
 	anchor, anchored := agent.Anchor(chain)
 	if anchored {
 		entry.Anchor = fmt.Sprintf("%s (%d)", anchor.Name, anchor.PID)
@@ -768,7 +768,7 @@ func (s *agentServer) ask(c *agent.Conn, req agent.Request, msg io.Writer) int {
 	if err != nil {
 		return failf(st, ExitNotFound, "%v", err)
 	}
-	chain, _ := agent.Ancestry(c.Peer.PID)
+	chain := peerChain(c.Peer.PID)
 	anchor, anchored := agent.Anchor(chain)
 	quit := make(chan struct{})
 	defer close(quit)

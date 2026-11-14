@@ -53,6 +53,11 @@ func Truncated(chain []Proc) bool {
 	return len(chain) > 0 && chain[len(chain)-1].PPID > 1
 }
 
+// Unreadable stands in for the chain of a process passess cannot read (no pid,
+// pid 1, a process that has gone): one process whose parent is unknown. Truncated
+// reports it, and Anchor finds no anchor in it, so nothing is remembered.
+func Unreadable(pid int) []Proc { return []Proc{{PID: pid, PPID: 2, Name: "unknown"}} }
+
 // Unidentified stands for the coding agent a truncated chain may hide, where
 // a name is needed: it is in no clients list, so a secret with one refuses it.
 const Unidentified = "an unidentified caller"

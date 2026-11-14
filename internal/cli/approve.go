@@ -72,6 +72,7 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 		return 0
 	}
 	slices.Sort(need)
+	need = slices.Compact(need)
 	family := policy.Family(prog.Name)
 	remember := anchored && u.Agent.ApprovalTTL > 0
 	now := time.Now()
@@ -322,11 +323,7 @@ func (s *agentServer) approvals(u *config.User) []agent.Approval {
 // serveApprover sends questions to an approver and settles them with its
 // answers, for as long as it stays connected.
 func (s *agentServer) serveApprover(c *agent.Conn) {
-	chain, err := agent.Ancestry(c.Peer.PID)
-	if err == nil {
-		err = approverGate(chain)
-	}
-	if err != nil {
+	if err := approverGate(peerChain(c.Peer.PID)); err != nil {
 		_ = c.Write(agent.Frame{Error: err.Error()})
 		return
 	}
@@ -378,14 +375,30 @@ func (s *agentServer) serveApprover(c *agent.Conn) {
 	}
 }
 
+// peerChain is the process chain of the peer with pid, as the agent sees it. A
+// peer passess cannot identify (pid 0 or 1, a process that has gone, an empty
+// chain) gets agent.Unreadable, which counts as an unidentified caller: the
+// kernel gave no pid, or the peer left before the walk, and either may hide a
+// harness, as a detached child does.
+func peerChain(pid int) []agent.Proc {
+	if pid <= 1 {
+		return agent.Unreadable(pid)
+	}
+	chain, err := agent.Ancestry(pid)
+	if err != nil || len(chain) == 0 {
+		return agent.Unreadable(pid)
+	}
+	return chain
+}
+
 // approverGate refuses an approver with a harness among its ancestors: an
 // agent must not approve its own requests. The whole chain counts, not only
 // the anchor, since any program the agent starts in between (script,
 // timeout, an interpreter) is an anchor of its own. One that detaches from
 // the harness first, a daemonized child whose parent is now launchd, gets
-// through (T6). A chain cut short, which may hide the harness, is refused.
+// through (T6). A chain cut short or empty, which may hide the harness, is refused.
 func approverGate(chain []agent.Proc) error {
-	if agent.Truncated(chain) {
+	if len(chain) == 0 || agent.Truncated(chain) {
 		return errors.New("refusing an approver whose process chain passess cannot read to the end: an agent must not approve its own requests; the user approves in Passess.app or with `passess agent approve` in a terminal of their own")
 	}
 	for _, p := range chain {

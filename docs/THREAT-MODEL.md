@@ -126,7 +126,7 @@ where the protection stops. Read the last section before relying on it.
   running as the user can connect to the agent as an approver, and so could approve its
   own requests. The agent refuses approvers with a harness executable among their
   ancestors, whatever runs in between (`script`, `timeout`, an interpreter), and one
-  whose chain passess cannot follow to the end (more than 64 processes deep), and
+  whose chain passess cannot follow to the end (more than 64 processes deep, or a peer that has gone or has no pid), and
   `passess agent approve` refuses when it sees a harness, by a marker or among its
   ancestors. To get through, a process has to detach from its harness first (a
   daemonized child whose parent is now launchd), which makes it T6, or run under an

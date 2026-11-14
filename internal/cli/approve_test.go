@@ -621,3 +621,35 @@ func TestAllowDoesNotOutliveLock(t *testing.T) {
 		}
 	}
 }
+
+// A peer passess cannot identify (no pid, pid 1, a process that has gone) has
+// no chain to read: it counts as an unidentified caller, an approver is
+// refused, and nothing is remembered for it.
+func TestPeerChainFailsClosed(t *testing.T) {
+	none := func(string) string { return "" }
+	child := exec.Command("true")
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	gone := child.Process.Pid // reaped: no such process
+	for _, pid := range []int{0, 1, gone} {
+		chain := peerChain(pid)
+		if got := callerAgents(none, chain); len(got) != 1 || got[0] != agent.Unidentified {
+			t.Errorf("pid %d: callers %v", pid, got)
+		}
+		if err := approverGate(chain); err == nil {
+			t.Errorf("pid %d: an approver that cannot be identified was let in", pid)
+		}
+		if _, ok := agent.Anchor(chain); ok {
+			t.Errorf("pid %d: an Allow would be remembered for it", pid)
+		}
+	}
+	if err := approverGate(nil); err == nil {
+		t.Error("an empty chain was let in as an approver")
+	}
+	// Control: a live process is read as it is.
+	chain := peerChain(os.Getpid())
+	if len(chain) == 0 || chain[0].PID != os.Getpid() || agent.Truncated(chain) {
+		t.Errorf("this process: %+v", chain)
+	}
+}
