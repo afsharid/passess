@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/afsharid/passess/internal/agent"
 )
@@ -35,11 +36,64 @@ type auditEntry struct {
 	Status  *int      `json:"status,omitempty"`
 }
 
+// What one entry may hold. The agent writes what a client sent, and a client
+// is not trusted to keep a line short: with these the longest line stays
+// under 200 KB even when every byte is escaped, far below what
+// readAudit reads.
+const (
+	auditField   = 256 // bytes of one word, name or path
+	auditDir     = 1024
+	auditWords   = 32 // argv words kept
+	auditSecrets = 64
+)
+
+// bounded returns e with every field the client chose cut to its limit; a
+// cut field ends in "…".
+func (e auditEntry) bounded() auditEntry {
+	e.Anchor = clip(e.Anchor, auditField)
+	e.Harness = clip(e.Harness, auditField)
+	e.Program = clip(e.Program, auditField)
+	e.Dir = clip(e.Dir, auditDir)
+	e.Secrets = clipAll(e.Secrets, auditSecrets)
+	e.Argv = clipAll(e.Argv, auditWords)
+	return e
+}
+
+// clipAll keeps the first n words, each cut to auditField, and ends with a
+// "…" word when it dropped any.
+func clipAll(words []string, n int) []string {
+	if words == nil {
+		return nil
+	}
+	out := make([]string, 0, min(len(words), n+1))
+	for i, w := range words {
+		if i == n {
+			out = append(out, "…")
+			break
+		}
+		out = append(out, clip(w, auditField))
+	}
+	return out
+}
+
+// clip cuts s to at most n bytes, on a character boundary, and marks the cut.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
 func (l *auditLog) write(e auditEntry) {
 	if l == nil || l.path == "" {
 		return
 	}
 	e.Time = time.Now().UTC()
+	e = e.bounded()
 	b, err := json.Marshal(e)
 	if err != nil {
 		return
