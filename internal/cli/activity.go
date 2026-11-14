@@ -79,13 +79,15 @@ func runActivity(st *Streams, args []string) int {
 		fmt.Fprintln(st.Stdout, "no activity yet: the agent records what it runs and what you approve")
 		return ExitOK
 	}
+	// The agent chose the program's file name and the log holds it as it
+	// was; the text view shows it without the characters a terminal acts on.
 	for _, e := range entries {
-		who := e.Program
+		who := printable(e.Program)
 		if e.Anchor != "" {
-			who += ", asked by " + e.Anchor
+			who += ", asked by " + printable(e.Anchor)
 		}
-		fmt.Fprintf(st.Stdout, "%s  %-8s %-11s %s for %s\n", e.Time.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Outcome,
-			strings.Join(e.Secrets, ", "), who)
+		fmt.Fprintf(st.Stdout, "%s  %-8s %-11s %s for %s\n", e.Time.Local().Format("2006-01-02 15:04:05"), printable(e.Kind), printable(e.Outcome),
+			printable(strings.Join(e.Secrets, ", ")), who)
 	}
 	return ExitOK
 }
