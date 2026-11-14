@@ -250,8 +250,11 @@ func (p *Program) interpreters(in *inspection, path string, add func(f, why stri
 		if stamp, err := stampOf(resolved); err == nil {
 			p.interps = append(p.interps, stamped{target, resolved, stamp})
 		}
-		if rname := filepath.Base(resolved); rname != name {
-			add(Family(rname), fmt.Sprintf("runs under %s", name))
+		// A multi-call binary the system installs under the name the #! line
+		// wrote runs that applet: /bin/cat that is busybox is cat. Under any
+		// other name it stays the multi-call binary.
+		if rf := Family(filepath.Base(resolved)); rf != Family(name) && (!multiCall(rf) || !in.systemApplet(name, resolved)) {
+			add(rf, fmt.Sprintf("runs under %s", name))
 		}
 		if !in.systemInterpreter(resolved) {
 			if f, orig := in.copyOf(resolved); f != "" {
@@ -262,6 +265,13 @@ func (p *Program) interpreters(in *inspection, path string, add func(f, why stri
 			p.interpreters(in, resolved, add, depth+1)
 		}
 	}
+}
+
+// systemApplet reports whether the system installs the file at resolved under
+// name, as it does each applet of a multi-call binary.
+func (in *inspection) systemApplet(name, resolved string) bool {
+	st, err := os.Stat(resolved)
+	return err == nil && installedAs(name, st)
 }
 
 // systemInterpreter reports whether path is a denied interpreter the system
