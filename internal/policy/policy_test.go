@@ -521,6 +521,52 @@ func TestRelativeShebangUsesTheRunDirectory(t *testing.T) {
 	}
 }
 
+// A #! interpreter written without a slash is opened by the kernel relative
+// to the run directory, not searched on PATH. Only a name env launches is
+// looked up on PATH.
+func TestSlashlessShebangUsesTheRunDirectory(t *testing.T) {
+	dir, _, _ := interpFixture(t)
+	script := filepath.Join(dir, "noslash")
+	writeScript(t, script, "#!myint")
+	elsewhere := func(name string) (string, error) {
+		if name == "myint" {
+			return "", os.ErrNotExist // not on PATH
+		}
+		return exec.LookPath(name)
+	}
+	p, err := InspectIn(script, dir, elsewhere)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("#!myint beside a copy of a shell was allowed (families %v)", p.Families)
+	}
+	// A directory without that file leaves nothing to judge, even when PATH
+	// has a program of that name.
+	onPath := func(name string) (string, error) {
+		if name == "myint" {
+			return filepath.Join(dir, "myint"), nil
+		}
+		return exec.LookPath(name)
+	}
+	p, err = InspectIn(script, t.TempDir(), onPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); !d.Allowed {
+		t.Errorf("#!myint with an empty run directory was refused: %+v", d)
+	}
+	// env searches PATH: the same name through env is the PATH program.
+	writeScript(t, script, "#!/usr/bin/env myint")
+	p, err = InspectIn(script, t.TempDir(), onPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Check("TOKEN", p, nil); d.Allowed {
+		t.Errorf("env myint with the copy on PATH was allowed (families %v)", p.Families)
+	}
+}
+
 // Inspect on its own judges a relative interpreter against the process's
 // working directory, where a direct run starts the program.
 func TestRelativeShebangUsesTheProcessDirectory(t *testing.T) {

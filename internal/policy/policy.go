@@ -224,11 +224,12 @@ const maxShebangDepth = 5
 // shell under another name is that shell, and a script named there is judged
 // by its own #! line in turn. The files are stamped for Unchanged.
 func (p *Program) interpreters(in *inspection, path string, add func(f, why string), depth int) {
-	for _, interp := range shebang(path) {
+	line, viaEnv := shebang(path)
+	for _, interp := range line {
 		name := filepath.Base(interp)
 		add(Family(name), fmt.Sprintf("runs under %s", name))
 		target := interp
-		if !strings.Contains(interp, "/") {
+		if viaEnv && !strings.Contains(interp, "/") {
 			t, err := in.lookPath(interp) // env searches PATH for it
 			if err != nil {
 				continue
@@ -288,28 +289,31 @@ func (in *inspection) systemInterpreter(path string) bool {
 }
 
 // shebang returns the interpreters named on a script's #! line, as written.
-// For "#!/usr/bin/env X" that is X: env only launches it there. When env's
-// options are not understood the line names env itself, which is denied.
-func shebang(path string) []string {
+// For "#!/usr/bin/env X" that is X: env only launches it there, and it reports
+// true because env searches PATH for a name without a slash. A name written
+// straight on the line is opened by the kernel relative to the run directory.
+// When env's options are not understood the line names env itself, which is
+// denied.
+func shebang(path string) ([]string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	defer f.Close()
 	line, _ := bufio.NewReader(io.LimitReader(f, 512)).ReadString('\n')
 	if !strings.HasPrefix(line, "#!") {
-		return nil
+		return nil, false
 	}
 	fields := strings.Fields(strings.TrimPrefix(line, "#!"))
 	if len(fields) == 0 {
-		return nil
+		return nil, false
 	}
 	if filepath.Base(fields[0]) == "env" {
 		if cmd, ok := envCommand(fields[1:]); ok {
-			return cmd
+			return cmd, true
 		}
 	}
-	return []string{fields[0]}
+	return []string{fields[0]}, false
 }
 
 // envCommand finds the command env would run for args, as written; with -P
