@@ -326,14 +326,20 @@ func unreadableName(w *syntax.Word, env Env) string {
 }
 
 // credentialDir says whether full is a directory of credential files, or all
-// that is in one (dir/*); HOME is not, though it holds some.
+// that is in one (dir/* or dir/.*); HOME is not, though it holds some. The
+// shell's * skips dotfiles and .* matches only them, so a glob counts only when
+// a credential file in dir has a name it matches: ~/.claude/* does not reach
+// .credentials.json, ~/.aws/* reaches credentials.
 func credentialDir(full string, env Env) bool {
+	glob := filepath.Base(full)
 	for _, c := range credentialPaths {
 		dir := filepath.Dir(filepath.Join(env.Home, c))
 		if env.Home == "" || strings.EqualFold(dir, env.Home) {
 			continue
 		}
-		if strings.EqualFold(full, dir) || (filepath.Base(full) == "*" && strings.EqualFold(filepath.Dir(full), dir)) {
+		dotted := strings.HasPrefix(filepath.Base(c), ".")
+		if strings.EqualFold(full, dir) ||
+			((glob == "*" && !dotted || glob == ".*" && dotted) && strings.EqualFold(filepath.Dir(full), dir)) {
 			return true
 		}
 	}

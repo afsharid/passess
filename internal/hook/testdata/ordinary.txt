@@ -807,3 +807,8 @@ passess activity
 passess --version
 %%
 passess help
+%%
+grep -r foo ~/.claude/*
+%%
+cd ~/.claude && grep -r foo *
+

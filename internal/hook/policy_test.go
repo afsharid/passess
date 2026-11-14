@@ -703,10 +703,13 @@ func TestUnreadablePrefixAndCredentialDirectory(t *testing.T) {
 		`cat < "$ROOT/.env"`, `while read l; do :; done < "$ROOT/.env"`, `cp "$ROOT/.env" /tmp/x`, `sudo cat "$ROOT/.env"`, `source "$ROOT/.env"`,
 		`grep -r aws_secret ~/.aws`, `grep -rn secret ~/.config/gh`, `grep -r . ~/.ssh/id_rsa`, `rg token ~/.docker`, `cp -r ~/.aws /tmp/a`,
 		`rsync -a ~/.aws/ /tmp/aws/`, `cat ~/.aws/*`, `grep -r x $HOME/.aws`, `cd ~/.aws && grep -r x .`, `cp -r ~/.kube /tmp/k`, `rg x ~/.codex`,
+		`cat ~/.gemini/*`, `cat ~/.codex/*`, `cd ~/.aws && grep -r x *`,
+		`grep -r x ~/.claude`, `cd ~/.claude && grep -r x .`, `cat ~/.claude/.*`, `cat ~/.claude/.credentials.json`, `cd ~/.claude && cat .*`,
 	}, []string{
 		`cat "$ROOT/README.md"`, `cat "$ROOT/.env.example"`, `cat $X/config.json`, `cat "$X/credentials.md"`, `cat "$X/.envs/a"`, `cat $PREFIX.env`,
 		`echo "$ROOT/.env"`, `ls "$ROOT/.env"`, `git add "$ROOT/.env.sample"`, `cp .env.example "$ROOT/.env"`, `cat "$ROOT/notes.txt"`,
 		`grep -r x ~/.config/other`, `grep -r x ~/.awsome`, `grep -r x ~`, `grep -r x ~/.config`, `cd ~ && grep -r x .`, `rsync -a ~/proj/ /tmp/p/`,
 		`ls ~/.aws`, `grep -r x ~/.claude/skills`, `cp -r ~/.claude/skills /tmp/s`, `cat ~/.aws/config`, `cp -r /tmp/a ~/.aws-backup`,
+		`cat ~/.claude/*`, `grep -r foo ~/.claude/*`, `cd ~/.claude && grep -r foo *`, `cp ~/.claude/* /tmp/s`,
 	})
 }
