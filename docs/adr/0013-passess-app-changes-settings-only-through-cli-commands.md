@@ -44,7 +44,7 @@ The app could write `config.toml` itself. It does not, for three reasons:
 ## Consequences
 
 - The CLI grows a command per setting. The rest followed the same rule: `backend op |
-  vault | bw | bws`, `mcp add | set | remove | list`, `profile add | set | remove | list`
+  vault | bw | bws | net`, `mcp add | set | remove | list`, `profile add | set | remove | list`
   and `agent config` write `[backends.NAME]`, `[mcp.NAME]`, `[profiles.NAME]` and
   `[agent]` with the same checked splice (`config.SetTableFields`, which can create a
   table the file does not have yet). The Vault token and the `bw` session go to the

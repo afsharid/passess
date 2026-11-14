@@ -321,6 +321,9 @@ let turkish: [String: String] = [
     "The account op uses. Empty: its default account.": "op'un kullandığı hesap. Boş: varsayılan hesap.",
     "Empty fields fall back to VAULT_ADDR and the system's certificates.":
         "Boş alanlar VAULT_ADDR'ı ve sistemin sertifikalarını kullanır.",
+    "Proxy": "Vekil sunucu",
+    "For passess http, a remote MCP server and Vault. Empty: none. passess does not use the proxy variables of the program that runs it.":
+        "passess http, uzak MCP sunucusu ve Vault için. Boş: yok. passess, kendisini çalıştıran programın vekil değişkenlerini kullanmaz.",
     "Namespace": "Ad alanı",
     "CA certificate file": "CA sertifika dosyası",
     "Token": "Token",

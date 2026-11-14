@@ -33,6 +33,7 @@ final class SettingsModel: ObservableObject {
     @Published var vaultNamespace = ""
     @Published var vaultCACert = ""
     @Published var bwsServerURL = ""
+    @Published var netProxy = ""
     @Published var vaultToken = ""
     @Published var bwSession = ""
 
@@ -89,6 +90,7 @@ final class SettingsModel: ObservableObject {
         vaultNamespace = backends.vault.namespace
         vaultCACert = backends.vault.caCert
         bwsServerURL = backends.bws.serverURL
+        netProxy = backends.proxy
         self.servers = servers
         self.profiles = profiles
         agentConfig = agent
@@ -114,6 +116,7 @@ final class SettingsModel: ObservableObject {
                     self.vaultNamespace = b.vault.namespace
                     self.vaultCACert = b.vault.caCert
                     self.bwsServerURL = b.bws.serverURL
+                    self.netProxy = b.proxy
                 }
                 self.servers = s
                 self.profiles = p
@@ -160,10 +163,11 @@ final class SettingsModel: ObservableObject {
             ("vault", "namespace", b.vault.namespace, vaultNamespace),
             ("vault", "ca-cert", b.vault.caCert, vaultCACert),
             ("bws", "server-url", b.bws.serverURL, bwsServerURL),
+            ("net", "proxy", b.proxy, netProxy),
         ].map { ($0.0, $0.1, $0.2, $0.3.trimmingCharacters(in: .whitespaces)) }.filter { $0.2 != $0.3 }
         guard !changes.isEmpty else { return }
         confirmAndRun(t("change how passess reaches your vault"), done: t("Backends saved.")) { cli in
-            for backend in ["op", "vault", "bws"] {
+            for backend in ["op", "vault", "bws", "net"] {
                 let flags = changes.filter { $0.0 == backend }.map { (flag: $0.1, value: $0.3) }
                 if !flags.isEmpty { try cli.setBackend(backend, flags) }
             }
@@ -411,6 +415,9 @@ private struct BackendsPane: View {
             }
             Field(title: "Bitwarden Secrets Manager", help: t("A self-hosted server. Empty: bitwarden.com.")) {
                 TextField("https://vault.bitwarden.eu", text: $model.bwsServerURL).textFieldStyle(.roundedBorder)
+            }
+            Field(title: t("Proxy"), help: t("For passess http, a remote MCP server and Vault. Empty: none. passess does not use the proxy variables of the program that runs it.")) {
+                TextField("http://proxy.example:3128", text: $model.netProxy).textFieldStyle(.roundedBorder)
             }
             HStack {
                 Spacer()

@@ -314,7 +314,8 @@ run it, so it asks you.
 variables (`HTTPS_PROXY` and the rest) and `SSL_CERT_FILE` / `SSL_CERT_DIR`, so they
 trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`, an absolute path.
 A proxy is yours to name: `passess backend net --proxy http://proxy.example:3128` (http,
-https or socks5) writes `backends.net.proxy`, and all three go through it. It carries the
+https or socks5), or Settings → Backends → Proxy in Passess.app, writes
+`backends.net.proxy`, and all three go through it. It carries the
 TLS connection without ending it, so it sees the host, not the request.
 
 ## A harness's own API key
