@@ -22,7 +22,7 @@ func TestClientKeepsSecretHeadersToTheirOrigin(t *testing.T) {
 	}))
 	t.Cleanup(origin.Close)
 
-	client, err := newClient(origin.URL+"/mcp", http.Header{"Authorization": {"Bearer passess-fake-token"}})
+	client, err := newClient(origin.URL+"/mcp", "", http.Header{"Authorization": {"Bearer passess-fake-token"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestClientKeepsSecretHeadersToTheirOrigin(t *testing.T) {
 	var got string
 	same := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Get("Authorization") }))
 	t.Cleanup(same.Close)
-	client, _ = newClient(same.URL+"/mcp", http.Header{"Authorization": {"Bearer passess-fake-token"}})
+	client, _ = newClient(same.URL+"/mcp", "", http.Header{"Authorization": {"Bearer passess-fake-token"}})
 	resp, err = client.Post(same.URL+"/mcp", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)

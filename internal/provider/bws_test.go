@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +29,9 @@ func bwsFake(t *testing.T) *fakeRunner {
 		}
 		if !slices.Contains(c.Env, "BWS_ACCESS_TOKEN="+fakeToken) {
 			t.Fatal("the access token must be in the environment")
+		}
+		if !slices.Contains(c.Env, "BWS_CONFIG_FILE="+os.DevNull) {
+			t.Fatal("bws must not read its profile file: the server comes from passess's config alone")
 		}
 		switch c.Args[0] + " " + c.Args[1] {
 		case "project list":

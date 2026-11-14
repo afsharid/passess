@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -282,7 +283,12 @@ func testExecValueNotInArgv(t *testing.T, agentPID int) {
 		pids = append(pids, agentPID)
 	}
 	for _, pid := range pids {
-		out, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+		// Linux has the arguments in /proc; ps there may be busybox's, which
+		// takes no -p.
+		out, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+		if runtime.GOOS != "linux" {
+			out, err = exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -5,7 +5,10 @@ package outbound
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 )
@@ -25,11 +28,41 @@ var (
 // and a proxy that terminates TLS with a CA it chose reads the secret in
 // clear. A caller that needs another CA names it in the config (vault
 // ca_cert).
-func Transport() *http.Transport {
+//
+// proxy is the one the user's config names (backends.net.proxy), or empty for
+// none. It carries the TLS connection without ending it, so it sees the host
+// and not the request. A proxy that does not parse fails every request: the
+// alternative would be to go around a proxy the user asked for.
+func Transport(proxy string) *http.Transport {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
+	if proxy != "" {
+		u, err := ParseProxy(proxy)
+		tr.Proxy = func(*http.Request) (*url.URL, error) { return u, err }
+	}
 	tr.TLSClientConfig = &tls.Config{RootCAs: systemRoots(), MinVersion: tls.VersionTLS12}
 	return tr
+}
+
+// ParseProxy reads a proxy setting: an http, https or socks5 URL with a host
+// and nothing after it.
+func ParseProxy(s string) (*url.URL, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, errors.New("the proxy is not a URL")
+	}
+	switch u.Scheme {
+	case "http", "https", "socks5":
+	default:
+		return nil, fmt.Errorf("the proxy takes an http, https or socks5 URL, not %q", u.Scheme)
+	}
+	if u.Host == "" || u.Hostname() == "" {
+		return nil, errors.New("the proxy URL names no host")
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("the proxy URL takes a host and a port, nothing after them")
+	}
+	return u, nil
 }
 
 // systemRoots loads the system roots once. If it cannot load them, the pool is

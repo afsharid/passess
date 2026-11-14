@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -66,7 +67,11 @@ func (b *BWS) run(ctx context.Context, args ...string) ([]byte, error) {
 	if getenv == nil {
 		getenv = OSGetenv
 	}
-	env := append(BaseEnv(getenv), "BWS_ACCESS_TOKEN="+string(tok.Bytes()))
+	// bws reads its server from a profile file any process of the user can
+	// write. The token goes only where passess's own config says: an empty
+	// config file stands in for the profile, so with no server_url bws uses
+	// bitwarden.com.
+	env := append(BaseEnv(getenv), "BWS_ACCESS_TOKEN="+string(tok.Bytes()), "BWS_CONFIG_FILE="+os.DevNull)
 	if b.ServerURL != "" {
 		env = append(env, "BWS_SERVER_URL="+b.ServerURL)
 	}
