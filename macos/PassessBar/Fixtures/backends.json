@@ -14,5 +14,8 @@
   "bws": {
     "server_url": "",
     "access_token": ""
+  },
+  "net": {
+    "proxy": ""
   }
 }

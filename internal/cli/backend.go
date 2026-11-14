@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/afsharid/passess/internal/config"
+	"github.com/afsharid/passess/internal/outbound"
 	"github.com/afsharid/passess/internal/provider"
 	"github.com/afsharid/passess/internal/ref"
 	"github.com/afsharid/passess/internal/secret"
@@ -45,7 +46,8 @@ const backendUsage = `Usage:
   passess backend op --account ACCOUNT        the 1Password account op uses ("" for its default)
   passess backend vault [--address URL] [--namespace NS] [--ca-cert PATH] [--token]
                                               --token: the token on stdin, kept in the keychain
-  passess backend bw --session                the unlocked session key on stdin, kept in the keychain`
+  passess backend bw --session                the unlocked session key on stdin, kept in the keychain
+  passess backend net --proxy URL             the proxy passess http, a remote MCP server and Vault go through ("" for none)`
 
 // runBackend sets what each backend needs, so no one edits the config for
 // it. Credentials go to the keychain on security(1)'s stdin, and the config
@@ -63,7 +65,7 @@ func runBackend(st *Streams, args []string) int {
 		if len(args) == 1 {
 			return storeBWSToken(st)
 		}
-	case "op", "vault", "bw":
+	case "op", "vault", "bw", "net":
 	default:
 		fmt.Fprintln(st.Stderr, backendUsage)
 		return ExitUsage
@@ -90,6 +92,9 @@ type backendView struct {
 		ServerURL   string `json:"server_url"`
 		AccessToken string `json:"access_token"` // a reference
 	} `json:"bws"`
+	Net struct {
+		Proxy string `json:"proxy"`
+	} `json:"net"`
 }
 
 func showBackends(st *Streams) int {
@@ -116,6 +121,7 @@ func showBackends(st *Streams) int {
 	v.Vault.Address, v.Vault.Namespace, v.Vault.CACert, v.Vault.Token = b.Vault.Address, b.Vault.Namespace, b.Vault.CACert, refString(b.Vault.Token)
 	v.BW.Session = refString(b.BW.Session)
 	v.BWS.ServerURL, v.BWS.AccessToken = b.BWS.ServerURL, refString(b.BWS.AccessToken)
+	v.Net.Proxy = b.Net.Proxy
 	return writeJSON(st, v)
 }
 
@@ -137,6 +143,8 @@ func setBackend(st *Streams, backend string, args []string) int {
 		strs["namespace"] = fs.String("namespace", "", "the Vault namespace; empty for none")
 		strs["ca_cert"] = fs.String("ca-cert", "", "a CA certificate file for the server; empty for the system's")
 		stdinCred, credKey, credRef = fs.Bool("token", false, "read the Vault token from stdin and keep it in the keychain"), "token", defaultVaultToken
+	case "net":
+		strs["proxy"] = fs.String("proxy", "", "an http, https or socks5 proxy URL for passess http, a remote MCP server and Vault; empty for none")
 	case "bw":
 		stdinCred, credKey, credRef = fs.Bool("session", false, "read the unlocked session key (bw unlock --raw) from stdin and keep it in the keychain"), "session", defaultBWSession
 	}
@@ -164,6 +172,11 @@ func setBackend(st *Streams, backend string, args []string) int {
 		}
 		if key == "ca_cert" && v != "" && !filepath.IsAbs(v) {
 			return failf(st, ExitUsage, "--ca-cert takes an absolute path: a relative one is read from whichever directory passess runs in")
+		}
+		if key == "proxy" && v != "" {
+			if _, err := outbound.ParseProxy(v); err != nil {
+				return failf(st, ExitUsage, "--proxy: %v", err)
+			}
 		}
 		if (key == "address" || key == "server_url") && v != "" {
 			if u, err := url.Parse(v); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {

@@ -176,7 +176,7 @@ func runHTTP(st *Streams, args []string) int {
 	}
 	transport := httpTransport
 	if transport == nil {
-		transport = outbound.Transport()
+		transport = outbound.Transport(u.Backends.Net.Proxy)
 	}
 	client := &http.Client{Transport: transport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {

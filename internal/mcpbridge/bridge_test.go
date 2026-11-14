@@ -55,7 +55,7 @@ func TestBridgeAddsHeadersAndRedactsReplies(t *testing.T) {
 	outR, outW := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(context.Background(), ts.URL, http.Header{"Authorization": {"Bearer " + token}}, inR, outW, rd)
+		done <- Run(context.Background(), ts.URL, "", http.Header{"Authorization": {"Bearer " + token}}, inR, outW, rd)
 		_ = outW.Close()
 	}()
 	replies := bufio.NewScanner(outR)

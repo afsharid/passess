@@ -10,7 +10,7 @@ import (
 func TestNewClientIgnoresTheCallersProxy(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
-	client, err := newClient("https://mcp.example.com/mcp", http.Header{"Authorization": {"Bearer " + token}})
+	client, err := newClient("https://mcp.example.com/mcp", "", http.Header{"Authorization": {"Bearer " + token}})
 	if err != nil {
 		t.Fatal(err)
 	}

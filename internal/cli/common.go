@@ -99,7 +99,7 @@ func newResolver(st *Streams, u *config.User) (*resolve.Resolver, func()) {
 
 	op := provider.OnePassword{Runner: run, Getenv: st.Getenv, Account: u.Backends.OP.Account}
 	vault := &provider.Vault{Address: u.Backends.Vault.Address, Namespace: u.Backends.Vault.Namespace,
-		CACert: u.Backends.Vault.CACert, Getenv: st.Getenv}
+		CACert: u.Backends.Vault.CACert, Proxy: u.Backends.Net.Proxy, Getenv: st.Getenv}
 	bw := provider.Bitwarden{Runner: run, Getenv: st.Getenv}
 
 	// Backend credentials come from providers that need no credential of their own.

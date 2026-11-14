@@ -96,7 +96,7 @@ A reference can point at any of these; give several and the first that resolves 
 | Reference | Backend | passess reaches it with |
 |---|---|---|
 | `op://vault/item/field` | 1Password | the `op` CLI: desktop app sign-in, or `OP_SERVICE_ACCOUNT_TOKEN` |
-| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token in the keychain: Connect your vault in Passess.app, or `passess backend bws` (another place with `backends.bws.access_token`) |
+| `bws://<project>/<KEY>` or `bws://<uuid>` | Bitwarden Secrets Manager | the `bws` CLI; its machine token in the keychain: Connect your vault in Passess.app, or `passess backend bws` (another place with `backends.bws.access_token`). The token goes to bitwarden.com or to `backends.bws.server_url`; the `bws` profile file is not read |
 | `bw://item/field` | Bitwarden Password Manager | the `bw` CLI with an unlocked session (`BW_SESSION` or `backends.bw.session`) |
 | `vault://mount/path#key` | HashiCorp Vault, OpenBao | HTTP, KV v2 or v1; token from `backends.vault.token`, `VAULT_TOKEN`, `BAO_TOKEN` or `~/.vault-token` (a daemon a coding agent starts gets no `VAULT_` or `BAO_` variables) |
 | `keychain://service/account` | macOS Keychain, Linux Secret Service | `security` / `secret-tool` |
@@ -312,8 +312,10 @@ run it, so it asks you.
 
 `passess http`, the remote MCP bridge and the Vault client ignore the caller's proxy
 variables (`HTTPS_PROXY` and the rest) and `SSL_CERT_FILE` / `SSL_CERT_DIR`, so they
-trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`, an absolute path; no
-setting names a proxy.
+trust the system roots only. Vault takes another CA in `backends.vault.ca_cert`, an absolute path.
+A proxy is yours to name: `passess backend net --proxy http://proxy.example:3128` (http,
+https or socks5) writes `backends.net.proxy`, and all three go through it. It carries the
+TLS connection without ending it, so it sees the host, not the request.
 
 ## A harness's own API key
 

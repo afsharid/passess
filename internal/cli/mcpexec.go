@@ -124,7 +124,7 @@ func runMCPExec(st *Streams, args []string) int {
 		if !ok {
 			in = io.NopCloser(st.Stdin)
 		}
-		if err := mcpbridge.Run(context.Background(), srv.URL, headers, in, st.Stdout, rd); err != nil {
+		if err := mcpbridge.Run(context.Background(), srv.URL, u.Backends.Net.Proxy, headers, in, st.Stdout, rd); err != nil {
 			return failf(st, ExitUnavailable, "mcp.%s: remote server: %v", name, err)
 		}
 		return ExitOK

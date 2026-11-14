@@ -24,6 +24,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/afsharid/passess/internal/outbound"
+
 	"github.com/afsharid/passess/internal/detect"
 	"github.com/afsharid/passess/internal/policy"
 	"github.com/afsharid/passess/internal/ref"
@@ -126,6 +128,13 @@ type Backends struct {
 	OP    OP
 	Vault Vault
 	BW    BW
+	Net   Net
+}
+
+// Net configures how passess itself reaches a server: passess http, a remote
+// MCP server and Vault.
+type Net struct {
+	Proxy string // an http, https or socks5 proxy URL; none when empty
 }
 
 // OP configures 1Password.
@@ -254,6 +263,9 @@ type rawUser struct {
 		BW struct {
 			Session string `toml:"session"`
 		} `toml:"bw"`
+		Net struct {
+			Proxy string `toml:"proxy"`
+		} `toml:"net"`
 	} `toml:"backends"`
 	Secrets map[string]struct {
 		Ref     any       `toml:"ref"`
@@ -395,6 +407,12 @@ func ParseUser(path string, data []byte) (*User, error) {
 	u.Backends.Vault.Address = raw.Backends.Vault.Address
 	u.Backends.Vault.Namespace = raw.Backends.Vault.Namespace
 	u.Backends.Vault.CACert = raw.Backends.Vault.CACert
+	if p := raw.Backends.Net.Proxy; p != "" {
+		if _, err := outbound.ParseProxy(p); err != nil {
+			return nil, fmt.Errorf("%s: backends.net.proxy: %w", path, err)
+		}
+		u.Backends.Net.Proxy = p
+	}
 
 	for name, s := range raw.Secrets {
 		if !nameRe.MatchString(name) {

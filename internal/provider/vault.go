@@ -28,6 +28,7 @@ type Vault struct {
 	Address   string // backends.vault.address, else VAULT_ADDR / BAO_ADDR
 	Namespace string
 	CACert    string // PEM file; system roots when empty
+	Proxy     string // backends.net.proxy; none when empty
 	Getenv    func(string) string
 	// Token returns the token; when nil, VAULT_TOKEN, BAO_TOKEN or ~/.vault-token.
 	Token  func(ctx context.Context) (secret.Value, error)
@@ -114,7 +115,7 @@ func (v *Vault) client() (*http.Client, error) {
 	if v.Client != nil {
 		return v.Client, nil
 	}
-	tr := outbound.Transport()
+	tr := outbound.Transport(v.Proxy)
 	if v.CACert != "" {
 		// A relative path would be read from the working directory of
 		// whoever resolves, which a repository can fill.

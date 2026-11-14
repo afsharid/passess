@@ -1,6 +1,7 @@
 package outbound
 
 import (
+	"bufio"
 	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -53,7 +54,7 @@ func TestTransportIgnoresProxyEnvironment(t *testing.T) {
 	}
 	t.Setenv("NO_PROXY", "")
 	// Go skips the proxy for loopback hosts, so a nil Proxy is the check.
-	if Transport().Proxy != nil {
+	if Transport("").Proxy != nil {
 		t.Fatal("the transport reads a proxy from the environment")
 	}
 }
@@ -79,7 +80,7 @@ func TestTransportDoesNotDialCallersProxy(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("HTTPS_PROXY", "http://"+proxy.Addr().String())
 	t.Setenv("HTTP_PROXY", "http://"+proxy.Addr().String())
-	tr := Transport()
+	tr := Transport("")
 	tr.TLSClientConfig.RootCAs = x509.NewCertPool()
 	tr.TLSClientConfig.RootCAs.AddCert(srv.Certificate())
 	resp, err := (&http.Client{Transport: tr}).Get(srv.URL)
@@ -193,7 +194,7 @@ func TestTransportRejectsServerSignedByCertEnvironmentCA(t *testing.T) {
 	rootsOnce = sync.Once{}
 	t.Cleanup(func() { rootsOnce = sync.Once{} })
 
-	client := &http.Client{Transport: Transport()}
+	client := &http.Client{Transport: Transport("")}
 	resp, err := client.Get(srv.URL)
 	if err == nil {
 		_ = resp.Body.Close()
@@ -375,5 +376,62 @@ func TestOutboundViolationsVariants(t *testing.T) {
 		if (len(got) > 0) != c.want {
 			t.Errorf("%s: want violation=%v, got %v", c.name, c.want, got)
 		}
+	}
+}
+
+// The proxy the user's config names is used, and only for carrying the TLS
+// connection: it is asked to CONNECT to the host and sees nothing else.
+func TestTransportUsesTheConfiguredProxy(t *testing.T) {
+	proxy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = proxy.Close() }()
+	first := make(chan string, 1)
+	go func() {
+		c, err := proxy.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		first <- line
+	}()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	client := &http.Client{Transport: Transport("http://" + proxy.Addr().String())}
+	req, _ := http.NewRequest("GET", srv.URL+"/v1/thing", nil)
+	req.Header.Set("Authorization", "Bearer passess-fake-token")
+	if resp, err := client.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("the stand-in proxy closes the connection, so the request cannot succeed")
+	}
+	select {
+	case line := <-first:
+		want := "CONNECT " + strings.TrimPrefix(srv.URL, "https://") + " HTTP/1.1\r\n"
+		if line != want {
+			t.Errorf("the proxy was sent %q, want %q", line, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the configured proxy was not dialed")
+	}
+}
+
+func TestParseProxy(t *testing.T) {
+	for _, ok := range []string{"http://proxy.example:3128", "https://proxy.example", "socks5://127.0.0.1:1080", "http://user:pw@proxy.example:8080/"} {
+		if _, err := ParseProxy(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"proxy.example:3128", "ftp://proxy.example", "http://", "http://proxy.example/path", "http://proxy.example?x=1", "file:///etc/passwd", "http://:3128"} {
+		if _, err := ParseProxy(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	// A setting that does not parse fails the request; it does not go direct.
+	tr := Transport("ftp://proxy.example")
+	req, _ := http.NewRequest("GET", "https://example.com/", nil)
+	if _, err := tr.Proxy(req); err == nil {
+		t.Error("a bad proxy setting did not fail the request")
 	}
 }

@@ -304,3 +304,47 @@ func TestBackendVaultCACertMustBeAbsolute(t *testing.T) {
 		t.Fatalf("empty did not clear it:\n%s", data)
 	}
 }
+
+// The proxy passess itself goes through is a setting of the user's config:
+// `backend net --proxy` writes it, refuses what is not a proxy URL, and a
+// config that holds one that is not is refused when it loads.
+func TestBackendNetProxy(t *testing.T) {
+	noHarness(t)
+	cfg := filepath.Join(t.TempDir(), "passess", "config.toml")
+	t.Setenv("PASSESS_CONFIG", cfg)
+	run := func(args ...string) (string, string, int) {
+		t.Helper()
+		var out, errb strings.Builder
+		code := Main(args, strings.NewReader(""), &out, &errb)
+		return out.String(), errb.String(), code
+	}
+	for _, bad := range []string{"proxy.example:3128", "ftp://proxy.example", "http://proxy.example/path"} {
+		if _, errOut, code := run("backend", "net", "--proxy", bad); code != ExitUsage || !strings.Contains(errOut, "proxy") {
+			t.Errorf("--proxy %q: exit %d, %q", bad, code, errOut)
+		}
+	}
+	if _, errOut, code := run("backend", "net", "--proxy", "http://proxy.example:3128"); code != 0 {
+		t.Fatalf("exit %d, %q", code, errOut)
+	}
+	if out, _, code := run("backend", "--json"); code != 0 || !strings.Contains(out, `"proxy": "http://proxy.example:3128"`) {
+		t.Fatalf("backend --json: exit %d, %s", code, out)
+	}
+	if _, errOut, code := run("backend", "net", "--proxy", ""); code != 0 {
+		t.Fatalf("clearing: exit %d, %q", code, errOut)
+	}
+	if data, _ := os.ReadFile(cfg); strings.Contains(string(data), "proxy") {
+		t.Fatalf("the cleared proxy is still in the config:\n%s", data)
+	}
+	if err := os.WriteFile(cfg, []byte("version = 1\n[backends.net]\nproxy = \"ftp://proxy.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := run("list"); code == 0 || !strings.Contains(errOut, "backends.net.proxy") {
+		t.Errorf("a config with a bad proxy loaded: exit %d, %q", code, errOut)
+	}
+	t.Run("an agent cannot set it", func(t *testing.T) {
+		t.Setenv("CLAUDECODE", "1")
+		if _, _, code := run("backend", "net", "--proxy", "http://proxy.example:3128"); code != ExitNoPerm {
+			t.Errorf("exit %d, want %d", code, ExitNoPerm)
+		}
+	})
+}
