@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 )
 
 // Version is the protocol version. A status or stop request, and the field
@@ -114,6 +115,52 @@ type AskFor struct {
 	Harness string    `json:"harness,omitempty"` // from the caller's environment: a label, unverified
 	Anchor  *Proc     `json:"anchor,omitempty"`  // the process an Allow is remembered for; nil: it is not
 	Until   time.Time `json:"until,omitzero"`    // how long an Allow lasts
+}
+
+// The most of a command line and a directory a question carries. Approvers
+// read a frame of at most maxFrame bytes (the Swift app, 1 MiB), and JSON may
+// escape a byte into six, so a request's own argv and dir, which only
+// maxRequest bounds, must not reach a question as they are.
+const (
+	maxAskArgv = 4 << 10
+	maxAskDir  = 1 << 10
+	maxAskPath = 1 << 10
+	askCut     = "[…cut]"
+)
+
+// Bounded returns the question cut down so every approver can read it: the
+// words of the command line past maxAskArgv bytes in all are dropped, the
+// directory and the executable's path are cut, and each cut is marked. The
+// user sees that something is missing, never a frame no approver can read.
+func (a AskFor) Bounded() AskFor {
+	a.Argv = boundArgv(a.Argv)
+	a.Dir = cutString(a.Dir, maxAskDir)
+	a.Path = cutString(a.Path, maxAskPath)
+	return a
+}
+
+func boundArgv(argv []string) []string {
+	n := 0
+	for i, w := range argv {
+		if n+len(w) > maxAskArgv {
+			out := append([]string(nil), argv[:i]...)
+			return append(out, cutString(w, maxAskArgv-n), askCut)
+		}
+		n += len(w)
+	}
+	return argv
+}
+
+// cutString keeps the first limit bytes of s, ending on a character, and marks
+// the cut.
+func cutString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + askCut
 }
 
 // Answer is an approver's reply.

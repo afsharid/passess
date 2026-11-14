@@ -108,9 +108,10 @@ func (s *agentServer) approval(st *Streams, u *config.User, names []string, prog
 	}
 	// The requester chose the argv, the directory and the program's name;
 	// the question shows them with control characters made visible, so no
-	// approver, terminal or app, acts on bytes the requester picked.
+	// approver, terminal or app, acts on bytes the requester picked. Bounded
+	// then cuts it to a size every approver can read.
 	ask := agent.AskFor{Secrets: missing, Program: visible(family), Path: visible(prog.Path), Argv: visibleAll(redactArgv(req.Argv, nil)), Dir: visible(req.Dir),
-		Harness: visible(detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v }))}
+		Harness: visible(detect.Harness(func(k string) string { v, _ := req.Env.Lookup(k); return v }))}.Bounded()
 	if anchored {
 		shown := anchor
 		shown.Name = visible(shown.Name)

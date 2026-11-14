@@ -207,6 +207,49 @@ func TestApprovalIsRememberedForTheCaller(t *testing.T) {
 	}
 }
 
+// A request's argv and dir reach an approver through a frame it reads in at
+// most 64 KiB (the app, 1 MiB): a long command line is cut in the question,
+// and the approver still reads it.
+func TestOversizedQuestionStaysReadable(t *testing.T) {
+	setupApprovals(t, `approval_timeout = "5s"`)
+	startAgent(t)
+	first := connectApprover(t, allowAll)
+	long := make([]string, 20000)
+	for i := range long {
+		long[i] = "word"
+	}
+	args := append([]string{"exec", "-s", "X", "--", "sh", "-c", "echo ran", "sh"}, long...)
+	type result struct {
+		out, errOut string
+		code        int
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, errOut, code := run(t, args...)
+		done <- result{out, errOut, code}
+	}()
+	select {
+	case r := <-done:
+		if r.code != 0 || r.out != "ran\n" {
+			t.Fatalf("exit %d, %q, %q", r.code, r.out, r.errOut)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the command waited for an approver that could not read the question")
+	}
+	select {
+	case q := <-first.notify:
+		n := 0
+		for _, w := range q.Argv {
+			n += len(w)
+		}
+		if n > 8<<10 || q.Argv[len(q.Argv)-1] != "[…cut]" || q.Argv[0] != "sh" {
+			t.Fatalf("argv of %d bytes, %d words, ends %q", n, len(q.Argv), q.Argv[len(q.Argv)-1])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the approver never read the question")
+	}
+}
+
 func TestApprovalDeniedAndTimedOut(t *testing.T) {
 	setupApprovals(t, `approval_timeout = "300ms"`)
 	startAgent(t)

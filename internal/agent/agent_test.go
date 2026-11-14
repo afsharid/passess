@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +253,31 @@ func TestSocketPath(t *testing.T) {
 	}
 	if _, err := SocketPath(env(nil)); err == nil {
 		t.Error("no HOME was accepted")
+	}
+}
+
+func TestAskForBounded(t *testing.T) {
+	words := make([]string, 20000)
+	for i := range words {
+		words[i] = "word"
+	}
+	hostile := strings.Repeat("\xff", 3000) // each byte escapes to six in JSON
+	q := AskFor{ID: "1", Secrets: []string{"X"}, Program: "sh", Path: "/bin/" + strings.Repeat("p", 5000),
+		Argv: append([]string{"sh"}, append(words, hostile)...), Dir: "/" + strings.Repeat("d", 100000)}.Bounded()
+	b, err := json.Marshal(Frame{Ask: &q})
+	if err != nil || len(b) > maxFrame {
+		t.Fatalf("a bounded question is %d bytes (%v), past the %d an approver reads", len(b), err, maxFrame)
+	}
+	if q.Argv[0] != "sh" || q.Argv[len(q.Argv)-1] != askCut || !strings.HasSuffix(q.Dir, askCut) || !strings.HasSuffix(q.Path, askCut) {
+		t.Errorf("the cuts are not marked: %q … %q", q.Argv[len(q.Argv)-1], q.Dir[len(q.Dir)-10:])
+	}
+	// Control: what fits is left alone.
+	small := AskFor{ID: "2", Argv: []string{"sh", "-c", "echo ran"}, Dir: "/work", Path: "/bin/sh"}
+	if got := small.Bounded(); !reflect.DeepEqual(got, small) {
+		t.Errorf("an ordinary question changed: %+v", got)
+	}
+	// A cut ends on a character.
+	if got := cutString(strings.Repeat("é", 10), 5); got != "éé"+askCut {
+		t.Errorf("cut mid-character: %q", got)
 	}
 }
