@@ -621,3 +621,20 @@ func TestTildeUser(t *testing.T) {
 		`cat ~u/.aws/config`, `cat ~root/proj/.env.example`,
 	})
 }
+
+// CDPATH moves a relative cd; the directory a cd - returns to is the one
+// before the last cd.
+func TestCdPathAndPrevious(t *testing.T) {
+	shellVerdicts(t, []string{
+		`CDPATH=~/.config cd passess && echo x >> config.toml`, `export CDPATH=$HOME/.config; cd passess; echo x >> config.toml`,
+		`CDPATH=~/.config; cd passess && echo x >> config.toml`, `declare -x CDPATH=~/.config; cd passess; echo x >> config.toml`,
+		`CDPATH=/x passess list`, `export CDPATH=/x; passess exec -s API_KEY -- ls`,
+		`cd ~/.config/passess; cd /tmp; cd -; echo x >> config.toml`, `cd ~/.aws; cd /tmp; cd -; cat credentials`,
+		`cd ~/.aws && cd /tmp && cd - && cat credentials`, `pushd ~/.aws; pushd /tmp; cd -; cat credentials`,
+		`cd ~/.aws; cd /tmp; cd -; cd /tmp; cd -; cat credentials`, `cd ~/.aws; (cd /tmp); cd /tmp; cd -; cat credentials`,
+	}, []string{
+		`CDPATH=.:$HOME/src cd app && make`, `export CDPATH=.:$HOME/src; cd app; make test`, `CDPATH= cd app && go build`,
+		`cd /tmp; cd -; cat config.toml`, `cd src && cd - && cat .npmrc`, `cd - && cat config.toml`, `cd /tmp && cd - && echo x > config.toml`,
+		`cd ~/.aws; cd /tmp; cd -; cd /tmp; cat credentials`, `cd /tmp; cd ~/.aws; cd -; cat credentials`,
+	})
+}

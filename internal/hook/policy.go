@@ -384,6 +384,9 @@ func checkShell(cmd string, at where, env Env) string {
 	// last directory known was a protected one (or none was known), so a
 	// relative sensitive name is still refused.
 	cur, stack, risk := at.dir, []string(nil), at.blind
+	// old is the directory cd - returns to, "" when it is not known; cdpath says
+	// CDPATH is set in this command line, so a relative cd may go anywhere.
+	old, cdpath := "", false
 	here := func() where { return where{cur, cur == "" && risk} }
 	// guarded says whether the directory the shell may have left was protected.
 	// The one the session began in is not taken for one above a protected
@@ -392,7 +395,7 @@ func checkShell(cmd string, at where, env Env) string {
 	// unknown drops the directory. dirs are the last ones it may have been.
 	unknown := func(sticky bool, dirs ...string) {
 		risk = sticky || slices.ContainsFunc(dirs, guarded)
-		cur, stack = "", nil
+		cur, stack, old = "", nil, ""
 	}
 	// A cd moves the shell only where the shell runs it. In a subshell, a
 	// pipeline, a background job or a substitution it is undone when that ends;
@@ -415,9 +418,11 @@ func checkShell(cmd string, at where, env Env) string {
 					scopes = scopes[:len(scopes)-1]
 					switch {
 					case sc.undone:
-						cur, stack, risk = sc.cur, sc.stack, sc.blind
+						cur, stack, old, risk = sc.cur, sc.stack, sc.old, sc.blind
 					case cur != sc.cur || !slices.Equal(stack, sc.stack):
 						unknown(sc.blind || (cur == "" && risk), sc.cur, cur)
+					case old != sc.old:
+						old = ""
 					}
 				}
 				return true
@@ -430,7 +435,7 @@ func checkShell(cmd string, at where, env Env) string {
 				parent = path[len(path)-1]
 			}
 			if undone, bounded := cdScopeOf(parent, node, env); bounded {
-				scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack), cur == "" && risk})
+				scopes = append(scopes, cdScope{node, undone, cur, slices.Clone(stack), old, cur == "" && risk})
 			}
 			path = append(path, node)
 			switch n := node.(type) {
@@ -466,6 +471,7 @@ func checkShell(cmd string, at where, env Env) string {
 					others = true
 				}
 				for _, a := range n.Assigns {
+					cdpath = cdpath || setsCDPath(a)
 					if reason == "" && a.Name != nil {
 						reason = checkAssign(a.Name.Value, program)
 						if pathSettings[a.Name.Value] && prog(program) != "passess" {
@@ -482,9 +488,12 @@ func checkShell(cmd string, at where, env Env) string {
 					run(body)
 					delete(running, program)
 				}
-				next, st := afterCd(args, cur, stack, env.Home)
+				next, st, isCd := afterCd(args, cur, stack, old, env.Home, cdpath)
 				if next == "" && cur != "" { // a cd to a directory not known here
-					risk = guarded(cur)
+					risk = guarded(cur) || cdpath
+				}
+				if isCd {
+					old = cur
 				}
 				cur, stack = next, st
 				switch prog(program) {
@@ -495,6 +504,7 @@ func checkShell(cmd string, at where, env Env) string {
 			case *syntax.DeclClause: // export, declare, typeset, local, readonly
 				reason = checkDecl(n, env)
 				for _, a := range n.Args {
+					cdpath = cdpath || (!a.Naked && setsCDPath(a))
 					if !a.Naked && a.Name != nil && pathSettings[a.Name.Value] {
 						steered = a.Name.Value
 					}
@@ -524,6 +534,7 @@ type cdScope struct {
 	undone bool // the cd is undone at its end; else the directory is unknown if it moved
 	cur    string
 	stack  []string
+	old    string
 	blind  bool // the directory was unknown then, and relative sensitive names counted
 }
 
@@ -567,7 +578,7 @@ func evalReaches(args []string, cur string, env Env) bool {
 				s, _ := literal(w, env)
 				words = append(words, s)
 			}
-			dir, stack = afterCd(words, dir, stack, env.Home)
+			dir, stack, _ = afterCd(words, dir, stack, "", env.Home, false)
 			hit = protectedDir(dir, env, true)
 		}
 		return !hit
@@ -598,18 +609,25 @@ func cdChain(s *syntax.Stmt, env Env) bool {
 var passessSettings = map[string]bool{"PASSESS_CONFIG": true, "PASSESS_AGENT_SOCK": true}
 
 // pathSettings move passess's config and socket with everything else; set
-// for a passess command, they point it elsewhere just the same.
-var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true}
+// for a passess command, they point it elsewhere just the same. CDPATH moves a
+// relative cd instead: afterCd gives up on one when it is set.
+var pathSettings = map[string]bool{"HOME": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true, "CDPATH": true}
+
+// setsCDPath says whether a is an assignment to CDPATH with a value.
+func setsCDPath(a *syntax.Assign) bool {
+	return a.Name != nil && a.Name.Value == "CDPATH" && a.Value != nil
+}
 
 // afterCd returns the working directory after a cd, pushd or popd with args,
-// and the pushd stack; other commands leave both as they are. A directory it
-// cannot tell (cd "$X", cd -) becomes "".
-func afterCd(args []string, cur string, stack []string, home string) (string, []string) {
+// and the pushd stack; other commands leave both as they are, and isCd says
+// whether it was one of them. old is where cd - goes. A directory it cannot
+// tell (cd "$X", a relative cd when CDPATH is set) becomes "".
+func afterCd(args []string, cur string, stack []string, old, home string, cdpath bool) (dir string, left []string, isCd bool) {
 	for len(args) > 0 && (filepath.Base(args[0]) == "builtin" || filepath.Base(args[0]) == "command") {
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		return cur, stack
+		return cur, stack, false
 	}
 	switch filepath.Base(args[0]) {
 	case "cd", "pushd":
@@ -620,26 +638,35 @@ func afterCd(args []string, cur string, stack []string, home string) (string, []
 		next := home
 		switch {
 		case len(ops) == 0 && filepath.Base(args[0]) == "pushd":
-			return "", stack // swaps with the top of a stack not known here
+			return "", stack, true // swaps with the top of a stack not known here
 		case len(ops) == 0:
-		case ops[0] == "" || ops[0] == "-":
+		case ops[0] == "":
 			next = ""
+		case ops[0] == "-":
+			next = old
 		default:
-			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) {
-				next = "" // relative to a directory not known here
+			if next = abs(ops[0], cur, home); !filepath.IsAbs(next) || (cdpath && searched(ops[0])) {
+				next = "" // relative to a directory not known here, or one CDPATH may move
 			}
 		}
 		if filepath.Base(args[0]) == "pushd" {
 			stack = append(stack, cur)
 		}
-		return next, stack
+		return next, stack, true
 	case "popd":
 		if len(stack) > 0 {
-			return stack[len(stack)-1], stack[:len(stack)-1]
+			return stack[len(stack)-1], stack[:len(stack)-1], true
 		}
-		return "", stack
+		return "", stack, true
 	}
-	return cur, stack
+	return cur, stack, false
+}
+
+// searched says whether cd looks for dir in CDPATH: every name but an absolute
+// one, one that starts with ./ or ../, and . and .. themselves.
+func searched(dir string) bool {
+	return dir != "." && dir != ".." && !strings.HasPrefix(dir, "/") && !strings.HasPrefix(dir, "./") && !strings.HasPrefix(dir, "../") &&
+		!strings.HasPrefix(dir, "~")
 }
 
 func checkAssign(name, program string) string {
