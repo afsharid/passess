@@ -13,10 +13,10 @@ jobs:
   cli:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
       - run: go test -race ./...
@@ -27,13 +27,13 @@ jobs:
           notes=$(git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}")
           [ -n "$notes" ] || notes=$(git tag -l --format='%(contents:subject)' "${GITHUB_REF_NAME}")
           printf '%s\n' "$notes" > "${RUNNER_TEMP}/notes.md"
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
-          version: "~> v2"
+          version: v2.20.2
           args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: "dist/*.tar.gz"
 
@@ -41,8 +41,8 @@ jobs:
     needs: cli
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
       # The tag reaches the shell through the environment, never as script
@@ -59,7 +59,7 @@ jobs:
       - run: make macos-check
       - run: make macos-app VERSION="$GITHUB_REF_NAME"
       - run: ditto -c -k --keepParent bin/Passess.app "Passess-${GITHUB_REF_NAME}-macos-arm64.zip"
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: "Passess-*.zip"
       - run: gh release upload "$GITHUB_REF_NAME" "Passess-${GITHUB_REF_NAME}-macos-arm64.zip"
