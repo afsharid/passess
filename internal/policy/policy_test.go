@@ -321,3 +321,41 @@ func TestCopyCheckDoesNotDependOnCallerPATH(t *testing.T) {
 		}
 	}
 }
+
+// A project file only narrows. With no allow list of the user's own, its
+// list must not unlock a denied family.
+func TestEffectiveProjectCannotUnlockDeniedFamilies(t *testing.T) {
+	for _, name := range []string{"sh", "bash", "python3", "node", "env", "base64", "busybox"} {
+		got := Effective(nil, []string{name})
+		if got == nil || len(got) != 0 {
+			t.Errorf("project allow [%s] with no user list gave %v, want an empty list", name, got)
+		}
+	}
+	if got := Effective(nil, []string{"gh", "bash", "git"}); !slices.Equal(got, []string{"gh", "git"}) {
+		t.Fatalf("denied names must drop out and the rest stay: %v", got)
+	}
+	// Control: a list the user wrote keeps the shell the user allowed.
+	if got := Effective([]string{"sh"}, []string{"bash"}); !slices.Equal(got, []string{"bash"}) {
+		t.Fatalf("a shell the user allowed was narrowed away: %v", got)
+	}
+	if got := Combine(nil, []string{"sh"}); !slices.Equal(got, []string{"sh"}) {
+		t.Fatalf("Combine of two user lists must not filter: %v", got)
+	}
+}
+
+func TestProjectAllowDoesNotHandShellsTheSecret(t *testing.T) {
+	sh := mustInspect(t, "sh")
+	for _, project := range [][]string{{"sh"}, {"bash"}, {"sh", "gh"}} {
+		if d := Check("TOKEN", sh, Effective(nil, project)); d.Allowed {
+			t.Errorf("project %v let a shell receive the secret", project)
+		}
+	}
+	// Control: a project may still name an ordinary program.
+	cat := mustInspect(t, "cat")
+	if d := Check("TOKEN", cat, Effective(nil, []string{"cat"})); !d.Allowed {
+		t.Errorf("project allow [cat] refused cat: %+v", d)
+	}
+	if d := Check("TOKEN", cat, Effective(nil, []string{"gh"})); d.Allowed {
+		t.Errorf("project allow [gh] let cat through")
+	}
+}

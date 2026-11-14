@@ -294,15 +294,37 @@ func hashFile(path string) []byte {
 // means "any program the default policy does not deny"; an empty non-nil
 // slice means nothing is allowed, and a project cannot widen that: only a
 // nil side gives way to the other, an empty one intersects to nothing.
+//
+// With no list of the user's own, the project's list stands in for it, but
+// Check reads a listed family as allowed even when the default policy denies
+// it. A project is never the user's word, so denied families drop out of its
+// list: it cannot hand a shell, an interpreter or an encoder a secret.
 func Effective(user, project []string) []string {
-	if project == nil {
+	if user == nil && project != nil {
+		kept := []string{}
+		for _, p := range project {
+			if !Denied(Family(p)) {
+				kept = append(kept, p)
+			}
+		}
+		return kept
+	}
+	return Combine(user, project)
+}
+
+// Combine intersects two allow lists the user wrote, such as a secret's and a
+// profile's, by family. Nil gives way to the other list. It does not filter
+// denied families: the user may allow them. A project's list goes through
+// Effective instead.
+func Combine(user, other []string) []string {
+	if other == nil {
 		return user
 	}
 	if user == nil {
-		return project
+		return other
 	}
 	both := []string{}
-	for _, p := range project {
+	for _, p := range other {
 		for _, u := range user {
 			if Family(p) == Family(u) {
 				both = append(both, p)
