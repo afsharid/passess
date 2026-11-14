@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -634,5 +635,34 @@ func TestAgentMasksWhatItHolds(t *testing.T) {
 	s.forget()
 	if got := s.mask(text); got != text {
 		t.Fatalf("after lock the agent still masks: %q", got)
+	}
+}
+
+// An agent that starts the daemon must not choose the backends the daemon's
+// later clients are served from: the variables the providers read are left
+// out of the daemon's environment. A person at a terminal keeps them.
+func TestAgentStartEnvDropsBackendVariablesForAgents(t *testing.T) {
+	environ := []string{
+		"PATH=/usr/bin", "LANG=C", "TMPDIR=/tmp",
+		"VAULT_ADDR=http://127.0.0.1:1", "VAULT_TOKEN=passess-fake-token", "BAO_ADDR=http://127.0.0.1:2", "BAO_TOKEN=passess-fake-token",
+		"VAULT_NAMESPACE=x", "OP_CONNECT_HOST=http://127.0.0.1:3", "OP_CONNECT_TOKEN=passess-fake-token",
+		"OP_SERVICE_ACCOUNT_TOKEN=passess-fake-token", "OP_ACCOUNT=x", "BWS_ACCESS_TOKEN=passess-fake-token",
+		"BWS_SERVER_URL=http://127.0.0.1:4", "BW_SESSION=passess-fake-token", "BITWARDENCLI_APPDATA_DIR=/x",
+	}
+	got, dropped := agentEnv(environ, true)
+	if !slices.Equal(got, []string{"PATH=/usr/bin", "LANG=C", "TMPDIR=/tmp"}) {
+		t.Errorf("under an agent the daemon got %v", got)
+	}
+	if len(dropped) != len(environ)-3 {
+		t.Errorf("dropped %v", dropped)
+	}
+	for _, d := range dropped {
+		if strings.Contains(d, "=") || strings.Contains(d, "passess-fake") {
+			t.Errorf("dropped list names %q: it must hold names only", d)
+		}
+	}
+	got, dropped = agentEnv(environ, false)
+	if !slices.Equal(got, environ) || len(dropped) != 0 {
+		t.Errorf("a person's environment was changed: %v, dropped %v", got, dropped)
 	}
 }

@@ -276,7 +276,16 @@ func agentStart(st *Streams) int {
 	// The agent runs from / so it pins no directory; relative paths in its
 	// environment would then point elsewhere, so it gets them absolute.
 	cmd.Dir = "/"
-	cmd.Env = append(os.Environ(), "PASSESS_CONFIG="+absolute(cfg), "PASSESS_AGENT_SOCK="+absolute(path))
+	// The daemon builds its backends from this environment once and serves
+	// every later client with them, so a coding agent that starts it must not
+	// pick the vault address or a backend token.
+	env, dropped := agentEnv(os.Environ(), len(callerAgents(st.Getenv, selfChain())) > 0)
+	if len(dropped) > 0 {
+		fmt.Fprintf(st.Stderr, "passess agent: started from a coding agent, so %s of this environment are not passed on; "+
+			"the agent reads backend settings from the config and the keychain. Start it in a terminal to pass them.\n",
+			strings.Join(dropped, ", "))
+	}
+	cmd.Env = append(env, "PASSESS_CONFIG="+absolute(cfg), "PASSESS_AGENT_SOCK="+absolute(path))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return failf(st, ExitSoftware, "%v", err)
@@ -295,6 +304,28 @@ func agentStart(st *Streams) int {
 		}
 	}
 	return failf(st, ExitSoftware, "the agent did not answer within 5 s; see %s", logPath)
+}
+
+// backendEnvPrefixes start the names of the variables that choose a backend's
+// address, account or credential: Vault and OpenBao, 1Password, bws and bw.
+var backendEnvPrefixes = []string{"VAULT_", "BAO_", "OP_", "BWS_", "BW_", "BITWARDENCLI_"}
+
+// agentEnv is the environment the agent daemon starts with. When an agent
+// started it, variables that choose a backend are left out and their names
+// returned; a person at a terminal passes them all.
+func agentEnv(environ []string, fromAgent bool) (env, dropped []string) {
+	if !fromAgent {
+		return environ, nil
+	}
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.ContainsFunc(backendEnvPrefixes, func(p string) bool { return strings.HasPrefix(name, p) }) {
+			dropped = append(dropped, name)
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env, dropped
 }
 
 func agentServe(st *Streams) int {
