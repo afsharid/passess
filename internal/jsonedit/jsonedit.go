@@ -19,19 +19,33 @@ import (
 // config could abort passess. Real harness configs nest a handful of levels.
 const maxDepth = 512
 
-// parse is hujson.Parse behind a depth check. One linear pass counts open
-// brackets, skipping strings and comments, and refuses a document that nests
-// deeper than maxDepth before the recursive parser sees it.
-func parse(src []byte) (hujson.Value, error) {
-	depth := 0
+// MaxSize is the largest document parse accepts. hujson keeps the whole tree
+// alive and one byte of a flat array costs about 300 bytes of heap, so a file
+// of a few hundred MB written by another process could get passess killed for
+// lack of memory. Real harness configs are a few KB; ~/.claude.json, the
+// biggest, stays well under this.
+const MaxSize = 8 << 20
+
+// maxNesting returns the deepest bracket nesting of src, or maxDepth+1 as soon
+// as it passes maxDepth. One linear pass counts open brackets, skipping strings
+// and comments. A closing bracket never takes the count below zero. On
+// malformed input the count can be higher than the tree hujson would build,
+// never lower, and hujson rejects that input anyway.
+func maxNesting(src []byte) int {
+	depth, deepest := 0, 0
 	for i := 0; i < len(src); i++ {
 		switch src[i] {
 		case '[', '{':
-			if depth++; depth > maxDepth {
-				return hujson.Value{}, fmt.Errorf("nested deeper than %d levels", maxDepth)
+			if depth++; depth > deepest {
+				deepest = depth
+			}
+			if deepest > maxDepth {
+				return deepest
 			}
 		case ']', '}':
-			depth--
+			if depth > 0 {
+				depth--
+			}
 		case '"':
 			for i++; i < len(src) && src[i] != '"'; i++ {
 				if src[i] == '\\' {
@@ -52,6 +66,19 @@ func parse(src []byte) (hujson.Value, error) {
 				}
 			}
 		}
+	}
+	return deepest
+}
+
+// parse is hujson.Parse behind a size and a depth check: a document over
+// MaxSize or nested deeper than maxDepth is refused before the recursive
+// parser sees it.
+func parse(src []byte) (hujson.Value, error) {
+	if len(src) > MaxSize {
+		return hujson.Value{}, fmt.Errorf("larger than %d MiB", MaxSize>>20)
+	}
+	if maxNesting(src) > maxDepth {
+		return hujson.Value{}, fmt.Errorf("nested deeper than %d levels", maxDepth)
 	}
 	return hujson.Parse(src)
 }

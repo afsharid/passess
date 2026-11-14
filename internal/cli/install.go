@@ -423,7 +423,7 @@ func hooksChange(verb, state string, skip bool) bool {
 // handler from it, and restores the file if it does not read back so.
 func editHooks(h harness.Hooks, self string, install bool) error {
 	path := h.File()
-	before, err := os.ReadFile(path)
+	before, err := harness.ReadConfig(path, harness.MaxConfigSize)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -532,7 +532,7 @@ func applyActions(a harness.Adapter, actions []harness.Action) error {
 // change.
 func editConfig(a harness.Adapter, ed harness.Editor, actions []harness.Action) error {
 	path := a.ConfigPath()
-	before, err := os.ReadFile(path)
+	before, err := harness.ReadConfig(path, harness.MaxConfigSize)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

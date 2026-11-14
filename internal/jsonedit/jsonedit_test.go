@@ -2,9 +2,12 @@ package jsonedit
 
 import (
 	"encoding/json"
+	"math/rand/v2"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/tailscale/hujson"
 )
 
 type server struct {
@@ -231,5 +234,143 @@ func TestDepthCountSkipsStringsAndComments(t *testing.T) {
 	over := strings.Repeat("[", maxDepth+1) + strings.Repeat("]", maxDepth+1)
 	if err := Decode([]byte(over), new(any)); err == nil {
 		t.Error("nesting over the limit accepted")
+	}
+}
+
+// Inputs that stress the counter's string and comment skipping. Every one is
+// valid for hujson or refused by it; none may pass the counter at less depth
+// than hujson builds, and the ones holding brackets only in strings or
+// comments must still decode.
+func TestDepthCountEdgeCases(t *testing.T) {
+	n := maxDepth + 88
+	open := strings.Repeat("[", n)
+	mixed := func(pairs int) string {
+		return strings.Repeat(`{"a":[`, pairs) + strings.Repeat(`]}`, pairs)
+	}
+	for name, tc := range map[string]struct {
+		doc string
+		ok  bool
+	}{
+		"escaped backslash before closing quote": {`["` + open + `\\", ` + `[1]]`, true},
+		"escaped quote keeps string open":        {`["` + open + `\"` + open + `"]`, true},
+		"closed line comment":                    {"[1, // " + open + "\n2]", true},
+		"closed block comment":                   {"[1, /* " + open + " */ 2]", true},
+		"slash star slash is not a close":        {"[/*/ " + open + " */ 1]", true},
+		"unterminated string":                    {`["` + open, false},
+		"unterminated line comment":              {"[1, // " + open, false},
+		"unterminated block comment":             {"[1, /* " + open, false},
+		"mixed 256 pairs":                        {mixed(maxDepth / 2), true},
+		"mixed 257 pairs":                        {mixed(maxDepth/2 + 1), false},
+		"array at the limit":                     {strings.Repeat("[", maxDepth) + strings.Repeat("]", maxDepth), true},
+		"array over the limit":                   {strings.Repeat("[", maxDepth+1) + strings.Repeat("]", maxDepth+1), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := Decode([]byte(tc.doc), new(any))
+			if tc.ok && err != nil {
+				t.Errorf("rejected: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Error("accepted")
+			}
+			if _, perr := Set([]byte(tc.doc), nil, "k", 1); tc.ok && strings.HasPrefix(tc.doc, "{") && perr != nil {
+				t.Errorf("Set rejected: %v", perr)
+			}
+		})
+	}
+}
+
+// A closing bracket never takes the count below zero, so stray closers
+// cannot hide the nesting that follows them.
+func TestDepthCountIsClamped(t *testing.T) {
+	strays := strings.Repeat("]", 600) + strings.Repeat("[", maxDepth+1)
+	if got := maxNesting([]byte(strays)); got != maxDepth+1 {
+		t.Errorf("maxNesting after stray closers = %d, want %d", got, maxDepth+1)
+	}
+	if err := Decode([]byte(strays), new(any)); err == nil {
+		t.Error("stray closers followed by deep nesting accepted")
+	}
+}
+
+// treeDepth is how deep hujson nests the parsed value.
+func treeDepth(v hujson.ValueTrimmed) int {
+	deepest := 0
+	switch x := v.(type) {
+	case *hujson.Object:
+		for _, m := range x.Members {
+			deepest = max(deepest, treeDepth(m.Value.Value))
+		}
+		return deepest + 1
+	case *hujson.Array:
+		for _, e := range x.Elements {
+			deepest = max(deepest, treeDepth(e.Value))
+		}
+		return deepest + 1
+	}
+	return 0
+}
+
+// For documents hujson accepts, the counter reports at least the nesting
+// hujson builds, so it can never pass a document the recursive parser would
+// overflow on. The inputs are random strings over the characters the counter
+// treats specially, and tricky seeds.
+func TestDepthCountAgreesWithHujson(t *testing.T) {
+	seeds := []string{
+		`{"a":[1,{"b":[]}]}`, `["\\"]`, `["\""]`, "[/*/ [[[ */ 1]", "[// [[\n1]",
+		`[1, /* ] */ 2]`, `{"k": "[[{{", "j": [[[]]]}`, "[]", "{}", `"x"`, "1",
+	}
+	alphabet := []string{"[", "]", "{", "}", `"`, `\`, "/", "*", "\n", ",", ":", "1", "a", " ", " ", "\r", `"a":`}
+	rng := rand.New(rand.NewPCG(1, 2))
+	valid := 0
+	check := func(doc string) {
+		v, err := hujson.Parse([]byte(doc))
+		if err != nil {
+			return
+		}
+		valid++
+		if got, want := maxNesting([]byte(doc)), treeDepth(v.Value); got < want {
+			t.Fatalf("maxNesting(%q) = %d, hujson nests %d", doc, got, want)
+		}
+	}
+	for _, s := range seeds {
+		check(s)
+	}
+	for range 200000 {
+		var b strings.Builder
+		for range 1 + rng.IntN(14) {
+			b.WriteString(alphabet[rng.IntN(len(alphabet))])
+		}
+		check(b.String())
+	}
+	if valid < 100 {
+		t.Fatalf("only %d random documents were valid; the differential check proves little", valid)
+	}
+}
+
+// A document over MaxSize is refused by every entry point before hujson sees
+// it; one at MaxSize still parses.
+func TestSizeCap(t *testing.T) {
+	pad := func(n int) []byte { return []byte("{}" + strings.Repeat(" ", n-2)) }
+	if err := Decode(pad(MaxSize), new(any)); err != nil {
+		t.Errorf("document at the cap rejected: %v", err)
+	}
+	huge := pad(MaxSize + 1)
+	if err := Decode(huge, new(any)); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("Decode over the cap: %v", err)
+	}
+	if _, err := Set(huge, nil, "k", 1); err == nil {
+		t.Error("Set accepted a document over the cap")
+	}
+	if _, err := Append(huge, nil, 1); err == nil {
+		t.Error("Append accepted a document over the cap")
+	}
+	if _, err := RemoveWhere(huge, nil, func(any) bool { return true }); err == nil {
+		t.Error("RemoveWhere accepted a document over the cap")
+	}
+	if _, err := Delete(huge, nil, "k"); err == nil {
+		t.Error("Delete accepted a document over the cap")
+	}
+	flat := []byte("[" + strings.Repeat("1,", MaxSize/2) + "1]")
+	if err := Decode(flat, new(any)); err == nil {
+		t.Error("a flat array over the cap was parsed")
 	}
 }

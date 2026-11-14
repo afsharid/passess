@@ -176,7 +176,7 @@ func (h Hooks) eventsPath(event string) []string {
 // passess hooks are there but for another binary or events, missing when
 // there are none.
 func (h Hooks) State(self string) (string, error) {
-	data, err := os.ReadFile(h.File())
+	data, err := ReadConfig(h.File(), MaxConfigSize)
 	if errors.Is(err, os.ErrNotExist) {
 		return StateMissing, nil
 	}
@@ -192,7 +192,7 @@ func (h Hooks) State(self string) (string, error) {
 	}
 	var doc map[string]any
 	if err := jsonedit.Decode(data, &doc); err != nil {
-		return "", fmt.Errorf("%s is not valid JSON", h.File())
+		return "", fmt.Errorf("%s is not valid JSON: %w", h.File(), err)
 	}
 	found, exact := 0, 0
 	for _, e := range h.Spec.Events {
