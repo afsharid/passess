@@ -546,10 +546,10 @@ ref = "env://PASSESS_TEST_LOOSE"
 func TestVaultNamesArePrintable(t *testing.T) {
 	for in, want := range map[string]string{
 		"OPENAI_API_KEY":   "OPENAI_API_KEY",
-		"x\x1b[2K\x1b[1Ay": "x[2K[1Ay",
+		"x\x1b[2K\x1b[1Ay": `x\x1b[2K\x1b[1Ay`,
 		"a\tb":             "a b",
-		"p\u009b31mq":      "p31mq",
-		"line\nbreak\r":    "linebreak",
+		"p\u009b31mq":      `p\x9b31mq`,
+		"line\nbreak\r":    `line\nbreak\r`,
 		"projeçt":          "projeçt",
 	} {
 		if got := vaultName(in); got != want {

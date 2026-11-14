@@ -10,10 +10,10 @@ import (
 
 const bidiName = "x\x1b[2Jy\u202e\u2028z\u200b"
 
-// printable drops the characters visible() spells out: control, bidi,
-// zero-width and line-separator runes, and keeps a tab.
-func TestPrintableDropsWhatVisibleSpellsOut(t *testing.T) {
-	if got := printable("gh" + bidiName + "\tok"); got != "ghx[2Jyz\tok" {
+// printable spells out what visible() spells out: control, bidi, zero-width
+// and line-separator runes, and keeps a tab.
+func TestPrintableSpellsWhatVisibleSpellsOut(t *testing.T) {
+	if got := printable("gh" + bidiName + "\tok"); got != `ghx\x1b[2Jy\u202e\u2028z\u200b`+"\tok" {
 		t.Fatalf("printable = %q", got)
 	}
 	noTerminalControls(t, "printable", printable(bidiName+"\u2029\u061c\u2060"))
@@ -22,7 +22,7 @@ func TestPrintableDropsWhatVisibleSpellsOut(t *testing.T) {
 	}
 }
 
-// The activity view drops bidi, zero-width and line-separator runes too.
+// The activity view spells out bidi, zero-width and line-separator runes too.
 func TestActivityBidi(t *testing.T) {
 	noHarness(t)
 	dir := t.TempDir()

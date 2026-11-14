@@ -82,7 +82,7 @@ func TestVisible(t *testing.T) {
 		"a\x1b[31mb":             `a\x1b[31mb`,
 		"a\tb\nc\rd":             `a\tb\nc\rd`,
 		"a\x7fb\u009bc":          `a\x7fb\x9bc`,
-		"a\u202eb\u2066c\u200fd": `a\u202eb\u2066c\u200fd`,
+		"a\u202eb\u2066c\u200fd": "a\\u202eb\\u2066c\u200fd", // the right-to-left mark is ordinary text
 		"a\u2028b":               `a\u2028b`,
 	} {
 		if got := visible(in); got != want {

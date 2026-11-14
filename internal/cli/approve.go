@@ -653,24 +653,25 @@ func printAsk(w io.Writer, a agent.AskFor) {
 // visible spells out the control, format and line-separator characters in
 // text a requester chose, as \n, \x1b or \u202e, so a prompt shows them
 // instead of acting on them: an escape sequence can redraw the lines above
-// it, and a bidi mark can reorder the line. Text that holds none comes back
+// it, and a bidi mark can reorder the line. It never drops a character, so
+// the shown text maps back to the real name. Text that holds none comes back
 // unchanged.
-func visible(s string) string {
-	clean := true
-	for _, r := range s {
-		if hidden(r) {
-			clean = false
-			break
-		}
-	}
-	if clean {
-		return s
-	}
+func visible(s string) string { return spell(s, false) }
+
+// spell is the one helper behind visible and printable. It spells out what
+// hiddenAt names, as \n, \x1b, \u202e or \U000e0067, and keeps a tab when
+// keepTab is set.
+func spell(s string, keepTab bool) string {
+	rs := []rune(s)
 	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case !hidden(r):
+	spelled := false
+	for i, r := range rs {
+		if !hiddenAt(rs, i) || (keepTab && r == '\t') {
 			b.WriteRune(r)
+			continue
+		}
+		spelled = true
+		switch {
 		case r == '\n':
 			b.WriteString(`\n`)
 		case r == '\r':
@@ -679,9 +680,14 @@ func visible(s string) string {
 			b.WriteString(`\t`)
 		case r < 0x100:
 			fmt.Fprintf(&b, `\x%02x`, r)
-		default:
+		case r < 0x10000:
 			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			fmt.Fprintf(&b, `\U%08x`, r)
 		}
+	}
+	if !spelled {
+		return s
 	}
 	return b.String()
 }
@@ -694,6 +700,62 @@ func visibleAll(words []string) []string {
 	return out
 }
 
+// hidden reports a rune that is hidden wherever it stands: controls (C0, DEL
+// and C1), the bidi embeddings, overrides and isolates, the line and
+// paragraph separators, and the format characters that show nothing (zero
+// width space, word joiner, soft hyphen, BOM and the like). Ordinary text
+// keeps the left and right marks, the variation selectors and, in context,
+// the joiners and the flag tags that hiddenAt decides.
 func hidden(r rune) bool {
+	switch {
+	case r == '\u200c', r == '\u200d', r == '\u200e', r == '\u200f', isTag(r):
+		return false
+	}
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// hiddenAt is hidden for the rune at rs[i], where its neighbours count: a
+// zero width joiner or non-joiner stays between letters, marks, digits or
+// emoji, as in Persian and in an emoji family; a tag character stays in a
+// flag sequence, a black flag, tags for letters and digits, then the cancel
+// tag.
+func hiddenAt(rs []rune, i int) bool {
+	r := rs[i]
+	switch {
+	case r == '\u200c', r == '\u200d':
+		return i == 0 || i == len(rs)-1 || !joins(rs[i-1]) || !joins(rs[i+1])
+	case isTag(r):
+		return !inFlag(rs, i)
+	}
+	return hidden(r)
+}
+
+func joins(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) || unicode.Is(unicode.So, r) || unicode.Is(unicode.Sk, r)
+}
+
+func isTag(r rune) bool { return r >= 0xe0020 && r <= 0xe007f }
+
+// inFlag reports whether the tag character at rs[i] belongs to a complete
+// flag sequence: U+1F3F4, tags for letters and digits, the cancel tag.
+func inFlag(rs []rune, i int) bool {
+	j := i
+	for j > 0 && isTag(rs[j-1]) {
+		j--
+	}
+	if j == 0 || rs[j-1] != 0x1f3f4 {
+		return false
+	}
+	k := j
+	for k < len(rs) && isTag(rs[k]) {
+		r := rs[k]
+		if r == 0xe007f {
+			return k == len(rs)-1 || !isTag(rs[k+1])
+		}
+		if r < 0xe0030 || (r > 0xe0039 && r < 0xe0061) || r > 0xe007a {
+			return false
+		}
+		k++
+	}
+	return false
 }
