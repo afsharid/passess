@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"testing"
 )
@@ -57,21 +58,10 @@ func TestTruncated(t *testing.T) {
 	}
 }
 
-// TestMain makes this binary the chain TestDeepChainIsTruncated builds: each
-// level starts the next and waits, the last reports its own ancestry.
+// TestMain makes this binary the measurement TestDeepChainIsTruncated runs at
+// the bottom of its chain: it reports its own ancestry.
 func TestMain(m *testing.M) {
-	if v := os.Getenv("PASSESS_TEST_DEPTH"); v != "" {
-		n, _ := strconv.Atoi(v)
-		if n > 0 {
-			self, _ := os.Executable()
-			cmd := exec.Command(self)
-			cmd.Env = append(os.Environ(), "PASSESS_TEST_DEPTH="+strconv.Itoa(n-1))
-			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-			if cmd.Run() != nil {
-				os.Exit(1)
-			}
-			os.Exit(0)
-		}
+	if os.Getenv("PASSESS_TEST_MEASURE") != "" {
 		chain, err := Ancestry(os.Getpid())
 		fmt.Printf("%d %v %v\n", len(chain), Truncated(chain), err)
 		os.Exit(0)
@@ -79,20 +69,36 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// chainScript starts the next level of the chain and waits, so each level is
+// a cheap shell; the last level runs the command it was given.
+const chainScript = `n=$1; shift
+if [ "$n" -gt 0 ]; then
+	sh "$0" $((n-1)) "$@"
+	status=$?
+	exit $status
+fi
+"$@"
+`
+
 // A process cannot choose its ancestors, but it can put enough processes of
 // its own below the harness to push it past the cap. Such a chain is
-// Truncated, and a short one is not.
+// Truncated, and a short one is not. Only the innermost process is a copy of
+// the test binary; the levels above it are shells.
 func TestDeepChainIsTruncated(t *testing.T) {
 	self, err := os.Executable()
 	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(t.TempDir(), "chain.sh")
+	if err := os.WriteFile(script, []byte(chainScript), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
 		depth     int
 		truncated bool
 	}{{3, false}, {70, true}} {
-		cmd := exec.Command(self)
-		cmd.Env = append(os.Environ(), "PASSESS_TEST_DEPTH="+strconv.Itoa(c.depth))
+		cmd := exec.Command("/bin/sh", script, strconv.Itoa(c.depth), self)
+		cmd.Env = append(os.Environ(), "PASSESS_TEST_MEASURE=1")
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("depth %d: %v", c.depth, err)
